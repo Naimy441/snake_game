@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#0b1a3a" />
+    <meta name="description" content="Coil Rush: classic Snake reimagined as a fast, cinematic 3D game with overhead and first-person views." />
+    <title>Coil Rush</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%2317c3b2'/%3E%3Cpath d='M18 40c0-10 28-6 28-16 0-6-8-8-14-6' stroke='%23ffb627' stroke-width='7' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene" aria-label="Game view"></canvas>
+      <canvas id="speedlines" aria-hidden="true"></canvas>
+      <div id="vignette" aria-hidden="true"></div>
+      <div id="flash" aria-hidden="true"></div>
+
+      <div id="hud" class="hidden">
+        <div class="hud-left">
+          <div class="stat score"><span class="label">Score</span><span id="hud-score" class="value">0</span></div>
+          <div class="stat"><span class="label">Best</span><span id="hud-best" class="value small">0</span></div>
+        </div>
+        <div class="hud-center">
+          <div id="hud-combo" class="combo hidden"><span id="hud-combo-x">x2</span><span class="combo-label">combo</span><div class="combo-bar"><i id="hud-combo-bar"></i></div></div>
+        </div>
+        <div class="hud-right">
+          <div class="stat"><span class="label">Length</span><span id="hud-length" class="value small">4</span></div>
+          <div class="stat"><span class="label">Speed</span><span id="hud-level" class="value small">1</span></div>
+          <button id="btn-cam" class="chip" title="Switch camera (C)"><span id="hud-cam">Overhead</span> <kbd>C</kbd></button>
+          <button id="btn-pause" class="chip icon" title="Pause (P / Esc)" aria-label="Pause">❚❚</button>
+        </div>
+        <div class="rush">
+          <div class="rush-label">Rush <kbd>Space</kbd></div>
+          <div class="rush-bar"><i id="hud-rush"></i></div>
+        </div>
+        <div id="fps" class="fps hidden">60 fps</div>
+      </div>
+
+      <div id="compass" class="hidden" aria-hidden="true">
+        <div class="needle orb" id="needle-orb"><span>▲</span></div>
+        <div class="needle prism hidden" id="needle-prism"><span>▲</span></div>
+        <div id="compass-text"></div>
+      </div>
+      <canvas id="minimap" class="hidden" width="160" height="160" aria-hidden="true"></canvas>
+      <div id="fp-hint" class="hidden">← → turn</div>
+      <div id="popups" aria-hidden="true"></div>
+      <div id="toast" role="status" aria-live="polite"></div>
+      <div id="countdown" class="hidden"></div>
+
+      <!-- Start screen -->
+      <section id="screen-start" class="screen">
+        <div class="card hero">
+          <h1 class="logo"><span>COIL</span><span class="accent">RUSH</span></h1>
+          <p class="tagline">Classic Snake, reborn at full speed.</p>
+          <div class="cam-select" role="radiogroup" aria-label="Camera">
+            <button data-cam="overhead" class="seg active" role="radio" aria-checked="true">Overhead</button>
+            <button data-cam="fp" class="seg" role="radio" aria-checked="false">First-person</button>
+          </div>
+          <button id="btn-play" class="primary big">Play <kbd>Enter</kbd></button>
+          <div class="row">
+            <button class="secondary" data-open="help">How to play</button>
+            <button class="secondary" data-open="settings">Settings</button>
+          </div>
+          <p class="best-line">Best score: <b id="start-best">0</b></p>
+        </div>
+      </section>
+
+      <!-- Pause -->
+      <section id="screen-pause" class="screen hidden">
+        <div class="card">
+          <h2>Paused</h2>
+          <button id="btn-resume" class="primary big">Resume <kbd>P</kbd></button>
+          <button id="btn-restart-p" class="secondary wide">Restart <kbd>R</kbd></button>
+          <div class="row">
+            <button class="secondary" data-open="help">Controls</button>
+            <button class="secondary" data-open="settings">Settings</button>
+          </div>
+          <button id="btn-menu-p" class="ghost">Main menu</button>
+        </div>
+      </section>
+
+      <!-- Game over -->
+      <section id="screen-over" class="screen hidden">
+        <div class="card">
+          <h2 id="over-title">Wipeout!</h2>
+          <p id="over-cause" class="muted"></p>
+          <div id="over-newbest" class="badge hidden">New best!</div>
+          <div class="final-score" id="over-score">0</div>
+          <div class="stats-grid">
+            <div><span>Best</span><b id="over-best">0</b></div>
+            <div><span>Length</span><b id="over-length">0</b></div>
+            <div><span>Top combo</span><b id="over-combo">x1</b></div>
+            <div><span>Time</span><b id="over-time">0s</b></div>
+          </div>
+          <button id="btn-again" class="primary big">Play again <kbd>Enter</kbd></button>
+          <button id="btn-menu-o" class="ghost">Main menu</button>
+        </div>
+      </section>
+
+      <!-- How to play -->
+      <section id="panel-help" class="screen panel hidden">
+        <div class="card wide-card">
+          <h2>How to play</h2>
+          <p class="muted">Eat golden orbs to grow and score. Don't hit the walls or your own body. Both cameras play the same game: switch any time.</p>
+          <div class="help-grid">
+            <div>
+              <h3>Overhead view</h3>
+              <ul class="keys">
+                <li><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> or <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> <span>move in that screen direction</span></li>
+                <li>Swipe <span>(touch) move in the swipe direction</span></li>
+              </ul>
+              <h3>First-person view</h3>
+              <ul class="keys">
+                <li><kbd>←</kbd><kbd>→</kbd> or <kbd>A</kbd><kbd>D</kbd> <span>turn left / right</span></li>
+                <li>Tap or swipe left / right <span>(touch) turn</span></li>
+                <li>Arrows on the floor show your path; the compass and minimap point to food</li>
+              </ul>
+            </div>
+            <div>
+              <h3>Everywhere</h3>
+              <ul class="keys">
+                <li><kbd>Q</kbd><kbd>E</kbd> <span>turn left / right relative to the snake</span></li>
+                <li><kbd>Space</kbd> hold <span>Rush: faster, double points, uses the meter</span></li>
+                <li><kbd>C</kbd> <span>switch camera</span></li>
+                <li><kbd>P</kbd> / <kbd>Esc</kbd> <span>pause</span></li>
+                <li><kbd>R</kbd> <span>restart</span></li>
+                <li><kbd>M</kbd> <span>mute</span></li>
+                <li>Gamepad <span>D-pad / stick to steer, A rush, Y camera, Start pause</span></li>
+              </ul>
+              <h3>Scoring</h3>
+              <ul class="plain">
+                <li><b class="gold">Orb</b> 10 points, grows 1, fills Rush.</li>
+                <li><b class="violet">Prism</b> 50 points, grows 2, fills Rush completely. Vanishes after 9 s.</li>
+                <li>Eat again within 5 s to build a combo, up to <b>x8</b>.</li>
+                <li>Every 4 orbs the speed level rises and the sky shifts.</li>
+              </ul>
+            </div>
+          </div>
+          <button class="primary" data-close>Got it</button>
+        </div>
+      </section>
+
+      <!-- Settings -->
+      <section id="panel-settings" class="screen panel hidden">
+        <div class="card wide-card">
+          <h2>Settings</h2>
+          <div class="setting">
+            <span>Graphics quality</span>
+            <div class="seg-group" id="set-quality">
+              <button class="seg" data-v="auto">Auto</button>
+              <button class="seg" data-v="high">High</button>
+              <button class="seg" data-v="medium">Medium</button>
+              <button class="seg" data-v="low">Low</button>
+            </div>
+          </div>
+          <label class="setting"><span>Reduce motion <small>no speed lines, shake, roll or FOV kicks</small></span><input type="checkbox" id="set-motion" /></label>
+          <label class="setting"><span>Path guide <small>floor arrows ahead of the snake (first-person)</small></span><input type="checkbox" id="set-guide" /></label>
+          <label class="setting"><span>Minimap &amp; compass <small>first-person navigation aids</small></span><input type="checkbox" id="set-minimap" /></label>
+          <label class="setting"><span>Show FPS</span><input type="checkbox" id="set-fps" /></label>
+          <label class="setting"><span>Sound effects</span><input type="range" id="set-sfx" min="0" max="1" step="0.05" /></label>
+          <label class="setting"><span>Music</span><input type="range" id="set-music" min="0" max="1" step="0.05" /></label>
+          <p class="muted small" id="quality-note"></p>
+          <button class="primary" data-close>Done</button>
+        </div>
+      </section>
+
+      <div id="touch" class="hidden">
+        <button id="t-left" class="tbtn" aria-label="Turn left">⟲</button>
+        <button id="t-rush" class="tbtn rushbtn" aria-label="Rush">RUSH</button>
+        <button id="t-right" class="tbtn" aria-label="Turn right">⟳</button>
+      </div>
+
+      <noscript>Coil Rush needs JavaScript and WebGL.</noscript>
+      <div id="webgl-error" class="screen hidden"><div class="card"><h2>WebGL unavailable</h2><p class="muted">Your browser could not start WebGL, which Coil Rush needs. Try enabling hardware acceleration or using a current version of Chrome, Edge, Firefox or Safari.</p></div></div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
