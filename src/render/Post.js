@@ -8,12 +8,15 @@ import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 //      colour grade, vignette, danger tint, white flash and speed lines.
 // Everything after the scene render is a handful of full-screen triangles,
 // much cheaper than the previous EffectComposer + UnrealBloom chain, and the
-// scene resolution can be scaled independently of the canvas.
+// scene resolution can be scaled independently of the canvas. The scene
+// target is allocated once at full size and the scene is drawn into a
+// smaller viewport when scaled, so changing resolution never reallocates
+// GPU memory (which would stall a frame).
 
 const VS = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
 
 const DOWN_FS = `
-uniform sampler2D tInput; uniform vec2 texel; uniform float threshold; uniform float knee; uniform bool prefilter;
+uniform sampler2D tInput; uniform vec2 texel; uniform float threshold; uniform float knee; uniform bool prefilter; uniform vec2 inScale;
 varying vec2 vUv;
 vec3 pre(vec3 c){
   float br = max(c.r, max(c.g, c.b));
@@ -23,11 +26,13 @@ vec3 pre(vec3 c){
   return min(c * w, vec3(30.0));
 }
 void main(){
-  vec3 s = texture2D(tInput, vUv).rgb * 4.0;
-  s += texture2D(tInput, vUv + vec2(-texel.x, -texel.y)).rgb;
-  s += texture2D(tInput, vUv + vec2( texel.x, -texel.y)).rgb;
-  s += texture2D(tInput, vUv + vec2(-texel.x,  texel.y)).rgb;
-  s += texture2D(tInput, vUv + vec2( texel.x,  texel.y)).rgb;
+  vec2 uv = vUv * inScale;
+  vec2 lim = inScale - texel * 0.5;
+  vec3 s = texture2D(tInput, uv).rgb * 4.0;
+  s += texture2D(tInput, min(uv + vec2(-texel.x, -texel.y), lim)).rgb;
+  s += texture2D(tInput, min(uv + vec2( texel.x, -texel.y), lim)).rgb;
+  s += texture2D(tInput, min(uv + vec2(-texel.x,  texel.y), lim)).rgb;
+  s += texture2D(tInput, min(uv + vec2( texel.x,  texel.y), lim)).rgb;
   s *= 0.125;
   gl_FragColor = vec4(prefilter ? pre(s) : s, 1.0);
 }`;
@@ -49,13 +54,14 @@ void main(){
 }`;
 
 const FINAL_FS = `
-uniform sampler2D tScene; uniform sampler2D tBloom;
+uniform sampler2D tScene; uniform sampler2D tBloom; uniform vec2 uScale; uniform vec2 uTexel;
 uniform float uBloom; uniform float uSpeed; uniform float uChroma; uniform float uVignette;
 uniform float uDanger; uniform vec3 uDangerColor; uniform float uFlash; uniform vec3 uFlashColor;
 uniform float uTime; uniform float uLines; uniform vec2 uCenter; uniform float uAspect;
 uniform float uSat; uniform float uContrast; uniform vec3 uTint; uniform vec3 uLift; uniform bool uUseBloom;
 varying vec2 vUv;
 float hash(float n){ return fract(sin(n) * 43758.5453123); }
+vec3 scene(vec2 uv){ return texture2D(tScene, min(clamp(uv, 0.0, 1.0) * uScale, uScale - uTexel * 0.5)).rgb; }
 void main(){
   vec2 uv = vUv;
   vec2 dir = uv - uCenter;
@@ -67,19 +73,19 @@ void main(){
     col = vec3(0.0);
     for (int i = 0; i < TAPS; i++) {
       float t = float(i) / float(TAPS);
-      col += texture2D(tScene, uv - dir * amt * t).rgb;
+      col += scene(uv - dir * amt * t);
     }
     col /= float(TAPS);
   } else {
-    col = texture2D(tScene, uv).rgb;
+    col = scene(uv);
   }
 #else
-  col = texture2D(tScene, uv).rgb;
+  col = scene(uv);
 #endif
   if (uChroma > 0.001) {
     vec2 off = dir * uChroma * 0.012 * r;
-    col.r = mix(col.r, texture2D(tScene, uv + off).r, 0.85);
-    col.b = mix(col.b, texture2D(tScene, uv - off).b, 0.85);
+    col.r = mix(col.r, scene(uv + off).r, 0.85);
+    col.b = mix(col.b, scene(uv - off).b, 0.85);
   }
   if (uUseBloom) col += texture2D(tBloom, uv).rgb * uBloom;
   gl_FragColor = vec4(col, 1.0);
@@ -124,7 +130,7 @@ export class PostFX {
     this.size = new THREE.Vector2(1, 1);
 
     this.downMat = new THREE.ShaderMaterial({
-      uniforms: { tInput: { value: null }, texel: { value: new THREE.Vector2() }, threshold: { value: 1.0 }, knee: { value: 0.5 }, prefilter: { value: false } },
+      uniforms: { tInput: { value: null }, texel: { value: new THREE.Vector2() }, threshold: { value: 1.0 }, knee: { value: 0.5 }, prefilter: { value: false }, inScale: { value: new THREE.Vector2(1, 1) } },
       vertexShader: VS,
       fragmentShader: DOWN_FS,
       depthTest: false,
@@ -149,6 +155,8 @@ export class PostFX {
       defines: { TAPS: taps },
       uniforms: {
         tScene: { value: null },
+        uScale: { value: new THREE.Vector2(1, 1) },
+        uTexel: { value: new THREE.Vector2(1, 1) },
         tBloom: { value: null },
         uUseBloom: { value: true },
         uBloom: { value: 0.35 },
@@ -196,10 +204,10 @@ export class PostFX {
     if (changed) this.allocate();
   }
 
+  // Free: only the viewport and two uniforms change.
   setScale(s) {
-    if (Math.abs(s - this.scale) < 1e-3) return;
-    this.scale = s;
-    this.allocate();
+    this.scale = Math.min(1, Math.max(0.3, s));
+    this.updateViewport();
   }
 
   setSize(w, h) {
@@ -209,8 +217,8 @@ export class PostFX {
   }
 
   allocate() {
-    const w = Math.max(2, Math.round(this.size.x * this.scale));
-    const h = Math.max(2, Math.round(this.size.y * this.scale));
+    const w = Math.max(2, Math.round(this.size.x));
+    const h = Math.max(2, Math.round(this.size.y));
     if (this.sceneRT) this.sceneRT.dispose();
     this.sceneRT = new THREE.WebGLRenderTarget(w, h, {
       type: THREE.HalfFloatType,
@@ -226,10 +234,27 @@ export class PostFX {
       lh = Math.max(1, Math.floor(lh / 2));
       this.levels.push(new THREE.WebGLRenderTarget(lw, lh, { type: THREE.HalfFloatType, depthBuffer: false }));
     }
+    this.updateViewport();
   }
 
+  updateViewport() {
+    if (!this.sceneRT) return;
+    const W = this.sceneRT.width;
+    const H = this.sceneRT.height;
+    const w = Math.max(2, Math.round(W * this.scale));
+    const h = Math.max(2, Math.round(H * this.scale));
+    this.sceneRT.viewport.set(0, 0, w, h);
+    this.sceneRT.scissor.set(0, 0, w, h);
+    this.sceneRT.scissorTest = this.scale < 1;
+    this.view = { x: w, y: h };
+    this.params.uScale.value.set(w / W, h / H);
+    this.params.uTexel.value.set(1 / W, 1 / H);
+    this.downMat.uniforms.inScale.value.set(w / W, h / H);
+  }
+
+  // Size of the scaled scene (in pixels) actually being rendered.
   get renderSize() {
-    return { x: this.sceneRT.width, y: this.sceneRT.height };
+    return this.view || { x: this.sceneRT.width, y: this.sceneRT.height };
   }
 
   render(scene, camera, { threshold = 1.0 } = {}) {
@@ -248,6 +273,8 @@ export class PostFX {
         this.downMat.uniforms.tInput.value = src.texture;
         this.downMat.uniforms.texel.value.set(1 / src.width, 1 / src.height);
         this.downMat.uniforms.prefilter.value = i === 0;
+        if (i === 0) this.downMat.uniforms.inScale.value.copy(this.params.uScale.value);
+        else this.downMat.uniforms.inScale.value.set(1, 1);
         this.downMat.uniforms.threshold.value = threshold;
         r.setRenderTarget(dst);
         q.render(r);

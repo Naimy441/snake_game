@@ -117,6 +117,9 @@ export class Input {
       case 'KeyM':
         if (!e.repeat) this.h.mute();
         break;
+      case 'KeyG':
+        if (!e.repeat && this.h.ghost) this.h.ghost();
+        break;
       default:
     }
   }

@@ -17,6 +17,17 @@ void main(){ float f = pow(1.0 - abs(dot(vN, vV)), 2.2); float a = f * uAmount *
 
 const ANIM = { none: 0, rainbow: 1, pulse: 2, flow: 3 };
 
+const GHOST_VS = `varying vec3 vN; varying vec3 vV; varying float vD;
+void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); vD = uv.x / 2.2; gl_Position = projectionMatrix * mv; }`;
+const GHOST_FS = `uniform vec3 uColor; uniform float uTime; uniform float uOpacity; uniform float uWait; varying vec3 vN; varying vec3 vV; varying float vD;
+void main(){
+  float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 1.7);
+  float band = 0.75 + 0.25 * sin(vD * 5.0 - uTime * 6.0);
+  float pulse = mix(1.0, 0.6 + 0.4 * sin(uTime * 4.0), uWait);
+  float a = clamp((0.3 + 0.55 * f) * band * pulse, 0.0, 0.9) * uOpacity;
+  gl_FragColor = vec4(uColor * (0.85 + 1.4 * f), a);
+}`;
+
 // Standard material plus: a fresnel rim light, per-vertex glow (aGlow, in the
 // surface colour) and skin animations (rainbow hue cycling, pulsing or
 // flowing glow) driven by the distance along the body (uv.x).
@@ -216,6 +227,35 @@ export class SnakeView {
     this.eyeMat.emissiveIntensity = h.eyeGlow ?? 0.9;
   }
 
+  // Turn this view into the ghost bot: a translucent, glowing fresnel shell
+  // with light bands flowing along the body, no shadows or accessories.
+  makeGhost(color = '#a8f0ff') {
+    this.isGhost = true;
+    this.ghostUniforms = { uColor: { value: new THREE.Color(color) }, uTime: { value: 0 }, uOpacity: { value: 1 }, uWait: { value: 0 } };
+    const mat = new THREE.ShaderMaterial({
+      uniforms: this.ghostUniforms,
+      vertexShader: GHOST_VS,
+      fragmentShader: GHOST_FS,
+      transparent: true,
+      depthWrite: false,
+    });
+    this.ghostMat = mat;
+    this.body.material = mat;
+    this.body.castShadow = false;
+    this.body.receiveShadow = false;
+    this.body.renderOrder = 4;
+    this.head.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = false;
+      if (o === this.headAura) return;
+      o.material = mat;
+      o.renderOrder = 4;
+    });
+    this.tongue.visible = false;
+    this.setAccessory('none');
+    this.aura.visible = false;
+  }
+
   setAccessory(id) {
     if (this.accessory) {
       this.head.remove(this.accessory);
@@ -397,6 +437,12 @@ export class SnakeView {
     this.bodyMat.emissiveIntensity = Math.max(pulse * 0.25, deathFlash * 0.8);
     this.headMat.emissiveIntensity = this.bodyMat.emissiveIntensity;
     this.rimUniforms.uTime.value = time;
+    if (this.isGhost) {
+      this.ghostUniforms.uTime.value = time;
+      this.aura.visible = false;
+      this.headAura.visible = false;
+      return;
+    }
     if (this.accessory && this.accessory.userData.bob) this.accessory.userData.bob.position.y = 0.48 + Math.sin(time * 2.4) * 0.025;
     this.auraUniforms.uAmount.value = rushGlow;
     this.auraUniforms.uTime.value = time;
@@ -411,6 +457,7 @@ export class SnakeView {
 
   dispose() {
     if (this.accessory) disposeAccessory(this.accessory);
+    if (this.ghostMat) this.ghostMat.dispose();
     this.geo.dispose();
     this.bodyMat.dispose();
     this.headMat.dispose();

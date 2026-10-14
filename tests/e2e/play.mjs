@@ -175,6 +175,21 @@ await page.waitForTimeout(800);
 await shot('04c-neon-zone');
 check(await page.evaluate(() => window.__coil.world.zone === 2), 'world can switch zones');
 
+// --- ghost guide: G toggles it; it races for the apple without touching the real board
+await pilot(true);
+await page.evaluate(() => { const g = window.__coil.game; if (!g.food) g.food = g.spawn('orb'); });
+await page.keyboard.press('KeyG');
+s = await page.evaluate(() => ({ on: window.__coil.settings.ghost, vis: window.__coil.ghostView.group.visible, row: !document.getElementById('hud-ghost-row').classList.contains('hidden') }));
+check(s.on && s.row, `G turns the ghost guide on (${JSON.stringify(s)})`);
+await page.waitForFunction(() => window.__coil.ghost.ticks > 0, null, { timeout: 30000 }).catch(() => {});
+s = await page.evaluate(() => ({ moved: window.__coil.ghost.ticks > 0, vis: window.__coil.ghostView.group.visible, real: window.__coil.game.food != null }));
+check(s.moved && s.vis && s.real, 'the ghost moves on the board without touching the real apple');
+await shot('04d-ghost');
+await page.keyboard.press('KeyG');
+s = await page.evaluate(() => ({ on: window.__coil.settings.ghost }));
+check(!s.on, 'G turns the ghost guide off again');
+await pilot(false);
+
 // --- crash into wall -> game over
 await page.evaluate(() => {
   const g = window.__coil.game;
