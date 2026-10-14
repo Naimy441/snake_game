@@ -90,12 +90,21 @@ camera, Start pauses, bumpers turn left/right.
 
 ### Controls that feel instant
 
-The snake moves on a grid, and the drawn snake trails the game's logic by
-part of a cell so it can glide smoothly. A turn pressed just after the snake
-committed to its next cell would normally only happen one cell later, which
-feels laggy. Instead, if the last move was a plain straight step, the game
-quietly redoes that step in the new direction, so turns land where you
-expect. The chase and first-person cameras also follow turns quickly.
+The snake moves on a grid, and the drawn snake trails the game's logic a
+little so it can glide smoothly. A few things keep that from feeling laggy:
+
+- **Late-turn grace:** a turn pressed just after the snake committed to its
+  next cell would normally only happen one cell later. If that last move was
+  a plain straight step, the game quietly redoes it in the new direction, so
+  turns land where you see the head.
+- **Turn buffering:** up to three turns can be queued, one per move, so a
+  quick double tap gives a tight U-turn and a third tap the next turn after it.
+- **Cameras lead the turn:** the chase and first-person cameras start turning
+  toward your next move as soon as you press, instead of waiting for the head.
+- **Humane top speed:** speed is capped (about 14 cells/s, 21 with Rush or a
+  boost pad) so double taps stay physically possible at full speed.
+- **Countdown:** keys pressed during READY/GO keep only your latest turn, so
+  mashing can't stack up moves for the start.
 
 ### Garage
 

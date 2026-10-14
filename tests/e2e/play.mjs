@@ -62,8 +62,15 @@ await page.waitForFunction(() => !window.__coil.garageOpen);
 gs = await page.evaluate(() => window.__coil.snake.skin.id);
 check(gs === 'tiger', 'closing the garage restores the equipped skin');
 
-// --- overhead gameplay
+// --- overhead gameplay; mashing keys during the countdown keeps at most one (the latest) turn
 await page.keyboard.press('Enter');
+await page.waitForFunction(() => window.__coil.state === 'countdown');
+for (const k of ['ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowLeft', 'ArrowRight']) await page.keyboard.press(k);
+let q = await page.evaluate(() => ({ state: window.__coil.state, queue: window.__coil.game.queue.map((d) => d.x) }));
+check(q.state !== 'countdown' || (q.queue.length === 1 && q.queue[0] === 1), `countdown mashing keeps only the latest turn (${JSON.stringify(q)})`);
+await page.keyboard.press('ArrowUp'); // same as the heading: cancels the pre-aimed turn
+q = await page.evaluate(() => ({ state: window.__coil.state, n: window.__coil.game.queue.length }));
+check(q.state !== 'countdown' || q.n === 0, 'pressing the current heading during the countdown cancels the pre-aim');
 await waitState('playing');
 let s = await state();
 check(s.mode === 'overhead', `overhead camera active (mode=${s.mode})`);

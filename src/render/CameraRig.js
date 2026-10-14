@@ -126,6 +126,12 @@ export class CameraRig {
     out.fov = 50;
   }
 
+  // Heading to face: the steering direction while playing, else the head's.
+  aimYaw(snake) {
+    const d = this.aim;
+    return d ? Math.atan2(d.x, d.z) : Math.atan2(snake.headDir.x, snake.headDir.z);
+  }
+
   // Damped yaw follow, substepped so long frames stay stable.
   followYaw(target, yaw, vel, k, dt) {
     const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
@@ -141,12 +147,12 @@ export class CameraRig {
   // Third person: behind and above the head, swinging smoothly through turns
   // and pulling back as the speed builds.
   computeTP(dt, snake, speedFx, reduceMotion, out) {
-    const targetYaw = Math.atan2(snake.headDir.x, snake.headDir.z);
+    const targetYaw = this.aimYaw(snake);
     if (this.tpYaw === null) {
       this.tpYaw = targetYaw;
       this.tpYawVel = 0;
     }
-    [this.tpYaw, this.tpYawVel] = this.followYaw(targetYaw, this.tpYaw, this.tpYawVel, 11, dt);
+    [this.tpYaw, this.tpYawVel] = this.followYaw(targetYaw, this.tpYaw, this.tpYawVel, 15, dt);
     const fwd = this.tmpV.set(Math.sin(this.tpYaw), 0, Math.cos(this.tpYaw));
     this.tpPull += ((reduceMotion ? 0 : speedFx) - this.tpPull) * Math.min(1, dt * 2);
     const dist = 4.3 + this.tpPull * 1.1;
@@ -164,11 +170,11 @@ export class CameraRig {
   }
 
   computeFP(dt, snake, speedFx, reduceMotion, out) {
-    const targetYaw = Math.atan2(snake.headDir.x, snake.headDir.z);
+    const targetYaw = this.aimYaw(snake);
     if (this.fpYaw === null) this.fpYaw = targetYaw;
     // Critically damped yaw: turns feel quick but never snap 90 degrees in a frame.
     // Substepped so it stays stable even when a frame takes a long time.
-    const k = 21;
+    const k = 26;
     const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
     const h = dt / steps;
     for (let i = 0; i < steps; i++) {
@@ -191,7 +197,8 @@ export class CameraRig {
     out.fov = 74 + (reduceMotion ? 0 : speedFx * 10);
   }
 
-  update(dt, snake, { speedFx = 0, reduceMotion = false } = {}) {
+  update(dt, snake, { speedFx = 0, reduceMotion = false, aim = null } = {}) {
+    this.aim = aim;
     const target = this.pose;
     if (this.mode === 'orbit') this.computeOrbit(dt, reduceMotion, target);
     else if (this.mode === 'showcase') this.computeShowcase(dt, snake, reduceMotion, target);
