@@ -1,8 +1,8 @@
 # Coil Rush
 
 Classic Snake reimagined as a fast, cinematic 3D browser game. Race a scaly
-serpent around a floating checkered island, grab golden rings, chase down a
-golden mouse, string together orb chains and hit boost pads, while the world
+serpent around a floating checkered island, grab spinning crystal apples,
+chase down a golden mouse, string together orb chains and hit boost pads, while the world
 transforms around you through four zones, each with its own adaptive
 chiptune soundtrack. Play from overhead, from a chase camera behind the head,
 or in first person, and switch at any moment: every view plays the same game.
@@ -33,7 +33,7 @@ npm run preview   # serves dist/ at http://localhost:4173
 
 ## How to play
 
-Eat golden **rings** to grow and score. Don't hit the walls, the pillars or
+Eat spinning crystal **apples** to grow and score. Don't hit the walls, the pillars or
 your own body.
 
 | Action | Overhead view | Chase and first-person views |
@@ -55,7 +55,7 @@ camera, Start pauses, bumpers turn left/right.
 
 ### Pickups and hazards
 
-- **Ring:** 10 points, grows the snake by 1, adds 25% Rush.
+- **Crystal apple:** 10 points, grows the snake by 1, adds 25% Rush.
 - **Prism:** appears now and then, worth 50 points, grows by 2 and fills Rush.
   It disappears after 9 seconds (it blinks near the end).
 - **Orb chain:** 3 to 5 numbered orbs. Eat them in order for rising points,
@@ -75,13 +75,41 @@ camera, Start pauses, bumpers turn left/right.
 
 - **Combo:** eat again within 5 seconds to raise the multiplier, up to x8.
 - **Rush:** hold Space to move 1.7x faster and score double while the meter lasts.
-- **Speed levels:** every 4 rings the snake speeds up.
+- **Speed levels:** every 4 apples the snake speeds up. The HUD shows how
+  many apples are left until the next level and which level brings the next
+  zone.
 - **Zones:** every 3 speed levels the world transforms. A glowing wave sweeps
   out from the arena, the old scenery shrinks away, new scenery grows in, and
   the sky, light, water, board and music all change: Emerald Coast, Golden
   Canyon, Neon Night, then Cyber Overdrive. The visuals get more intense with
   each level inside a zone too.
 - At game over you get a rank from D to S.
+
+### Controls that feel instant
+
+The snake moves on a grid, and the drawn snake trails the game's logic by
+part of a cell so it can glide smoothly. A turn pressed just after the snake
+committed to its next cell would normally only happen one cell later, which
+feels laggy. Instead, if the last move was a plain straight step, the game
+quietly redoes that step in the new direction, so turns land where you
+expect. The chase and first-person cameras also follow turns quickly.
+
+### Garage
+
+Open the **Garage** from the main menu (or after a run) to customise your
+snake. The camera swings in close for a live preview.
+
+- **16 skins:** Viper, Coral, Python, Emerald Boa, Tiger, Candy Cane, Glacier,
+  plus unlockables: Neon Runner and Circuit (glowing light lines), Magma
+  (molten cracks that pulse), Golden King, Chrome (mirror metal), Galaxy
+  (twinkling stars), Prism (an animated rainbow), Dragon and Phantom.
+- **9 accessories:** shades, top hat, party hat, horns, bow, flower, plus an
+  unlockable crown and halo.
+- Locked items show what unlocks them, with your progress (for example
+  "Catch 3 golden mice (1 / 3)"). Unlocks come from your best score and
+  lifetime totals: runs played, apples eaten, mice caught, chains completed
+  and the furthest zone reached. New unlocks are announced on the results
+  screen. You can preview a locked item, but it only equips once unlocked.
 
 ### Music
 
@@ -95,7 +123,7 @@ flows instead of cutting. Pausing muffles it rather than stopping it.
 ### Chase and first-person aids
 
 Glowing chevrons on the floor show the cells straight ahead (they turn red
-just before an obstacle), the compass points to the nearest ring (plus the
+just before an obstacle), the compass points to the nearest apple (plus the
 prism and mouse) with its distance in cells, a heading-up minimap shows the
 whole board, the screen edge glows red when the next move would be fatal, and
 each wall's rim glows red as you approach it. The guide, minimap and compass
@@ -109,7 +137,8 @@ can be turned off in Settings.
   is on by default if your system asks for reduced motion.
 - Path guide, minimap and compass, FPS counter, sound effect and music volume.
 
-Settings and your best score are saved in the browser.
+Settings, your snake's look, lifetime stats and your best score are saved in
+the browser.
 
 ## Performance
 
@@ -148,9 +177,7 @@ npm run bench      # rough frame-time benchmark of the built game (emulated Reti
 `npm run test:e2e` and `npm run bench` use `playwright-core` and need a
 Chromium binary: set `CHROMIUM_PATH` to one if Playwright's default isn't
 installed. Headless Chromium renders on the CPU, so the benchmark's absolute
-numbers aren't real frame rates; it's for before/after comparisons. (The CPU
-renderer also drops some triangles on large distant meshes; that artifact
-doesn't occur on real GPUs.)
+numbers aren't real frame rates; it's for before/after comparisons. 
 
 ### Project layout
 
@@ -167,12 +194,14 @@ src/
   render/Post.js         fused post-processing pipeline with dynamic render scale
   render/materials.js    reveal, checker and board shaders on standard materials
   render/geo.js          noise and geometry helpers, prop merging
-  render/SnakeView.js    the animated snake (dynamic tube mesh, modelled head, boost aura)
+  render/SnakeView.js    the animated snake (dynamic tube mesh, modelled head, skins, boost aura)
+  render/accessories.js  hats, horns, shades and other head accessories
+  skins.js               skin patterns, accessories and their unlock rules
   render/SnakePath.js    smooth path through grid cells with rounded corners
-  render/FoodView.js     rings, prisms, orb chains and the golden mouse
+  render/FoodView.js     crystal apples, prisms, orb chains and the golden mouse
   render/BoardObjects.js pillars with warnings, and boost pads
   render/Effects.js      particles, shockwaves, path guide
-  render/CameraRig.js    orbit / overhead / chase / first-person cameras and blending
+  render/CameraRig.js    orbit / garage / overhead / chase / first-person cameras and blending
   render/textures.js     procedural textures
   audio/Audio.js         synthesized sound effects and the adaptive music engine
   Input.js               keyboard, touch and gamepad
@@ -188,7 +217,7 @@ exact.
 - Visuals and performance were checked in headless software rendering, not
   on a real GPU or a Mac. The dynamic resolution should keep frame rates
   smooth, but if it still stutters, pick Medium or Low quality.
-- No online leaderboard; the best score is per browser.
+- No online leaderboard; the best score and unlocks are per browser.
 - Touch controls were checked in an emulated phone viewport, not on a physical
   device.
 

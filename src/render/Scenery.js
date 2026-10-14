@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { PropBuilder, mulberry32, displace, ribbon, xform, clean } from './geo.js';
+import { PropBuilder, mulberry32, displace, ribbon, xform, clean, cone } from './geo.js';
 import { makeRevealUniforms, propMaterials, makeCheckerMaterial, addReveal } from './materials.js';
 import { islandRadius, GRASS_Y } from './Island.js';
 import { makeWaterfall, WATER_Y } from './Water.js';
@@ -148,7 +148,7 @@ function islet(b, rng, x, y, z, r, falls, { palms = true } = {}) {
   for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * TAU * r) / 1.5, (uv.getY(i) * 2.6) / 1.5);
   xform(band, { x, y: y - 1.55, z });
   b.add(band, { anchor, bucket: 'checker', keepUv: true, ao: 1 });
-  const under = clean(new THREE.ConeGeometry(r * 0.82, r * 1.7, 12, 3));
+  const under = clean(cone(r * 0.82, r * 1.7, 12, 3));
   under.rotateX(Math.PI);
   displace(under, r * 0.1, 0.25, rng() * 30);
   xform(under, { x, y: y - 2.85 - r * 0.85, z });
@@ -248,7 +248,7 @@ function mountain(b, rng, x, z, rad, h, colors) {
   const peaks = [[0, 0, 1, 1], [rad * 0.55, rad * 0.2, 0.6, 0.7], [-rad * 0.5, -rad * 0.15, 0.55, 0.65]];
   const snowLine = WATER_Y + h * 0.7;
   for (const [ox, oz, sr, sh] of peaks) {
-    const g = clean(new THREE.ConeGeometry(rad * sr, h * sh, 18, 10));
+    const g = clean(cone(rad * sr, h * sh, 18, 10));
     displace(g, rad * sr * 0.07, 0.028, rng() * 50);
     xform(g, { x: x + ox, y: WATER_Y + (h * sh) / 2 - 2, z: z + oz, ry: rng() * TAU });
     b.add(g, {

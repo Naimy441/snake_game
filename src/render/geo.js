@@ -186,3 +186,10 @@ export class PropBuilder {
     return meshes;
   }
 }
+
+// three r169's ConeGeometry drops half of each row's triangles when
+// heightSegments > 1 (fixed upstream in r170). A cylinder with a vanishing
+// top radius generates every face; clean() then welds the tip into one vertex.
+export function cone(radius, height, radial = 8, heightSegs = 1) {
+  return new THREE.CylinderGeometry(radius * 1e-6, radius, height, radial, heightSegs);
+}

@@ -45,6 +45,23 @@ await page.waitForTimeout(1500);
 await shot('01-menu');
 check(await page.isVisible('#screen-start'), 'start screen visible');
 
+// --- garage: free skins equip, locked ones only preview
+await page.click('#btn-garage');
+await page.waitForFunction(() => window.__coil.rig.mode === 'showcase');
+check(await page.isVisible('#garage'), 'garage opens with the showcase camera');
+await page.click('.gar-item[data-kind="skin"][data-id="tiger"]');
+await page.click('.gar-item[data-kind="acc"][data-id="shades"]');
+let gs = await page.evaluate(() => ({ skin: window.__coil.snake.skin.id, acc: window.__coil.snake.accessoryId, saved: window.__coil.settings.skin }));
+check(gs.skin === 'tiger' && gs.acc === 'shades' && gs.saved === 'tiger', `free skin and accessory equip (${JSON.stringify(gs)})`);
+await page.click('.gar-item[data-kind="skin"][data-id="neon"]');
+gs = await page.evaluate(() => ({ skin: window.__coil.snake.skin.id, saved: window.__coil.settings.skin, lock: document.getElementById('gar-lock').textContent }));
+check(gs.skin === 'neon' && gs.saved === 'tiger' && /Locked/.test(gs.lock), 'locked skin previews but does not equip');
+await shot('01b-garage');
+await page.keyboard.press('Escape');
+await page.waitForFunction(() => !window.__coil.garageOpen);
+gs = await page.evaluate(() => window.__coil.snake.skin.id);
+check(gs === 'tiger', 'closing the garage restores the equipped skin');
+
 // --- overhead gameplay
 await page.keyboard.press('Enter');
 await waitState('playing');

@@ -1,59 +1,57 @@
 import * as THREE from 'three';
 import { SnakePath, CORNER } from './SnakePath.js';
+import { skinById } from '../skins.js';
+import { buildAccessory, disposeAccessory } from './accessories.js';
 
 const STEP = 0.2; // ring spacing along the body, in cells
 const UP = new THREE.Vector3(0, 1, 0);
-
-const C_DORSAL = new THREE.Color('#1386a8');
-const C_SIDE = new THREE.Color('#2fe3c6');
-const C_BELLY = new THREE.Color('#f3e7c4');
-const C_DIAMOND = new THREE.Color('#ffb627');
-const C_EDGE = new THREE.Color('#06242e');
-
-// Body-fixed colour: d is the distance from the head in cells, theta the angle
-// around the body (PI/2 = spine). Ring i always sits at d = i * STEP, so the
-// pattern travels with the snake and only has to be computed once.
-function bodyColor(d, theta, out) {
-  const dorsal = Math.sin(theta);
-  const lateral = Math.abs(Math.cos(theta));
-  if (dorsal < -0.35) {
-    out.copy(C_BELLY);
-    const band = Math.abs(((d * 3) % 1) - 0.5) < 0.08 ? 0.9 : 1;
-    return out.multiplyScalar(band);
-  }
-  out.copy(C_SIDE).lerp(C_DORSAL, Math.max(0, dorsal));
-  const f = ((d + 0.25) / 0.9) % 1;
-  const diamond = Math.abs(f - 0.5) * 2 + lateral * 1.6;
-  if (diamond < 0.62) out.copy(C_DIAMOND);
-  else if (diamond < 0.82) out.copy(C_EDGE);
-  if (dorsal < 0) out.lerp(C_BELLY, (-dorsal / 0.35) * 0.5);
-  return out;
-}
 
 const AURA_VS = `uniform float uPush; varying vec3 vN; varying vec3 vV;
 void main(){ vec3 p = position + normal * uPush; vec4 mv = modelViewMatrix * vec4(p, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`;
 const AURA_FS = `uniform vec3 uColor; uniform float uAmount; uniform float uTime; varying vec3 vN; varying vec3 vV;
 void main(){ float f = pow(1.0 - abs(dot(vN, vV)), 2.2); float a = f * uAmount * (0.75 + 0.25 * sin(uTime * 30.0)); gl_FragColor = vec4(uColor * a * 2.2, a); }`;
 
-// Fresnel rim light added to a standard material's emissive term.
-function withRim(mat, uniforms) {
+const ANIM = { none: 0, rainbow: 1, pulse: 2, flow: 3 };
+
+// Standard material plus: a fresnel rim light, per-vertex glow (aGlow, in the
+// surface colour) and skin animations (rainbow hue cycling, pulsing or
+// flowing glow) driven by the distance along the body (uv.x).
+function withSkin(mat, uniforms) {
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aGlow; varying float vGlow; varying float vBodyD;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow; vBodyD = uv.x / 2.2;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 uRimColor; uniform float uRim;')
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform vec3 uRimColor; uniform float uRim; uniform float uAnim; uniform float uTime; uniform float uGlowAmt;
+        varying float vGlow; varying float vBodyD;
+        vec3 skinHue(float h){ vec3 k = clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); return k * k * (3.0 - 2.0 * k); }`
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        if (uAnim > 0.5 && uAnim < 1.5) diffuseColor.rgb *= mix(vec3(1.0), skinHue(fract(vBodyD * 0.32 - uTime * 0.35)), 0.92);`
+      )
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
         float rimF = pow(1.0 - saturate(dot(normalize(vNormal), normalize(vViewPosition))), 3.0);
-        totalEmissiveRadiance += uRimColor * rimF * uRim;`
+        totalEmissiveRadiance += uRimColor * rimF * uRim;
+        float gp = 1.0;
+        if (uAnim > 1.5 && uAnim < 2.5) gp = 0.55 + 0.45 * sin(uTime * 3.0 - vBodyD * 1.4);
+        if (uAnim > 2.5) gp = 0.3 + 0.9 * pow(0.5 + 0.5 * sin(vBodyD * 2.2 - uTime * 7.0), 3.0);
+        totalEmissiveRadiance += diffuseColor.rgb * vGlow * uGlowAmt * gp;`
       );
   };
-  mat.customProgramCacheKey = () => 'snake-rim';
+  mat.customProgramCacheKey = () => 'snake-skin';
   return mat;
 }
 
 export class SnakeView {
-  constructor({ maxCells, radial = 14, scaleMap }) {
+  constructor({ maxCells, radial = 14, scaleMap, skin = 'viper', accessory = 'none' }) {
     this.group = new THREE.Group();
     this.path = new SnakePath(maxCells + 4);
     this.radial = radial;
@@ -71,15 +69,9 @@ export class SnakeView {
     this.normals = new Float32Array(vCount * 3);
     const colors = new Float32Array(vCount * 3);
     const uvs = new Float32Array(vCount * 2);
-    const col = new THREE.Color();
     for (let i = 0; i < this.maxRings; i++) {
       for (let j = 0; j <= R; j++) {
-        const theta = (j / R) * Math.PI * 2;
         const k = i * (R + 1) + j;
-        bodyColor(i * STEP, theta, col);
-        colors[k * 3] = col.r;
-        colors[k * 3 + 1] = col.g;
-        colors[k * 3 + 2] = col.b;
         uvs[k * 2] = i * STEP * 2.2;
         uvs[k * 2 + 1] = (j / R) * 4;
       }
@@ -104,12 +96,19 @@ export class SnakeView {
     geo.setAttribute('position', this.posAttr);
     geo.setAttribute('normal', this.normAttr);
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('aGlow', new THREE.BufferAttribute(new Float32Array(vCount), 1));
     geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e4);
     this.geo = geo;
 
-    this.rimUniforms = { uRimColor: { value: new THREE.Color('#9fd0ff') }, uRim: { value: 0.6 } };
-    this.bodyMat = withRim(
+    this.rimUniforms = {
+      uRimColor: { value: new THREE.Color('#9fd0ff') },
+      uRim: { value: 0.6 },
+      uAnim: { value: 0 },
+      uTime: { value: 0 },
+      uGlowAmt: { value: 1 },
+    };
+    this.bodyMat = withSkin(
       new THREE.MeshStandardMaterial({
         vertexColors: true,
         roughness: 0.34,
@@ -145,6 +144,86 @@ export class SnakeView {
     this.group.add(this.aura);
 
     this.buildHead(scaleMap);
+    this.applySkin(skin);
+    this.setAccessory(accessory);
+  }
+
+  // Recolour the body and head for a skin (cheap: runs once per change).
+  applySkin(id) {
+    const skin = skinById(id);
+    this.skin = skin;
+    const R = this.radial;
+    const col = new THREE.Color();
+    const colors = this.geo.attributes.color;
+    const glow = this.geo.attributes.aGlow;
+    for (let i = 0; i < this.maxRings; i++) {
+      const d = i * STEP;
+      for (let j = 0; j <= R; j++) {
+        const theta = (j / R) * Math.PI * 2;
+        const k = i * (R + 1) + j;
+        skin.color(d, theta, col);
+        colors.array[k * 3] = col.r;
+        colors.array[k * 3 + 1] = col.g;
+        colors.array[k * 3 + 2] = col.b;
+        glow.array[k] = skin.glow ? skin.glow(d, theta) : 0;
+      }
+    }
+    colors.needsUpdate = true;
+    glow.needsUpdate = true;
+    const m = skin.mat || {};
+    for (const [mat, ns] of [[this.bodyMat, 0.6], [this.headMat, 0.35]]) {
+      mat.roughness = m.roughness ?? 0.34;
+      mat.metalness = m.metalness ?? 0.08;
+      mat.envMapIntensity = m.env ?? 1.3;
+      mat.normalScale.setScalar((m.normal ?? 1) * ns);
+    }
+    this.rimUniforms.uAnim.value = ANIM[skin.anim || 'none'];
+    this.auraUniforms.uColor.value.set(skin.aura);
+    this.trailColor = skin.trail;
+    // head
+    const h = skin.head;
+    const top = new THREE.Color(h.top);
+    const side = new THREE.Color(h.side);
+    const bel = new THREE.Color(h.belly);
+    const acc = new THREE.Color(h.accent);
+    const hp = this.headShape;
+    const hc = this.headGeo.attributes.color;
+    const hg = this.headGeo.attributes.aGlow;
+    const headGlow = skin.glow ? skin.glow(0, Math.PI / 2) * 0.5 : 0;
+    for (let i = 0; i < hp.length / 3; i++) {
+      const x = hp[i * 3];
+      const y = hp[i * 3 + 1];
+      const z = hp[i * 3 + 2];
+      const tp = y / 0.275;
+      if (tp < -0.15) col.copy(bel);
+      else {
+        col.copy(side).lerp(top, Math.max(0, Math.min(1, tp * 1.3)));
+        if (tp > 0.55 && Math.abs(x) < 0.09 && z > -0.2 && z < 0.12) col.copy(acc);
+      }
+      hc.array[i * 3] = col.r;
+      hc.array[i * 3 + 1] = col.g;
+      hc.array[i * 3 + 2] = col.b;
+      hg.array[i] = headGlow;
+    }
+    hc.needsUpdate = true;
+    hg.needsUpdate = true;
+    this.eyeMat.color.set(h.eye);
+    this.eyeMat.emissive.set(h.eye);
+    this.eyeMat.emissiveIntensity = h.eyeGlow ?? 0.9;
+  }
+
+  setAccessory(id) {
+    if (this.accessory) {
+      this.head.remove(this.accessory);
+      disposeAccessory(this.accessory);
+      this.accessory = null;
+    }
+    const a = buildAccessory(id);
+    if (a) {
+      this.accessory = a;
+      this.head.add(a);
+    }
+    this.accessoryId = id;
   }
 
   buildHead(scaleMap) {
@@ -152,7 +231,6 @@ export class SnakeView {
     const g = new THREE.SphereGeometry(0.5, 40, 28);
     const pos = g.attributes.position;
     const colors = new Float32Array(pos.count * 3);
-    const col = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
       let x = pos.getX(i) * 0.8;
       let y = pos.getY(i) * 0.55;
@@ -164,18 +242,13 @@ export class SnakeView {
       }
       if (y < 0) y *= 0.62;
       pos.setXYZ(i, x, y, z);
-      const top = y / 0.275;
-      if (top < -0.15) col.copy(C_BELLY);
-      else {
-        col.copy(C_SIDE).lerp(C_DORSAL, Math.max(0, Math.min(1, top * 1.3)));
-        // a golden crown mark between the eyes
-        if (top > 0.55 && Math.abs(x) < 0.09 && z > -0.2 && z < 0.12) col.copy(C_DIAMOND);
-      }
-      colors.set([col.r, col.g, col.b], i * 3);
     }
     g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    g.setAttribute('aGlow', new THREE.BufferAttribute(new Float32Array(pos.count), 1));
     g.computeVertexNormals();
-    this.headMat = withRim(
+    this.headGeo = g;
+    this.headShape = Float32Array.from(pos.array);
+    this.headMat = withSkin(
       new THREE.MeshStandardMaterial({
         vertexColors: true,
         roughness: 0.3,
@@ -197,13 +270,13 @@ export class SnakeView {
     headAura.visible = false;
     head.add(headAura);
 
-    const eyeMat = new THREE.MeshStandardMaterial({
+    const eyeMat = (this.eyeMat = new THREE.MeshStandardMaterial({
       color: '#ffd23f',
       emissive: '#ff9f1c',
       emissiveIntensity: 1.2,
       roughness: 0.05,
       metalness: 0.1,
-    });
+    }));
     const pupilMat = new THREE.MeshBasicMaterial({ color: '#05060a' });
     const eyeGeo = new THREE.SphereGeometry(0.085, 20, 14);
     const pupilGeo = new THREE.BoxGeometry(0.02, 0.11, 0.05);
@@ -319,6 +392,8 @@ export class SnakeView {
     this.headMat.emissive.copy(this.bodyMat.emissive);
     this.bodyMat.emissiveIntensity = Math.max(pulse * 0.25, deathFlash * 0.8);
     this.headMat.emissiveIntensity = this.bodyMat.emissiveIntensity;
+    this.rimUniforms.uTime.value = time;
+    if (this.accessory && this.accessory.userData.bob) this.accessory.userData.bob.position.y = 0.48 + Math.sin(time * 2.4) * 0.025;
     this.auraUniforms.uAmount.value = rushGlow;
     this.auraUniforms.uTime.value = time;
     this.aura.visible = rushGlow > 0.02;
@@ -331,6 +406,7 @@ export class SnakeView {
   }
 
   dispose() {
+    if (this.accessory) disposeAccessory(this.accessory);
     this.geo.dispose();
     this.bodyMat.dispose();
     this.headMat.dispose();

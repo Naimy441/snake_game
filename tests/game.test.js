@@ -336,3 +336,66 @@ test('nothing spawns on obstacles, pads or chain orbs', () => {
     assert.ok(!taken.has(`${f.x},${f.z}`));
   }
 });
+
+test('a late turn redoes the last straight step in the new direction', () => {
+  const g = new SnakeGame({ rng: seq([0.5]) });
+  const h0 = { ...g.head };
+  g.step(); // straight up
+  assert.ok(g.canRegrace());
+  const ev = g.regrace(DIRS.left);
+  assert.ok(ev && ev.regraced);
+  assert.deepEqual(g.head, { x: h0.x - 1, z: h0.z });
+  assert.deepEqual(g.dir, DIRS.left);
+  assert.equal(g.cells.length, 4);
+  assert.equal(g.ticks, 1);
+  assert.equal(g.canRegrace(), false, 'only once per step');
+});
+
+test('late turns cannot reverse, and never redo a step that ate or turned', () => {
+  const g = new SnakeGame({ rng: seq([0.5]) });
+  g.step();
+  assert.equal(g.regrace(DIRS.down), null);
+  assert.equal(g.regrace(DIRS.up), null);
+  g.food = { x: g.head.x, z: g.head.z - 1, type: 'orb', id: 77 };
+  g.step();
+  assert.equal(g.canRegrace(), false);
+  g.queueDirection(DIRS.left);
+  g.step();
+  assert.equal(g.canRegrace(), false);
+  g.step();
+  assert.equal(g.canRegrace(), true);
+  g.queueDirection(DIRS.up);
+  assert.equal(g.canRegrace(), false, 'not while a turn is already queued');
+});
+
+// ---------------------------------------------------------------- skins
+import { Color } from 'three';
+import { SKINS, ACCESSORIES, isUnlocked, unlockProgress, skinById } from '../src/skins.js';
+
+test('every skin produces valid colours and glow all over the body', () => {
+  const c = new Color();
+  for (const s of SKINS) {
+    for (let d = 0; d < 20; d += 0.37) {
+      for (let t = 0; t < Math.PI * 2; t += 0.4) {
+        s.color(d, t, c);
+        for (const v of [c.r, c.g, c.b]) assert.ok(Number.isFinite(v) && v >= 0, `${s.id} colour`);
+        const gl = s.glow ? s.glow(d, t) : 0;
+        assert.ok(Number.isFinite(gl) && gl >= 0, `${s.id} glow`);
+      }
+    }
+    assert.ok(s.head && s.swatch && s.name, `${s.id} metadata`);
+  }
+  assert.equal(new Set(SKINS.map((s) => s.id)).size, SKINS.length, 'unique skin ids');
+  assert.equal(new Set(ACCESSORIES.map((s) => s.id)).size, ACCESSORIES.length, 'unique accessory ids');
+});
+
+test('skins unlock from lifetime stats', () => {
+  const fresh = { games: 0, apples: 0, mice: 0, chains: 0, pads: 0, maxZone: 0, best: 0 };
+  const free = SKINS.filter((s) => isUnlocked(s, fresh));
+  assert.ok(free.length >= 6, 'plenty of skins are free from the start');
+  const neon = skinById('neon');
+  assert.equal(isUnlocked(neon, fresh), false);
+  assert.equal(isUnlocked(neon, { ...fresh, maxZone: 1 }), true);
+  assert.equal(unlockProgress(skinById('golden'), { ...fresh, mice: 2 }), '2 / 3');
+  assert.equal(skinById('nope').id, 'viper');
+});

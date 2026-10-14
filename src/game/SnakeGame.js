@@ -471,6 +471,57 @@ export class SnakeGame {
   step() {
     const ev = { ate: null, died: false, cause: null, turned: false, bonusExpired: false, won: false };
     if (!this.alive) return ev;
+    // Snapshot for the late-turn grace window (see regrace).
+    this.undo = {
+      cells: this.cells.slice(), removedTail: this.removedTail, pendingGrowth: this.pendingGrowth,
+      dir: this.dir, queue: this.queue.slice(), time: this.time, ticks: this.ticks,
+      rush: this.rush, rushing: this.rushing, boostTicks: this.boostTicks,
+      prey: this.prey ? { ...this.prey } : null, preyTimer: this.preyTimer,
+    };
+    this.undoOk = false;
+    const result = this.advance(ev);
+    // Only a plain straight move (nothing eaten, spawned, expired or turned) can be redone.
+    this.undoOk = this.alive && Object.entries(result).every(([k, v]) => k === 'cause' || !v);
+    return result;
+  }
+
+  // A turn pressed just after the snake committed to its next cell would
+  // otherwise only apply one cell later, which feels laggy because the drawn
+  // head is still behind. If the last step was a plain straight move, undo it
+  // and take it again in the new direction.
+  canRegrace() {
+    return this.alive && !!this.undoOk && this.queue.length === 0;
+  }
+
+  regrace(d) {
+    if (!this.canRegrace()) return null;
+    const u = this.undo;
+    if (sameDir(d, u.dir) || opposite(d, u.dir)) return null;
+    this.cells = u.cells;
+    this.removedTail = u.removedTail;
+    this.pendingGrowth = u.pendingGrowth;
+    this.dir = u.dir;
+    this.time = u.time;
+    this.ticks = u.ticks;
+    this.rush = u.rush;
+    this.rushing = u.rushing;
+    this.boostTicks = u.boostTicks;
+    this.prey = u.prey;
+    this.preyTimer = u.preyTimer;
+    this.queue = [{ x: d.x, z: d.z }];
+    this.undoOk = false;
+    const ev = this.step();
+    ev.regraced = true;
+    return ev;
+  }
+
+  // Relative turn resolved against the current heading (for regrace).
+  turnDir(side) {
+    const l = this.lastQueuedDir();
+    return side > 0 ? { x: -l.z + 0, z: l.x + 0 } : { x: l.z + 0, z: -l.x + 0 };
+  }
+
+  advance(ev) {
 
     this.rushing = this.wantRush && this.rush > 0;
     const interval = this.currentInterval();
