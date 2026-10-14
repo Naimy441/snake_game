@@ -62,6 +62,22 @@ await page.waitForFunction(() => !window.__coil.garageOpen);
 gs = await page.evaluate(() => window.__coil.snake.skin.id);
 check(gs === 'tiger', 'closing the garage restores the equipped skin');
 
+// --- level select starts locked at level 1; toasts on the menu draw above the menu card
+let ls = await page.evaluate(() => ({ name: document.getElementById('lvl-sel-name').textContent, prev: document.getElementById('lvl-prev').disabled, next: document.getElementById('lvl-next').disabled }));
+check(ls.name === 'Level 1' && ls.prev && ls.next, `level select is locked on a fresh save (${JSON.stringify(ls)})`);
+await page.keyboard.press('KeyM');
+await page.waitForTimeout(400);
+ls = await page.evaluate(() => {
+  const t = document.getElementById('toast');
+  const r = t.getBoundingClientRect();
+  const c = document.querySelector('#screen-start .card').getBoundingClientRect();
+  const overlap = !(r.bottom <= c.top || r.top >= c.bottom || r.right <= c.left || r.left >= c.right);
+  return { z: getComputedStyle(t).zIndex, overlap, shown: t.classList.contains('show'), text: t.textContent };
+});
+check(ls.shown && Number(ls.z) >= 10 && !ls.overlap, `menu toast shows above the screens, clear of the menu card (${JSON.stringify(ls)})`);
+await page.keyboard.press('KeyM');
+await shot('01c-menu-toast');
+
 // --- overhead gameplay; mashing keys during the countdown keeps at most one (the latest) turn
 await page.keyboard.press('Enter');
 await page.waitForFunction(() => window.__coil.state === 'countdown');
@@ -237,6 +253,43 @@ s = await state();
 check(s.quality === 'low', 'quality can be changed');
 await page.keyboard.press('Escape');
 check(!(await page.isVisible('#panel-settings')), 'Esc closes the settings panel');
+
+// --- level select: start at an unlocked level, then slow motion at a zone change
+await page.evaluate(() => window.__coil.toMenu());
+await waitState('menu');
+await page.evaluate(() => { const a = window.__coil; a.stats.maxLevel = 5; a.renderLevelSelect(); });
+for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+ls = await page.evaluate(() => document.getElementById('lvl-sel-name').textContent);
+check(ls === 'Level 4', `arrow keys pick an unlocked starting level (${ls})`);
+await page.keyboard.press('ArrowRight');
+await page.keyboard.press('ArrowRight');
+await page.keyboard.press('ArrowRight');
+ls = await page.evaluate(() => document.getElementById('lvl-sel-name').textContent);
+check(ls === 'Level 6', `cannot go past the highest unlocked level (${ls})`);
+await page.keyboard.press('ArrowLeft');
+await page.keyboard.press('ArrowLeft');
+await page.keyboard.press('Enter');
+await waitState('playing');
+s = await page.evaluate(() => { const g = window.__coil.game; return { level: g.level, zone: g.zone, pillars: g.obstacles.length }; });
+check(s.level === 3 && s.zone === 1, `run starts at the chosen level (${JSON.stringify(s)})`);
+await pilot(true);
+await page.evaluate(() => {
+  const g = window.__coil.game;
+  g.foodEaten = 20; // one apple before level 7 = Neon Night
+  const nx = g.head.x + g.dir.x;
+  const nz = g.head.z + g.dir.z;
+  g.food = { x: nx, z: nz, type: 'orb', id: 9090 };
+  if (!g.inBounds(nx, nz) || g.obstacleAt(nx, nz, false)) g.foodEaten = 20;
+});
+await page.waitForFunction(() => window.__coil.game.zone === 2, null, { timeout: 20000 }).catch(() => {});
+await page.waitForFunction(() => (window.__coil.timeScale ?? 1) < 0.6, null, { timeout: 20000 }).catch(() => {});
+s = await page.evaluate(() => ({ zone: window.__coil.game.zone, ts: window.__coil.timeScale }));
+check(s.zone === 2 && s.ts < 0.6, `gameplay slows down while the zone card shows (timeScale ${s.ts?.toFixed(2)})`);
+await shot('08-slowmo-zone');
+await page.waitForFunction(() => (window.__coil.timeScale ?? 1) > 0.95 || window.__coil.state !== 'playing', null, { timeout: 30000 }).catch(() => {});
+s = await page.evaluate(() => ({ ts: window.__coil.timeScale, state: window.__coil.state }));
+check(s.ts > 0.95 || s.state !== 'playing', 'and returns to full speed afterwards');
+await pilot(false);
 
 check(errors.length === 0, `no console errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
 await browser.close();

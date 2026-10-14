@@ -1,3 +1,5 @@
+// Storage keys keep the game's original working name so existing saves
+// (settings, best score, unlocks) carry over after the rename.
 const KEY = 'coilrush.settings.v1';
 const BEST_KEY = 'coilrush.best.v1';
 const STATS_KEY = 'coilrush.stats.v1';
@@ -23,6 +25,7 @@ export const DEFAULTS = {
   skin: 'viper',
   accessory: 'none',
   ghost: false,
+  startLevel: 0,
 };
 
 export function loadSettings() {
@@ -60,7 +63,7 @@ export function saveBest(v) {
 }
 
 // Lifetime totals used to unlock skins and accessories.
-export const STAT_DEFAULTS = { games: 0, apples: 0, mice: 0, chains: 0, pads: 0, maxZone: 0 };
+export const STAT_DEFAULTS = { games: 0, apples: 0, mice: 0, chains: 0, pads: 0, maxZone: 0, maxLevel: 0 };
 
 export function loadStats() {
   try {

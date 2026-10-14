@@ -595,3 +595,24 @@ test('the ghost ignores the golden mouse and steers around pillars', () => {
   assert.equal(gh.ateFood, 800);
   assert.ok(g.prey, 'mouse untouched');
 });
+
+test('starting at a later level sets speed, zone, pillars and pads', () => {
+  const g = new SnakeGame();
+  g.startAtLevel(5);
+  assert.equal(g.level, 5);
+  assert.equal(g.zone, 1);
+  assert.deepEqual(g.levelProgress(), { into: 0, need: 4, max: false });
+  assert.equal(g.obstacles.length, 3, 'pillars from levels 4 and 5');
+  assert.ok(g.obstacles.every((o) => o.solid));
+  assert.equal(g.pads.length, 2);
+  assert.equal(g.cells.length, 4);
+  assert.ok(g.stillConnected([]));
+  const fresh = new SnakeGame();
+  fresh.startAtLevel(0);
+  assert.equal(fresh.level, 0);
+  assert.equal(fresh.obstacles.length, 0);
+  const top = new SnakeGame();
+  top.startAtLevel(99);
+  assert.equal(top.level, 12);
+  assert.ok(top.obstacles.length <= 12);
+});

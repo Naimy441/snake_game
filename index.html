@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#0b1a3a" />
-    <meta name="description" content="Coil Rush: classic Snake reimagined as a high-speed 3D game with overhead, chase and first-person views." />
-    <title>Coil Rush</title>
+    <meta name="description" content="Snake Rush: classic Snake reimagined as a high-speed 3D game with overhead, chase and first-person views." />
+    <title>Snake Rush</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%231f4fd8'/%3E%3Cpath d='M18 40c0-10 28-6 28-16 0-6-8-8-14-6' stroke='%23ffc21a' stroke-width='7' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="/src/style.css" />
     <!-- Critical styles inline so the first paint is the loading screen, never raw HTML -->
@@ -29,10 +29,10 @@
     <div id="app">
       <div id="loader" role="status" aria-live="polite">
         <div>
-          <div class="lg"><span>COIL</span><span>RUSH</span></div>
+          <div class="lg"><span>SNAKE</span><span>RUSH</span></div>
           <div class="spin"></div>
           <p id="loader-msg">Building the world…</p>
-          <noscript><p>Coil Rush needs JavaScript and WebGL.</p></noscript>
+          <noscript><p>Snake Rush needs JavaScript and WebGL.</p></noscript>
         </div>
       </div>
       <canvas id="scene" aria-label="Game view"></canvas>
@@ -86,13 +86,23 @@
       <!-- Start screen -->
       <section id="screen-start" class="screen">
         <div class="card hero">
-          <h1 class="logo"><span>COIL</span><span class="accent">RUSH</span></h1>
+          <h1 class="logo"><span>SNAKE</span><span class="accent">RUSH</span></h1>
           <p class="tagline">Classic Snake at full speed.</p>
           <div class="cam-select" role="radiogroup" aria-label="Camera">
             <button data-cam="overhead" class="seg active" role="radio" aria-checked="true">Overhead</button>
             <button data-cam="tp" class="seg" role="radio" aria-checked="false">Chase</button>
             <button data-cam="fp" class="seg" role="radio" aria-checked="false">First-person</button>
           </div>
+          <div class="lvl-select" id="lvl-select" aria-label="Starting level">
+            <button id="lvl-prev" class="lvl-arrow" aria-label="Previous level">‹</button>
+            <div class="lvl-sel-info">
+              <span class="lvl-sel-label">Start at</span>
+              <b id="lvl-sel-name">Level 1</b>
+              <span id="lvl-sel-zone">Emerald Coast</span>
+            </div>
+            <button id="lvl-next" class="lvl-arrow" aria-label="Next level">›</button>
+          </div>
+          <p class="muted small lvl-sel-hint" id="lvl-sel-hint">Reach new levels to start from them here.</p>
           <button id="btn-play" class="primary big">Play <kbd>Enter</kbd></button>
           <button id="btn-ghost" class="secondary wide ghost-btn" title="Toggle the ghost guide (G)">Ghost guide: <b id="btn-ghost-state">Off</b> <span class="muted small">race a perfect bot</span> <kbd>G</kbd></button>
           <button id="btn-garage" class="secondary wide garage-btn">Garage <span class="muted small">skins &amp; accessories</span></button>
@@ -240,7 +250,7 @@
         <button id="t-right" class="tbtn" aria-label="Turn right">⟳</button>
       </div>
 
-      <div id="webgl-error" class="screen hidden"><div class="card"><h2>WebGL unavailable</h2><p class="muted">Your browser could not start WebGL 2, which Coil Rush needs. Try enabling hardware acceleration or using a current version of Chrome, Edge, Firefox or Safari.</p></div></div>
+      <div id="webgl-error" class="screen hidden"><div class="card"><h2>WebGL unavailable</h2><p class="muted">Your browser could not start WebGL 2, which Snake Rush needs. Try enabling hardware acceleration or using a current version of Chrome, Edge, Firefox or Safari.</p></div></div>
     </div>
     <script>
       // If the game's scripts fail to load at all, explain instead of spinning forever.
@@ -252,7 +262,7 @@
           if (failed) document.body.classList.add('boot-failed');
         };
         var fail = function (detail) {
-          say("Coil Rush couldn't start" + (detail ? ': ' + detail : '') + '. Try reloading; if you\'re running it locally, run "npm install" first.', true);
+          say("Snake Rush couldn't start" + (detail ? ': ' + detail : '') + '. Try reloading; if you\'re running it locally, run "npm install" first.', true);
         };
         // script elements report failed loads (including any module they import) as non-bubbling error events
         document.addEventListener('error', function (e) {
