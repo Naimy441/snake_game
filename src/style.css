@@ -1,3 +1,8 @@
+/* Exo 2 (SIL Open Font License, see fonts/OFL-Exo2.txt), bundled locally */
+@font-face { font-family: 'Exo 2'; font-style: normal; font-weight: 600; font-display: swap; src: url('./fonts/exo-2-latin-600-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Exo 2'; font-style: italic; font-weight: 800; font-display: swap; src: url('./fonts/exo-2-latin-800-italic.woff2') format('woff2'); }
+@font-face { font-family: 'Exo 2'; font-style: italic; font-weight: 900; font-display: swap; src: url('./fonts/exo-2-latin-900-italic.woff2') format('woff2'); }
+
 :root {
   --ink: #f6f9ff;
   --muted: #b9c7e6;

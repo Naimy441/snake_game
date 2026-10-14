@@ -1,7 +1,3 @@
-import '@fontsource/exo-2/latin-600.css';
-import '@fontsource/exo-2/latin-800-italic.css';
-import '@fontsource/exo-2/latin-900-italic.css';
-import './style.css';
 import * as THREE from 'three';
 
 import { SnakeGame, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL } from './game/SnakeGame.js';
@@ -1228,4 +1224,22 @@ class App {
   }
 }
 
-new App();
+// Boot after the loading screen has painted; if anything fails, say so on
+// screen instead of leaving a blank page.
+function showBootError(err) {
+  console.error(err);
+  document.body.classList.add('boot-failed');
+  const el = document.getElementById('loader-msg');
+  if (el) el.textContent = `Coil Rush couldn't start: ${err && err.message ? err.message : err}. Try reloading; if you're running it locally, run "npm install" first.`;
+}
+
+requestAnimationFrame(() =>
+  setTimeout(() => {
+    try {
+      new App();
+      document.body.classList.remove('loading');
+    } catch (err) {
+      showBootError(err);
+    }
+  }, 0)
+);
