@@ -1,32 +1,36 @@
+import '@fontsource/exo-2/latin-600.css';
+import '@fontsource/exo-2/latin-800-italic.css';
+import '@fontsource/exo-2/latin-900-italic.css';
 import './style.css';
 import * as THREE from 'three';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-import { SnakeGame, DIRS, COMBO_WINDOW_MS } from './game/SnakeGame.js';
+import { SnakeGame, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, MAX_LEVEL } from './game/SnakeGame.js';
 import { World } from './render/World.js';
 import { SnakeView } from './render/SnakeView.js';
 import { FoodView } from './render/FoodView.js';
+import { BoardObjects } from './render/BoardObjects.js';
 import { Effects } from './render/Effects.js';
 import { CameraRig } from './render/CameraRig.js';
+import { PostFX } from './render/Post.js';
 import { CORNER } from './render/SnakePath.js';
-import { makeGlowTexture, makeScaleNormalMap } from './render/textures.js';
+import { makeGlowTexture, makeScaleNormalMap, makeRingTexture, makeChevronTexture } from './render/textures.js';
 import { AudioEngine } from './audio/Audio.js';
 import { Input } from './Input.js';
 import { loadSettings, saveSettings, loadBest, saveBest, QUALITY } from './settings.js';
 
 const $ = (id) => document.getElementById(id);
 const BOARD = 21;
-const CAMERA_NAMES = { overhead: 'Overhead', fp: 'First-person' };
+const CAMERA_NAMES = { overhead: 'Overhead', tp: 'Chase', fp: 'First-person' };
+const CAMERA_ORDER = ['overhead', 'tp', 'fp'];
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
 class App {
   constructor() {
     this.settings = loadSettings();
     this.canvas = $('scene');
     try {
-      this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
+      this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: false, stencil: false, powerPreference: 'high-performance' });
+      if (!this.renderer.capabilities.isWebGL2) throw new Error('WebGL 2 required');
     } catch (err) {
       console.error(err);
       $('webgl-error').classList.remove('hidden');
@@ -37,17 +41,19 @@ class App {
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.toneMappingExposure = 1.0;
     r.shadowMap.enabled = true;
-    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    r.shadowMap.type = THREE.PCFShadowMap;
+    r.info.autoReset = false;
 
     this.isTouch = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
     if (this.isTouch) document.body.classList.add('touch-device');
 
+    this.post = new PostFX(r);
     this.game = new SnakeGame({ size: BOARD, best: loadBest() });
     this.world = new World({ size: BOARD, renderer: r });
     this.scene = this.world.scene;
     this.toWorld = (x, z) => this.world.toWorld(x, z);
 
-    this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 1200);
+    this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 1500);
     this.rig = new CameraRig(this.camera, BOARD);
 
     this.glowTex = makeGlowTexture();
@@ -56,6 +62,8 @@ class App {
     this.scene.add(this.effects.group);
     this.food = new FoodView(this.glowTex);
     this.scene.add(this.food.group);
+    this.board = new BoardObjects({ glowTex: this.glowTex, ringTex: makeRingTexture(), chevronTex: makeChevronTexture(), checker: this.world.island.checker });
+    this.scene.add(this.board.group);
 
     this.audio = new AudioEngine();
     this.audio.setVolumes({ sfx: this.settings.sfx, music: this.settings.music, muted: this.settings.muted });
@@ -68,12 +76,13 @@ class App {
     this.deathFlash = 0;
     this.speedFx = 0;
     this.rushGlow = 0;
-    this.cameraMode = this.settings.camera === 'fp' ? 'fp' : 'overhead';
+    this.flashAmt = 0;
+    this.flashColor = new THREE.Color('#ffffff');
+    this.cameraMode = CAMERA_ORDER.includes(this.settings.camera) ? this.settings.camera : 'overhead';
     this.fpsFrames = 0;
     this.fpsTime = 0;
-    this.perfWindow = { time: 0, frames: 0, grace: 2 };
     this.lastHud = {};
-    this.runStart = 0;
+    this.dyn = { scale: 1, samples: [], timer: 0, grace: 2, good: 0, backoff: 1, lastUp: -99, slowAtMin: 0 };
 
     this.activeQuality = this.settings.quality === 'auto' ? (this.isTouch ? 'medium' : 'high') : this.settings.quality;
     this.applyQuality();
@@ -84,7 +93,7 @@ class App {
       tap: (side) => this.onTap(side),
       rush: (on) => (this.game.wantRush = on),
       confirm: (k) => this.onConfirm(k),
-      camera: () => this.toggleCamera(),
+      camera: () => this.cycleCamera(),
       pause: (k) => this.onPause(k),
       restart: () => this.onRestart(),
       mute: () => this.toggleMute(),
@@ -96,6 +105,7 @@ class App {
     window.addEventListener('resize', () => this.resize());
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && (this.state === 'playing' || this.state === 'countdown')) this.pause();
+      this.dyn.grace = 2;
     });
     window.addEventListener('blur', () => {
       if (this.state === 'playing') this.pause();
@@ -104,18 +114,35 @@ class App {
     this.rig.setMode('orbit', { instant: true });
     this.updateCameraUI();
     this.syncFood();
+    this.precompile();
     this.last = performance.now();
     this.renderer.setAnimationLoop((now) => this.frame(now));
+    this.THREE = THREE;
     window.__coil = this; // handy for debugging and automated tests
+  }
+
+  // Compile every shader before the first frame (all zones, all pickups), so
+  // nothing stalls mid-game the first time it appears.
+  precompile() {
+    const show = [this.food.orb.group, this.food.prism.group, this.food.prey.group, ...this.food.chain.links, ...this.board.pads];
+    const prev = show.map((o) => o.visible);
+    show.forEach((o) => (o.visible = true));
+    this.snake.aura.visible = true;
+    this.renderer.setRenderTarget(this.post.sceneRT);
+    this.world.precompile(this.camera);
+    this.renderer.setRenderTarget(null);
+    show.forEach((o, i) => (o.visible = prev[i]));
+    this.snake.aura.visible = false;
   }
 
   // ---------------------------------------------------------------- quality
   applyQuality() {
     const q = QUALITY[this.activeQuality];
     this.q = q;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixelRatio));
     this.world.setShadowQuality(q.shadows);
+    this.world.setParticleBudget(q.ambient);
     this.effects.setParticleBudget(q.particles);
+    this.post.configure({ samples: q.samples, bloomLevels: q.bloomLevels, taps: q.taps });
     if (!this.snake || this.snake.radial !== q.radial) {
       const old = this.snake;
       this.snake = new SnakeView({ maxCells: BOARD * BOARD, radial: q.radial, scaleMap: this.scaleMap });
@@ -128,48 +155,40 @@ class App {
       }
       this.scene.add(this.snake.group);
     }
-    if (q.bloom && !this.composer) this.buildComposer();
+    this.dyn.scale = 1;
+    this.dyn.grace = 2;
+    this.dyn.good = 0;
+    this.dyn.slowAtMin = 0;
     this.resize();
-    this.perfWindow = { time: 0, frames: 0, grace: 2 };
     const note = $('quality-note');
     if (note) note.textContent = this.settings.quality === 'auto' ? `Auto is currently using ${this.activeQuality} quality.` : '';
-  }
-
-  buildComposer() {
-    const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
-    const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
-    this.composer = new EffectComposer(this.renderer, rt);
-    this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.4, 0.5, 0.92);
-    this.composer.addPass(this.bloom);
-    this.composer.addPass(new OutputPass());
   }
 
   resize() {
     if (!this.renderer) return;
     const w = window.innerWidth;
     const h = window.innerHeight;
+    const pr = Math.min(window.devicePixelRatio || 1, this.q.maxPR);
+    this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.rig.fitOverhead(w / h);
-    if (this.composer) {
-      this.composer.setPixelRatio(this.renderer.getPixelRatio());
-      this.composer.setSize(w, h);
-    }
-    const sl = $('speedlines');
-    sl.width = w;
-    sl.height = h;
-    this.slCtx = sl.getContext('2d');
-    this.slClear = false;
+    const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    this.post.scale = this.dyn.scale;
+    this.post.setSize(size.x, size.y);
   }
 
   // ---------------------------------------------------------------- input
+  get relativeSteer() {
+    return this.cameraMode === 'fp' || this.cameraMode === 'tp';
+  }
+
   onDirection(dir, src) {
     if (this.state !== 'playing' && this.state !== 'countdown') return;
     let ok;
-    if (this.cameraMode === 'fp') {
-      // In first person, left/right steer relative to the snake; up/down do nothing.
+    if (this.relativeSteer) {
+      // In chase / first person, left/right steer relative to the snake.
       if (dir === 'left') ok = this.game.turn(-1);
       else if (dir === 'right') ok = this.game.turn(1);
       else if (src !== 'swipe') this.flashHint();
@@ -185,16 +204,13 @@ class App {
   }
 
   onTap(side) {
-    if (this.cameraMode === 'fp') this.onTurn(side === 'left' ? -1 : 1);
+    if (this.relativeSteer) this.onTurn(side === 'left' ? -1 : 1);
   }
 
   onConfirm(kind) {
+    this.unlockAudio();
     if (this.openPanel) return kind !== 'space' ? (this.closePanel(), true) : false;
-    if (this.state === 'menu') {
-      this.startGame();
-      return true;
-    }
-    if (this.state === 'over') {
+    if (this.state === 'menu' || this.state === 'over') {
       this.startGame();
       return true;
     }
@@ -205,7 +221,7 @@ class App {
     return false;
   }
 
-  onPause(key) {
+  onPause() {
     if (this.openPanel) {
       this.closePanel();
       return;
@@ -226,8 +242,15 @@ class App {
     this.toast(this.settings.muted ? 'Sound off' : 'Sound on');
   }
 
-  toggleCamera() {
-    this.setCamera(this.cameraMode === 'fp' ? 'overhead' : 'fp');
+  unlockAudio() {
+    const first = !this.audio.ctx;
+    this.audio.unlock();
+    if (first && this.audio.ctx && this.state === 'menu') this.audio.startMusic({ menu: true });
+  }
+
+  cycleCamera() {
+    const i = CAMERA_ORDER.indexOf(this.cameraMode);
+    this.setCamera(CAMERA_ORDER[(i + 1) % CAMERA_ORDER.length]);
   }
 
   setCamera(mode) {
@@ -236,7 +259,7 @@ class App {
     saveSettings(this.settings);
     if (['playing', 'paused', 'countdown'].includes(this.state)) {
       this.rig.setMode(mode, { reduceMotion: this.settings.reduceMotion });
-      if (mode === 'fp') this.flashHint();
+      if (this.relativeSteer) this.flashHint();
     }
     this.updateCameraUI();
     this.audio.ui();
@@ -251,27 +274,30 @@ class App {
 
   // ---------------------------------------------------------------- flow
   startGame() {
-    this.audio.unlock();
+    this.unlockAudio();
     this.audio.start();
-    this.audio.startMusic();
     this.timers = [];
     this.game.reset();
     this.game.wantRush = this.input.rushKeys.size > 0;
     this.t = 0;
     this.lunge = 0;
     this.deathFlash = 0;
-    this.food.orb.hide();
-    this.food.prism.hide();
+    this.food.hideAll();
+    this.board.clear();
     this.syncFood();
+    if (this.world.zone !== 0 || this.world.transitioning) this.world.setZone(0, { duration: 1.4 });
+    this.audio.setMusicState({ menu: false, zone: 0, level: 0, intensity: 0.1 });
+    this.audio.startMusic({ menu: false });
     this.showScreen(null);
     $('hud').classList.remove('hidden');
     this.rig.setMode(this.cameraMode, { reduceMotion: this.settings.reduceMotion });
     this.updateCameraUI();
     this.state = 'countdown';
-    this.countdown = this.settings.reduceMotion ? 0.8 : 1.1;
+    this.countdown = this.settings.reduceMotion ? 0.9 : 1.2;
     this.showCountdown('READY');
-    this.runStart = this.simTime;
-    if (this.cameraMode === 'fp') this.flashHint();
+    this.audio.countdown(false);
+    this.saidGo = false;
+    if (this.relativeSteer) this.flashHint();
   }
 
   pause() {
@@ -279,31 +305,35 @@ class App {
     this.prevState = this.state;
     this.state = 'paused';
     this.showScreen('screen-pause');
-    this.audio.stopMusic();
+    this.audio.setPaused(true);
     $('countdown').classList.add('hidden');
   }
 
   resume() {
     if (this.state !== 'paused') return;
-    this.audio.unlock();
-    this.audio.startMusic();
+    this.unlockAudio();
+    this.audio.setPaused(false);
     this.showScreen(null);
     this.state = 'countdown';
     this.countdown = 0.6;
+    this.saidGo = false;
     this.showCountdown('GO');
   }
 
   toMenu() {
     this.state = 'menu';
-    this.audio.stopMusic();
+    this.audio.setPaused(false);
+    this.audio.setMusicState({ menu: true, zone: 0, intensity: 0 });
+    this.audio.startMusic({ menu: true });
     this.timers = [];
     this.game.reset();
     this.t = 0;
     this.lunge = 0;
     this.deathFlash = 0;
-    this.food.orb.hide();
-    this.food.prism.hide();
+    this.food.hideAll();
+    this.board.clear();
     this.syncFood();
+    if (this.world.zone !== 0 || this.world.transitioning) this.world.setZone(0, { duration: 1.4 });
     $('hud').classList.add('hidden');
     this.rig.setMode('orbit', { reduceMotion: this.settings.reduceMotion });
     this.showScreen('screen-start');
@@ -320,18 +350,117 @@ class App {
     this.timers.push({ at: this.simTime + seconds, fn });
   }
 
+  // Delay from a logical event to the drawn head reaching that cell.
+  visualDelay() {
+    return (0.75 * this.game.currentInterval()) / 1000;
+  }
+
   // ---------------------------------------------------------------- game events
   tick() {
     const g = this.game;
     const wasRushing = g.rushing;
     const ev = g.step();
-    if (ev.ate) this.onEat(ev.ate);
-    if (ev.bonusSpawned) {
-      this.toast('A prism appeared! Grab it fast');
-    }
+    const delay = this.visualDelay();
+    const rm = this.settings.reduceMotion;
+    const at = (c) => this.toWorld(c.x, c.z);
+
+    if (ev.ate) this.onEat(ev.ate, ev.levelUp);
+    if (ev.bonusSpawned) this.toast('A prism appeared! Grab it fast');
     if (ev.bonusExpired) {
-      const w = this.toWorld(ev.bonusExpired.x, ev.bonusExpired.z);
+      const w = at(ev.bonusExpired);
       this.effects.emit(w.x, 0.5, w.z, { count: 20, color: '#c77dff', speed: 1.5, up: 1, life: 0.6 });
+    }
+    if (ev.chainSpawned) {
+      this.toast('Orb chain! Eat them in order');
+      this.audio.chainLink(0);
+      for (const l of ev.chainSpawned.links) {
+        const w = at(l);
+        this.effects.emit(w.x, 0.4, w.z, { count: 10, color: '#38f6ff', speed: 1.2, up: 2, size: 0.18, life: 0.6 });
+      }
+    }
+    if (ev.chainLink) {
+      const c = ev.chainLink;
+      this.later(delay, () => {
+        const w = at(c);
+        this.effects.emit(w.x, 0.5, w.z, { count: 26, color: '#38f6ff', speed: 3, up: 2.2, size: 0.22 });
+        this.effects.shockwave(w.x, w.z, '#38f6ff', { max: 2.2, dur: 0.4 });
+        this.popup(new THREE.Vector3(w.x, 0, w.z), `+${c.points}  ${c.index + 1}/${c.of}`, 'chain');
+        this.audio.chainLink(c.index + 1);
+      });
+    }
+    if (ev.chainComplete) {
+      const c = ev.chainComplete;
+      this.later(delay + 0.05, () => {
+        const w = at(c);
+        this.popup(new THREE.Vector3(w.x, 0.6, w.z), `CHAIN! +${c.bonus}`, 'chain big');
+        this.effects.emit(w.x, 0.6, w.z, { count: 80, color: '#7ff8ff', speed: 5, up: 3, size: 0.3 });
+        this.effects.shockwave(w.x, w.z, '#38f6ff', { max: 6, dur: 0.7 });
+        this.audio.chainComplete();
+        this.banner('Rush full!');
+        if (!rm) {
+          this.flash(0.22, '#9ff8ff');
+          this.rig.kick += 6;
+        }
+      });
+    }
+    if (ev.chainBroken) {
+      this.toast('Chain broken: wrong order');
+      this.audio.chainBroken();
+    }
+    if (ev.chainExpired) this.toast('The orb chain faded');
+    if (ev.preySpawned) {
+      this.toast('A golden mouse! Catch it');
+      this.audio.preySpotted();
+      const w = at(ev.preySpawned);
+      this.effects.emit(w.x, 0.2, w.z, { count: 24, color: '#d8c49a', speed: 1.6, up: 1.5, size: 0.2, life: 0.7 });
+    }
+    if (ev.caught) {
+      const c = ev.caught;
+      this.later(delay, () => {
+        const w = at(c);
+        this.popup(new THREE.Vector3(w.x, 0, w.z), `+${c.points}${c.combo > 1 ? ` x${c.combo}` : ''}`, 'prey');
+        this.effects.emit(w.x, 0.4, w.z, { count: 60, color: '#ffd36a', speed: 4, up: 3, size: 0.28 });
+        this.effects.shockwave(w.x, w.z, '#ffd36a', { max: 4, dur: 0.55 });
+        this.audio.preyCaught();
+        if (!rm) {
+          this.flash(0.15, '#fff2b0');
+          this.rig.kick += 4;
+        }
+      });
+    }
+    if (ev.preyEscaped) {
+      this.toast('The mouse got away');
+      this.audio.preyEscaped();
+      const w = at(ev.preyEscaped);
+      this.effects.emit(w.x, 0.15, w.z, { count: 30, color: '#b8a888', speed: 2, up: 1.2, size: 0.22, life: 0.6 });
+    }
+    if (ev.boost) {
+      this.later(delay * 0.8, () => {
+        const w = at(ev.boost);
+        this.audio.boost();
+        this.popup(new THREE.Vector3(w.x, 0, w.z), 'BOOST!', 'boost');
+        this.effects.emit(w.x, 0.2, w.z, { count: 40, color: '#ffb020', speed: 3.5, up: 1.2, size: 0.24, life: 0.5 });
+        if (!rm) this.rig.kick += 8;
+      });
+    }
+    if (ev.obstaclesWarned) {
+      this.audio.obstacleWarn();
+      this.toast('Pillars rising! Watch the red rings');
+    }
+    if (ev.obstaclesRaised) {
+      this.audio.obstacleRise();
+      for (const o of ev.obstaclesRaised) {
+        const w = at(o);
+        this.effects.emit(w.x, 0.1, w.z, { count: 26, color: '#c8b8a0', speed: 2.4, up: 1.6, size: 0.24, life: 0.6 });
+        this.effects.shockwave(w.x, w.z, '#ff8a5c', { max: 1.6, dur: 0.35 });
+      }
+      if (!rm) this.rig.shake += 0.08;
+    }
+    if (ev.padsSpawned) {
+      for (const p of ev.padsSpawned) {
+        const w = at(p);
+        this.effects.emit(w.x, 0.1, w.z, { count: 14, color: '#ffd23f', speed: 1.2, up: 1.4, size: 0.18, life: 0.5 });
+      }
     }
     if (ev.died) {
       this.onDeath(ev);
@@ -348,19 +477,17 @@ class App {
     this.food.sync(this.game, this.toWorld);
   }
 
-  onEat(ate) {
+  onEat(ate, levelUp) {
     const g = this.game;
     const w = this.toWorld(ate.x, ate.z);
     const pos = new THREE.Vector3(w.x, 0, w.z);
-    // The logical head is a step ahead of the drawn head; play the pickup
-    // effects when the drawn head actually reaches the food.
-    const delay = (0.75 * g.currentInterval()) / 1000;
+    const delay = this.visualDelay();
     this.food.markEaten(ate.type, pos, delay);
     const prism = ate.type === 'prism';
     this.later(delay, () => {
       const rm = this.settings.reduceMotion;
       this.effects.emit(w.x, 0.45, w.z, {
-        count: prism ? 70 : 36,
+        count: prism ? 70 : 34,
         color: prism ? '#e0aaff' : '#ffd060',
         speed: prism ? 4.5 : 3.2,
         up: 2.4,
@@ -369,12 +496,13 @@ class App {
       this.effects.emit(w.x, 0.45, w.z, { count: 14, color: '#ffffff', speed: 1.5, up: 3.5, size: 0.14, life: 0.5 });
       this.effects.shockwave(w.x, w.z, prism ? '#c77dff' : '#ffcf4a', { max: prism ? 4.5 : 2.6 });
       this.popup(pos, `+${ate.points}${ate.combo > 1 ? ` x${ate.combo}` : ''}`, prism ? 'prism' : '');
+      const v = pos.clone().project(this.camera);
       if (prism) {
         this.audio.prism();
-        if (!rm) this.flash(0.25);
-      } else this.audio.eat(ate.combo);
+        if (!rm) this.flash(0.22, '#f0d8ff');
+      } else this.audio.eat(ate.combo, THREE.MathUtils.clamp(v.x, -0.8, 0.8));
       if (!rm) this.rig.kick += prism ? 5 : 2.5;
-      if (this.cameraMode === 'overhead') this.rig.shake += prism ? 0.08 : 0.03;
+      if (this.cameraMode !== 'fp') this.rig.shake += prism ? 0.08 : 0.03;
     });
     if (ate.combo > 1) {
       const el = $('hud-combo');
@@ -382,12 +510,26 @@ class App {
       void el.offsetWidth;
       el.classList.add('pop');
     }
-    if (ate.levelUp) {
-      this.later(delay, () => {
-        this.audio.levelUp();
-        this.toast(`Speed level ${g.level + 1}!`);
-      });
-      this.audio.setIntensity(g.level);
+    if (levelUp) {
+      this.later(delay, () => this.onLevelUp(levelUp));
+    }
+  }
+
+  onLevelUp(lu) {
+    const hp = this.snake.headPos;
+    this.world.pulse(hp.x, hp.z);
+    if (lu.zoneUp) {
+      this.world.setZone(lu.zone);
+      this.audio.zoneUp();
+      this.titleCard(lu.zone);
+      if (!this.settings.reduceMotion) {
+        this.flash(0.35, '#ffffff');
+        this.rig.kick += 10;
+      }
+    } else {
+      this.audio.levelUp();
+      this.banner(lu.level >= MAX_LEVEL ? 'Max speed!' : 'Speed up!');
+      if (!this.settings.reduceMotion) this.rig.kick += 4;
     }
   }
 
@@ -397,7 +539,7 @@ class App {
     this.t = 1; // the failed move never happened: hold the last pose
     this.dyingTime = 0;
     this.audio.death();
-    this.audio.stopMusic();
+    this.audio.stopMusic({ fade: 1.0 });
     saveBest(g.best);
     const hp = this.snake.headPos;
     const won = ev.cause === 'win';
@@ -412,30 +554,52 @@ class App {
       this.effects.shockwave(hp.x, hp.z, won ? '#7dffb0' : '#ff3b5c', { max: 5, dur: 0.6 });
       this.deathFlash = 1;
       if (!this.settings.reduceMotion) {
-        this.flash(0.18);
+        this.flash(0.25, won ? '#ffffff' : '#ff8090');
         this.rig.shake += 0.25;
       }
     });
     // Pull back to the overhead view so the player can see what happened.
-    if (this.cameraMode === 'fp') this.later(0.55, () => this.rig.setMode('overhead', { reduceMotion: this.settings.reduceMotion }));
+    if (this.cameraMode !== 'overhead') this.later(0.55, () => this.rig.setMode('overhead', { reduceMotion: this.settings.reduceMotion }));
     this.later(1.25, () => this.showGameOver(ev.cause));
+  }
+
+  rank(score) {
+    return score >= 6000 ? 'S' : score >= 3000 ? 'A' : score >= 1400 ? 'B' : score >= 500 ? 'C' : 'D';
   }
 
   showGameOver(cause) {
     const g = this.game;
     this.state = 'over';
+    this.audio.gameOver();
     $('over-title').textContent = cause === 'win' ? 'Perfect board!' : 'Wipeout!';
-    $('over-cause').textContent =
-      cause === 'wall' ? 'You crashed into the wall.' : cause === 'body' ? 'You ran into your own body.' : 'You filled the entire board!';
+    $('over-cause').textContent = {
+      wall: 'You crashed into the wall.',
+      body: 'You ran into your own body.',
+      obstacle: 'You smashed into a pillar.',
+      win: 'You filled the entire board!',
+    }[cause];
+    const rank = this.rank(g.score);
+    const rk = $('over-rank');
+    rk.textContent = rank;
+    rk.className = `rank ${rank}`;
     $('over-score').textContent = g.score.toLocaleString();
     $('over-best').textContent = g.best.toLocaleString();
     $('over-length').textContent = g.cells.length;
     $('over-combo').textContent = `x${g.maxCombo}`;
-    $('over-time').textContent = `${Math.round(g.time / 1000)}s`;
+    $('over-time').textContent = this.formatTime(g.time);
+    $('over-zone').textContent = String(g.zone + 1);
+    $('over-chains').textContent = String(g.stats.chains);
+    $('over-prey').textContent = String(g.stats.prey);
+    $('over-pads').textContent = String(g.stats.pads);
     $('over-newbest').classList.toggle('hidden', !(g.newBest && g.score > 0));
     $('start-best').textContent = g.best.toLocaleString();
     this.showScreen('screen-over');
     $('btn-again').focus({ preventScroll: true });
+  }
+
+  formatTime(ms) {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   }
 
   // ---------------------------------------------------------------- UI
@@ -447,13 +611,12 @@ class App {
     $('btn-menu-p').addEventListener('click', () => this.toMenu());
     $('btn-menu-o').addEventListener('click', () => this.toMenu());
     $('btn-pause').addEventListener('click', () => this.onPause());
-    $('btn-cam').addEventListener('click', () => this.toggleCamera());
+    $('btn-cam').addEventListener('click', () => this.cycleCamera());
     document.querySelectorAll('.cam-select .seg').forEach((b) => b.addEventListener('click', () => this.setCamera(b.dataset.cam)));
     document.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => this.openPanelById(`panel-${b.dataset.open}`)));
     document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => this.closePanel()));
     $('start-best').textContent = this.game.best.toLocaleString();
 
-    // settings
     const s = this.settings;
     const qBtns = document.querySelectorAll('#set-quality .seg');
     const markQ = () => qBtns.forEach((b) => b.classList.toggle('active', b.dataset.v === s.quality));
@@ -489,7 +652,7 @@ class App {
         saveSettings(s);
       });
       el.addEventListener('change', () => {
-        this.audio.unlock();
+        this.unlockAudio();
         if (key === 'sfx') this.audio.eat(1);
       });
     };
@@ -498,8 +661,10 @@ class App {
     $('fps').classList.toggle('hidden', !s.showFps);
     this.applyMotion();
 
-    // first click anywhere unlocks audio
-    window.addEventListener('pointerdown', () => this.audio.unlock(), { once: true });
+    // first interaction anywhere unlocks audio (and starts the menu music)
+    const unlock = () => this.unlockAudio();
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
   }
 
   applyMotion() {
@@ -539,21 +704,38 @@ class App {
     el.textContent = text;
     el.classList.add('show');
     clearTimeout(this.toastTimer);
-    this.toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+    this.toastTimer = setTimeout(() => el.classList.remove('show'), 1900);
   }
 
-  flash(amount) {
-    const el = $('flash');
-    el.style.transition = 'none';
-    el.style.opacity = amount;
+  banner(text) {
+    const el = $('banner');
+    $('banner-text').textContent = text;
+    el.classList.add('hidden');
     void el.offsetWidth;
-    el.style.transition = 'opacity 0.35s ease-out';
-    el.style.opacity = 0;
+    el.classList.remove('hidden');
+    clearTimeout(this.bannerTimer);
+    this.bannerTimer = setTimeout(() => el.classList.add('hidden'), 1550);
+  }
+
+  titleCard(zone) {
+    const el = $('titlecard');
+    $('tc-zone').textContent = `Zone ${zone + 1}`;
+    $('tc-name').textContent = ZONE_NAMES[zone];
+    el.classList.add('hidden');
+    void el.offsetWidth;
+    el.classList.remove('hidden');
+    clearTimeout(this.tcTimer);
+    this.tcTimer = setTimeout(() => el.classList.add('hidden'), 2850);
+  }
+
+  flash(amount, color = '#ffffff') {
+    this.flashAmt = Math.max(this.flashAmt, amount);
+    this.flashColor.set(color);
   }
 
   popup(pos, text, cls) {
     const v = pos.clone().setY(0.9).project(this.camera);
-    if (v.z > 1) return;
+    if (v.z > 1 || Math.abs(v.x) > 1.1 || Math.abs(v.y) > 1.1) return;
     const el = document.createElement('div');
     el.className = `popup ${cls}`;
     el.textContent = text;
@@ -569,85 +751,111 @@ class App {
     $(id).textContent = value;
   }
 
+  setClass(el, cls, on) {
+    const k = `${el.id || el.className}:${cls}`;
+    if (this.lastHud[k] === on) return;
+    this.lastHud[k] = on;
+    el.classList.toggle(cls, on);
+  }
+
+  setStyle(id, prop, value) {
+    const k = `${id}.${prop}`;
+    if (this.lastHud[k] === value) return;
+    this.lastHud[k] = value;
+    $(id).style[prop] = value;
+  }
+
   updateHud() {
     const g = this.game;
     this.setText('hud-score', g.score.toLocaleString());
     this.setText('hud-best', g.best.toLocaleString());
     this.setText('hud-length', String(g.cells.length));
+    this.setText('hud-time', this.formatTime(g.time));
     this.setText('hud-level', String(g.level + 1));
-    $('hud-rush').style.width = `${g.rush}%`;
-    document.querySelector('.rush').classList.toggle('active', g.rushing);
+    this.setText('hud-zone', ZONE_NAMES[g.zone]);
+    this.setStyle('hud-rush', 'transform', `scaleX(${(g.rush / 100).toFixed(3)})`);
+    const rushEl = $('hud-rush-wrap');
+    this.setClass(rushEl, 'active', g.rushing);
+    this.setClass(rushEl, 'full', g.rush >= 99.9);
+    this.setClass($('hud-boost'), 'hidden', !g.boosting);
     const comboLeft = 1 - (g.time - g.lastEatTime) / COMBO_WINDOW_MS;
     const showCombo = g.combo > 1 && comboLeft > 0 && this.state !== 'over';
-    $('hud-combo').classList.toggle('hidden', !showCombo);
+    this.setClass($('hud-combo'), 'hidden', !showCombo);
     if (showCombo) {
       this.setText('hud-combo-x', `x${g.combo}`);
-      $('hud-combo-bar').style.width = `${Math.max(0, comboLeft) * 100}%`;
+      this.setStyle('hud-combo-bar', 'transform', `scaleX(${Math.max(0, comboLeft).toFixed(2)})`);
     }
-    const fp = this.cameraMode === 'fp' && this.rig.mode === 'fp' && (this.state === 'playing' || this.state === 'countdown' || this.state === 'paused');
-    document.getElementById('app').classList.toggle('fp-active', fp);
-    const aids = fp && this.settings.minimap;
-    $('compass').classList.toggle('hidden', !aids);
-    $('minimap').classList.toggle('hidden', !aids);
+    // chain tracker
+    const ch = g.chain;
+    this.setClass($('hud-chain'), 'hidden', !ch);
+    if (ch) {
+      const key = `${ch.id}:${ch.next}`;
+      if (this.lastChainKey !== key) {
+        this.lastChainKey = key;
+        $('hud-chain-dots').innerHTML = ch.links.map((_, i) => `<i class="${i < ch.next ? 'done' : i === ch.next ? 'next' : ''}"></i>`).join('');
+      }
+      const left = Math.max(0, (ch.expires - g.time) / 1000);
+      this.setText('hud-chain-time', `${left.toFixed(1)}s`);
+      this.setClass($('hud-chain'), 'urgent', left < 3);
+    }
+
+    const view = this.relativeSteer && (this.rig.mode === 'fp' || this.rig.mode === 'tp') && (this.state === 'playing' || this.state === 'countdown' || this.state === 'paused');
+    this.setClass($('app'), 'view-aids', view && this.settings.minimap);
+    const aids = view && this.settings.minimap;
+    this.setClass($('compass'), 'hidden', !aids);
+    this.setClass($('minimap'), 'hidden', !aids);
     if (aids) {
       this.updateCompass();
       this.drawMinimap();
     }
     const showTouch = this.isTouch && (this.state === 'playing' || this.state === 'countdown');
-    $('touch').classList.toggle('hidden', !showTouch);
-    $('touch').classList.toggle('overhead', this.cameraMode !== 'fp');
-    if (this.state !== 'playing' && this.state !== 'countdown') $('fp-hint').classList.add('hidden');
-
-    // danger vignette in first person when the next cell ahead is fatal
-    let danger = 0;
-    if (fp && this.state === 'playing') {
-      const look = g.lookAhead(3);
-      if (look.blocked && look.free === 0) danger = 0.55 + 0.25 * Math.sin(this.simTime * 18);
-      else if (look.blocked && look.free === 1) danger = 0.22;
-    }
-    $('vignette').style.opacity = danger;
+    this.setClass($('touch'), 'hidden', !showTouch);
+    this.setClass($('touch'), 'overhead', !this.relativeSteer);
+    if (this.state !== 'playing' && this.state !== 'countdown') this.setClass($('fp-hint'), 'hidden', true);
+    else this.lastHud['fp-hint:hidden'] = undefined;
   }
 
-  fpForward() {
-    const yaw = this.rig.fpYaw ?? Math.atan2(this.snake.headDir.x, this.snake.headDir.z);
+  viewForward() {
+    const yaw = this.rig.viewYaw() ?? Math.atan2(this.snake.headDir.x, this.snake.headDir.z);
     return { x: Math.sin(yaw), z: Math.cos(yaw) };
   }
 
   updateCompass() {
     const g = this.game;
-    const f = this.fpForward();
+    const f = this.viewForward();
     const hp = this.snake.headPos;
-    const aim = (food, needle) => {
-      if (!food) {
-        needle.classList.add('hidden');
+    const aim = (target, needle) => {
+      if (!target) {
+        this.setClass(needle, 'hidden', true);
         return null;
       }
-      needle.classList.remove('hidden');
-      const w = this.toWorld(food.x, food.z);
+      this.setClass(needle, 'hidden', false);
+      const w = this.toWorld(target.x, target.z);
       const vx = w.x - hp.x;
       const vz = w.z - hp.z;
       const rel = Math.atan2(f.x * vz - f.z * vx, f.x * vx + f.z * vz);
-      needle.style.transform = `rotate(${rel}rad)`;
-      return Math.abs(food.x - g.head.x) + Math.abs(food.z - g.head.z);
+      needle.style.transform = `rotate(${rel.toFixed(3)}rad)`;
+      return Math.abs(target.x - g.head.x) + Math.abs(target.z - g.head.z);
     };
     const d = aim(g.food, $('needle-orb'));
     aim(g.bonus, $('needle-prism'));
+    aim(g.prey, $('needle-prey'));
     this.setText('compass-text', d == null ? '' : String(d));
   }
 
   drawMinimap() {
-    const c = $('minimap').getContext('2d');
+    const c = this.mmCtx || (this.mmCtx = $('minimap').getContext('2d'));
     const W = c.canvas.width;
     const g = this.game;
     c.clearRect(0, 0, W, W);
-    const f = this.fpForward();
+    const f = this.viewForward();
     const a = Math.atan2(f.x, -f.z);
     const cell = W / (BOARD * 1.45);
     const o = (BOARD - 1) / 2;
     c.save();
     c.translate(W / 2, W / 2);
     c.rotate(-a);
-    c.fillStyle = 'rgba(120, 210, 120, 0.25)';
+    c.fillStyle = 'rgba(120, 210, 120, 0.22)';
     c.strokeStyle = 'rgba(56, 246, 255, 0.9)';
     c.lineWidth = 2;
     c.fillRect((-BOARD / 2) * cell, (-BOARD / 2) * cell, BOARD * cell, BOARD * cell);
@@ -658,13 +866,20 @@ class App {
       c.arc((x - o) * cell, (z - o) * cell, cell * r, 0, Math.PI * 2);
       c.fill();
     };
+    const sq = (x, z, color) => {
+      c.fillStyle = color;
+      c.fillRect((x - o - 0.45) * cell, (z - o - 0.45) * cell, cell * 0.9, cell * 0.9);
+    };
+    for (const ob of g.obstacles) sq(ob.x, ob.z, ob.solid ? '#d8d0c0' : 'rgba(255, 60, 90, 0.7)');
+    for (const p of g.pads) dot(p.x, p.z, '#ff8a2a', 0.6);
+    if (g.chain) for (let i = g.chain.next; i < g.chain.links.length; i++) dot(g.chain.links[i].x, g.chain.links[i].z, '#38f6ff', i === g.chain.next ? 0.75 : 0.5);
     if (g.food) dot(g.food.x, g.food.z, '#ffcf4a', 0.75);
     if (g.bonus) dot(g.bonus.x, g.bonus.z, '#d9a3ff', 0.8);
+    if (g.prey) dot(g.prey.x, g.prey.z, '#fff2b0', 0.7);
     for (let i = g.cells.length - 1; i >= 1; i--) dot(g.cells[i].x, g.cells[i].z, '#17c3b2', 0.48);
     dot(g.head.x, g.head.z, '#ffffff', 0.62);
     c.restore();
-    // heading marker
-    c.fillStyle = 'rgba(255,255,255,0.8)';
+    c.fillStyle = 'rgba(255,255,255,0.85)';
     c.beginPath();
     c.moveTo(W / 2, 6);
     c.lineTo(W / 2 - 5, 14);
@@ -672,45 +887,12 @@ class App {
     c.fill();
   }
 
-  drawSpeedLines(intensity) {
-    const ctx = this.slCtx;
-    const w = ctx.canvas.width;
-    const h = ctx.canvas.height;
-    if (intensity < 0.04) {
-      if (!this.slClear) {
-        ctx.clearRect(0, 0, w, h);
-        this.slClear = true;
-      }
-      return;
-    }
-    this.slClear = false;
-    ctx.clearRect(0, 0, w, h);
-    const fp = this.rig.mode === 'fp';
-    const cx = w / 2;
-    const cy = fp ? h * 0.46 : h / 2;
-    const maxR = Math.hypot(w, h) / 2;
-    const n = Math.floor((fp ? 46 : 26) * intensity);
-    ctx.lineCap = 'round';
-    for (let i = 0; i < n; i++) {
-      const ang = Math.random() * Math.PI * 2;
-      const r0 = (0.55 + Math.random() * 0.4) * maxR;
-      const len = (0.08 + Math.random() * 0.22) * maxR * intensity;
-      const c = Math.cos(ang);
-      const s = Math.sin(ang);
-      ctx.strokeStyle = `rgba(255,255,255,${Math.min(0.55, (0.2 + Math.random() * 0.4) * intensity)})`;
-      ctx.lineWidth = 1 + Math.random() * 2.5;
-      ctx.beginPath();
-      ctx.moveTo(cx + c * r0, cy + s * r0);
-      ctx.lineTo(cx + c * (r0 + len), cy + s * (r0 + len));
-      ctx.stroke();
-    }
-  }
-
   // ---------------------------------------------------------------- loop
   frame(now) {
     const rawDt = Math.max(0, (now - this.last) / 1000);
     const dt = Math.min(0.1, rawDt);
     this.last = now;
+    this.renderer.info.reset();
     this.input.pollGamepad();
     const g = this.game;
     const rm = this.settings.reduceMotion;
@@ -727,7 +909,11 @@ class App {
 
     if (this.state === 'countdown') {
       this.countdown -= dt;
-      if (this.countdown <= 0.45 && $('countdown').textContent !== 'GO!') this.showCountdown('GO!');
+      if (this.countdown <= 0.45 && !this.saidGo) {
+        this.saidGo = true;
+        this.showCountdown('GO!');
+        this.audio.countdown(true);
+      }
       if (this.countdown <= 0) {
         this.state = 'playing';
         setTimeout(() => {
@@ -752,72 +938,133 @@ class App {
     }
     this.deathFlash = Math.max(0, this.deathFlash - dt * 1.2);
 
+    const fast = g.rushing || g.boosting;
     const targetFx = this.state === 'playing' ? g.intensity() : 0;
     this.speedFx += (targetFx - this.speedFx) * Math.min(1, dt * 3);
-    this.rushGlow += ((g.rushing && this.state === 'playing' ? 1 : 0) - this.rushGlow) * Math.min(1, dt * 8);
+    this.rushGlow += ((fast && this.state === 'playing' ? 1 : 0) - this.rushGlow) * Math.min(1, dt * 8);
 
-    this.snake.update(g, Math.min(1, Math.max(0, this.t)), this.simTime, this.toWorld, {
+    this.snake.update(g, clamp01(this.t), this.simTime, this.toWorld, {
       lunge: this.lunge,
       rushGlow: this.rushGlow,
       deathFlash: this.deathFlash,
     });
-    if (g.rushing && this.state === 'playing' && Math.random() < 0.7) {
+    this.snake.setRim(this.world.p.rimColor, 0.35 + this.world.p.rimIntensity * 0.25);
+    if (fast && this.state === 'playing' && Math.random() < 0.8) {
       const hp = this.snake.headPos;
-      this.effects.emit(hp.x - this.snake.headDir.x * 0.5, 0.35, hp.z - this.snake.headDir.z * 0.5, {
-        count: 2, color: '#5ff6ff', speed: 0.6, up: 0.6, size: 0.18, life: 0.45, gravity: 0, spread: 0.5,
+      const hd = this.snake.headDir;
+      this.effects.emit(hp.x - hd.x * 0.5, 0.3, hp.z - hd.z * 0.5, {
+        count: 2, color: g.boosting ? '#ffb020' : '#5ff6ff', speed: 0.6, up: 0.6, size: 0.18, life: 0.45, gravity: 0, spread: 0.5,
       });
     }
 
-    this.food.update(dt, this.simTime, { reduceMotion: rm, lights: this.q.foodLights, beam: this.cameraMode === 'fp' });
+    const view = this.rig.mode === 'fp' || this.rig.mode === 'tp';
+    this.food.update(dt, this.simTime, { reduceMotion: rm, beam: view });
     this.syncFood();
+    const headingYaw = Math.atan2(this.snake.headDir.x, this.snake.headDir.z);
+    this.board.applyPalette(this.world.p);
+    this.board.sync(g, this.toWorld, dt, this.simTime, headingYaw);
     const playing = this.state === 'playing' || this.state === 'countdown' || this.state === 'paused';
-    this.effects.updateGuide(g, this.toWorld, playing && this.settings.guide && this.rig.mode === 'fp');
+    this.effects.updateGuide(g, this.toWorld, playing && this.settings.guide && view);
     this.effects.update(dt);
-    this.world.update(dt, g.level, rm);
+    const rs = this.post.renderSize;
+    const pxScale = rs.y / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
+    this.world.update(dt, { level: this.state === 'menu' ? 0 : g.level, reduceMotion: rm, pxScale });
     this.world.updateWalls(g, dt, this.state === 'playing');
     this.rig.update(dt, this.snake, { speedFx: this.speedFx, reduceMotion: rm });
     // The first-person camera sits inside the head; hide it once we're there.
     this.snake.head.visible = !(this.rig.mode === 'fp' && this.rig.blend > 0.85);
+    this.effects.uniforms.scale.value = pxScale;
 
-    // particle size in pixels
-    const px = this.renderer.getDrawingBufferSize(this.tmpV2 || (this.tmpV2 = new THREE.Vector2())).y;
-    this.effects.uniforms.scale.value = px / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
+    // music follows the action
+    const inGame = this.state === 'playing' || this.state === 'countdown' || this.state === 'paused';
+    const intensity = clamp01(0.12 + (g.level / MAX_LEVEL) * 0.6 + ((g.combo - 1) / 7) * 0.2 + (fast ? 0.15 : 0));
+    this.audio.setMusicState({ menu: !inGame && this.state !== 'dying' && this.state !== 'over', intensity, rush: fast && this.state === 'playing', zone: this.state === 'menu' ? 0 : g.zone, level: g.level });
 
-    if (this.bloom) this.bloom.strength = 0.38 + this.rushGlow * 0.2;
-    if (this.q.bloom && this.composer) this.composer.render();
-    else this.renderer.render(this.scene, this.camera);
-
-    this.drawSpeedLines(rm ? 0 : Math.max(0, this.speedFx - 0.15) * 1.2);
+    this.renderFrame(dt, view, rm);
     if (this.state !== 'menu') this.updateHud();
     this.measure(rawDt);
   }
 
+  renderFrame(dt, view, rm) {
+    const P = this.post.params;
+    const pp = this.world.postParams();
+    this.flashAmt = Math.max(0, this.flashAmt - dt * 2.6);
+    let danger = 0;
+    const g = this.game;
+    if (view && this.state === 'playing') {
+      const look = g.lookAhead(3);
+      if (look.blocked && look.free === 0) danger = 0.42 + 0.2 * Math.sin(this.simTime * 18);
+      else if (look.blocked && look.free === 1) danger = 0.16;
+    }
+    const speed = rm ? 0 : Math.max(0, this.speedFx - 0.25) * (view ? 1.3 : 0.45) + this.rushGlow * (view ? 0.5 : 0.15);
+    const trans = this.world.transitioning ? 0.5 : 0;
+    P.uBloom.value = pp.bloom + this.rushGlow * 0.18 + this.flashAmt * 0.5;
+    P.uSat.value = pp.sat;
+    P.uContrast.value = pp.contrast;
+    P.uTint.value.copy(pp.tint);
+    P.uLift.value.copy(pp.lift);
+    P.uVignette.value = pp.vignette + this.rushGlow * 0.1;
+    P.uSpeed.value = speed;
+    P.uLines.value = rm ? 0 : Math.max(0, this.speedFx - 0.2) * (view ? 1.2 : 0.5) + this.rushGlow * 0.6;
+    P.uChroma.value = rm ? 0 : this.rushGlow * 0.7 + trans;
+    P.uDanger.value = danger;
+    P.uFlash.value = Math.min(0.6, this.flashAmt);
+    P.uFlashColor.value.copy(this.flashColor);
+    P.uTime.value = this.simTime;
+    P.uCenter.value.set(0.5, view ? 0.56 : 0.5);
+    this.renderer.toneMappingExposure = pp.exposure;
+    this.post.render(this.scene, this.camera, { threshold: pp.threshold });
+  }
+
+  // Frame-time driven resolution scaling, then quality stepping (Auto only).
   measure(dt) {
     this.fpsFrames++;
     this.fpsTime += dt;
     if (this.fpsTime >= 0.5) {
       this.fps = this.fpsFrames / this.fpsTime;
-      if (this.settings.showFps) $('fps').textContent = `${Math.round(this.fps)} fps · ${this.activeQuality}`;
+      if (this.settings.showFps) {
+        const i = this.renderer.info.render;
+        $('fps').textContent = `${Math.round(this.fps)} fps · ${this.activeQuality} · ${Math.round(this.post.scale * 100)}% · ${i.calls} draws`;
+      }
       this.fpsFrames = 0;
       this.fpsTime = 0;
     }
-    // Auto quality: step down if the game can't hold a smooth frame rate.
-    if (this.settings.quality !== 'auto' || this.state !== 'playing') return;
-    const p = this.perfWindow;
-    if (p.grace > 0) {
-      p.grace -= dt;
+    if (this.settings.fixedResolution) return;
+    const d = this.dyn;
+    if (d.grace > 0) {
+      d.grace -= dt;
+      d.samples.length = 0;
       return;
     }
-    p.time += dt;
-    p.frames++;
-    if (p.time >= 3) {
-      const fps = p.frames / p.time;
-      p.time = 0;
-      p.frames = 0;
-      if (fps < 45 && this.activeQuality !== 'low') {
+    d.samples.push(dt * 1000);
+    d.timer += dt;
+    if (d.timer < 1) return;
+    d.timer = 0;
+    const s = d.samples.sort((a, b) => a - b);
+    const p80 = s[Math.floor(s.length * 0.8)];
+    d.samples.length = 0;
+    const q = this.q;
+    const nowT = this.simTime;
+    if (p80 > 19.5) {
+      d.good = 0;
+      if (nowT - d.lastUp < 3) d.backoff = Math.min(16, d.backoff * 2);
+      if (d.scale > q.minScale + 1e-3) {
+        d.scale = Math.max(q.minScale, d.scale * 0.85);
+        this.post.setScale(d.scale);
+        d.grace = 0.5;
+      } else if (this.settings.quality === 'auto' && this.activeQuality !== 'low' && ++d.slowAtMin >= 3) {
         this.activeQuality = this.activeQuality === 'high' ? 'medium' : 'low';
         this.applyQuality();
-        this.toast(`Graphics set to ${this.activeQuality} for smoother play`);
+        if (this.state === 'playing') this.toast(`Graphics set to ${this.activeQuality} for smoother play`);
+      }
+    } else if (p80 < 17.8) {
+      d.slowAtMin = 0;
+      if (d.scale < 1 && ++d.good >= 3 * d.backoff) {
+        d.good = 0;
+        d.scale = Math.min(1, d.scale * 1.1);
+        d.lastUp = nowT;
+        this.post.setScale(d.scale);
+        d.grace = 0.5;
       }
     }
   }

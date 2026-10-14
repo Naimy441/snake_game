@@ -82,15 +82,33 @@ await shot('03-paused');
 await page.keyboard.press('KeyP');
 await waitState('playing');
 
-// --- switch to first person mid-game: same game state continues
+// --- C cycles overhead -> chase -> first person; the game state carries over
+// (an autopilot keeps the snake off the walls while the slow software renderer takes screenshots)
+const pilot = (on) => page.evaluate((on) => {
+  clearInterval(window.__camPilot);
+  if (!on) return;
+  const g = window.__coil.game;
+  window.__camPilot = setInterval(() => { const l = g.lookAhead(3); if (l.blocked && l.free < 3 && !g.queue.length) { if (!g.turn(1)) g.turn(-1); } }, 15);
+}, on);
+await pilot(true);
 const before = await state();
 await page.keyboard.press('KeyC');
 await page.waitForFunction(() => window.__coil.rig.blend >= 1, null, { timeout: 10000 }).catch(() => {});
 s = await state();
+check(s.mode === 'tp' && s.alive, `switched to chase camera (mode=${s.mode})`);
+const tpDist = Math.hypot(s.cam[0] - s.headPos[0], s.cam[2] - s.headPos[2]);
+check(tpDist > 2 && tpDist < 8 && s.cam[1] > 1.5, `chase camera sits behind and above the head (dist=${tpDist.toFixed(2)}, y=${s.cam[1].toFixed(2)})`);
+await shot('03b-chase');
+await page.keyboard.press('KeyC');
+await page.waitForFunction(() => window.__coil.rig.blend >= 1, null, { timeout: 10000 }).catch(() => {});
+s = await state();
 check(s.mode === 'fp' && s.alive, 'switched to first-person mid-game, still alive');
-check(s.len === before.len && s.score === before.score, 'game state carried across camera switch');
+check(s.len >= before.len && s.score >= before.score, 'game state carried across camera switches');
 const camDist = Math.hypot(s.cam[0] - s.headPos[0], s.cam[2] - s.headPos[2]);
 check(camDist < 1.2 && s.cam[1] < 1.2, `first-person camera sits at the head (dist=${camDist.toFixed(2)}, y=${s.cam[1].toFixed(2)})`);
+await pilot(false);
+await page.evaluate(() => { const g = window.__coil.game; g.queue = []; });
+s = await state();
 const d0 = s.dir;
 await page.keyboard.press('ArrowRight');
 await page.waitForFunction((d) => window.__coil.game.dir.x !== d.x || window.__coil.game.dir.z !== d.z, d0, { timeout: 5000 }).catch(() => {});
@@ -103,6 +121,7 @@ await page.evaluate(() => {
   if (!g.inBounds(g.food.x, g.food.z)) g.food = { x: 10, z: 10, type: 'orb', id: 777 };
   window.__coil.syncFood();
 });
+await pilot(true);
 await page.waitForTimeout(600);
 await shot('04-first-person');
 check(await page.isVisible('#minimap'), 'minimap visible in first-person');
@@ -110,8 +129,27 @@ check(await page.isVisible('#compass'), 'food compass visible in first-person');
 
 // --- back to overhead
 await page.keyboard.press('KeyC');
+await pilot(false);
 await page.waitForFunction(() => window.__coil.rig.blend >= 1, null, { timeout: 10000 }).catch(() => {});
 check((await state()).mode === 'overhead', 'switched back to overhead');
+
+// --- new mechanics: obstacles, pads, chains and prey all appear and render without errors
+await page.evaluate(() => {
+  const g = window.__coil.game;
+  g.addObstacles(3);
+  g.obstacles.forEach((o) => (o.solidAt = 0));
+  g.spawnPad();
+  g.spawnChain();
+  g.spawnPrey();
+});
+await page.waitForTimeout(1500);
+s = await page.evaluate(() => { const g = window.__coil.game; return { obs: g.obstacles.filter((o) => o.solid).length, pads: g.pads.length, prey: !!g.prey, alive: g.alive }; });
+check(s.obs > 0 || !s.alive, `pillars rise (${s.obs} solid)`);
+await shot('04b-mechanics');
+await page.evaluate(() => { const a = window.__coil; a.world.setZone(2, { instant: true }); });
+await page.waitForTimeout(800);
+await shot('04c-neon-zone');
+check(await page.evaluate(() => window.__coil.world.zone === 2), 'world can switch zones');
 
 // --- crash into wall -> game over
 await page.evaluate(() => {

@@ -30,6 +30,28 @@ function bodyColor(d, theta, out) {
   return out;
 }
 
+const AURA_VS = `uniform float uPush; varying vec3 vN; varying vec3 vV;
+void main(){ vec3 p = position + normal * uPush; vec4 mv = modelViewMatrix * vec4(p, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`;
+const AURA_FS = `uniform vec3 uColor; uniform float uAmount; uniform float uTime; varying vec3 vN; varying vec3 vV;
+void main(){ float f = pow(1.0 - abs(dot(vN, vV)), 2.2); float a = f * uAmount * (0.75 + 0.25 * sin(uTime * 30.0)); gl_FragColor = vec4(uColor * a * 2.2, a); }`;
+
+// Fresnel rim light added to a standard material's emissive term.
+function withRim(mat, uniforms) {
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uRimColor; uniform float uRim;')
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+        float rimF = pow(1.0 - saturate(dot(normalize(vNormal), normalize(vViewPosition))), 3.0);
+        totalEmissiveRadiance += uRimColor * rimF * uRim;`
+      );
+  };
+  mat.customProgramCacheKey = () => 'snake-rim';
+  return mat;
+}
+
 export class SnakeView {
   constructor({ maxCells, radial = 14, scaleMap }) {
     this.group = new THREE.Group();
@@ -86,22 +108,41 @@ export class SnakeView {
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e4);
     this.geo = geo;
 
-    this.bodyMat = new THREE.MeshPhysicalMaterial({
-      vertexColors: true,
-      roughness: 0.38,
-      metalness: 0.05,
-      clearcoat: 0.7,
-      clearcoatRoughness: 0.25,
-      normalMap: scaleMap,
-      normalScale: new THREE.Vector2(0.55, 0.55),
-      emissive: new THREE.Color('#00ffd0'),
-      emissiveIntensity: 0,
-    });
+    this.rimUniforms = { uRimColor: { value: new THREE.Color('#9fd0ff') }, uRim: { value: 0.6 } };
+    this.bodyMat = withRim(
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.34,
+        metalness: 0.08,
+        normalMap: scaleMap,
+        normalScale: new THREE.Vector2(0.6, 0.6),
+        envMapIntensity: 1.3,
+        emissive: new THREE.Color('#00ffd0'),
+        emissiveIntensity: 0,
+      }),
+      this.rimUniforms
+    );
     this.body = new THREE.Mesh(geo, this.bodyMat);
     this.body.castShadow = true;
     this.body.receiveShadow = true;
     this.body.frustumCulled = false;
     this.group.add(this.body);
+
+    // Boost aura: the same tube drawn again, pushed out along its normals,
+    // as an additive fresnel glow. Shares the geometry and its draw range.
+    this.auraUniforms = { uPush: { value: 0.07 }, uColor: { value: new THREE.Color('#38c8ff') }, uAmount: { value: 0 }, uTime: { value: 0 } };
+    this.auraMat = new THREE.ShaderMaterial({
+      uniforms: this.auraUniforms,
+      vertexShader: AURA_VS,
+      fragmentShader: AURA_FS,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.aura = new THREE.Mesh(geo, this.auraMat);
+    this.aura.frustumCulled = false;
+    this.aura.visible = false;
+    this.group.add(this.aura);
 
     this.buildHead(scaleMap);
   }
@@ -134,26 +175,34 @@ export class SnakeView {
     }
     g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     g.computeVertexNormals();
-    this.headMat = new THREE.MeshPhysicalMaterial({
-      vertexColors: true,
-      roughness: 0.32,
-      clearcoat: 0.9,
-      clearcoatRoughness: 0.2,
-      normalMap: scaleMap,
-      normalScale: new THREE.Vector2(0.35, 0.35),
-      emissive: new THREE.Color('#00ffd0'),
-      emissiveIntensity: 0,
-    });
+    this.headMat = withRim(
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.3,
+        metalness: 0.08,
+        normalMap: scaleMap,
+        normalScale: new THREE.Vector2(0.35, 0.35),
+        envMapIntensity: 1.4,
+        emissive: new THREE.Color('#00ffd0'),
+        emissiveIntensity: 0,
+      }),
+      this.rimUniforms
+    );
     const skull = new THREE.Mesh(g, this.headMat);
     skull.castShadow = true;
     head.add(skull);
+    const headAura = new THREE.Mesh(new THREE.SphereGeometry(0.62, 24, 16), this.auraMat);
+    headAura.scale.set(0.95, 0.62, 1.15);
+    this.headAura = headAura;
+    headAura.visible = false;
+    head.add(headAura);
 
-    const eyeMat = new THREE.MeshPhysicalMaterial({
+    const eyeMat = new THREE.MeshStandardMaterial({
       color: '#ffd23f',
       emissive: '#ff9f1c',
-      emissiveIntensity: 0.9,
+      emissiveIntensity: 1.2,
       roughness: 0.05,
-      clearcoat: 1,
+      metalness: 0.1,
     });
     const pupilMat = new THREE.MeshBasicMaterial({ color: '#05060a' });
     const eyeGeo = new THREE.SphereGeometry(0.085, 20, 14);
@@ -268,13 +317,23 @@ export class SnakeView {
     const pulse = rushGlow * (0.55 + 0.25 * Math.sin(time * 18));
     this.bodyMat.emissive.set(deathFlash > 0 ? '#ff2a2a' : '#00ffd0');
     this.headMat.emissive.copy(this.bodyMat.emissive);
-    this.bodyMat.emissiveIntensity = Math.max(pulse * 0.35, deathFlash * 0.8);
+    this.bodyMat.emissiveIntensity = Math.max(pulse * 0.25, deathFlash * 0.8);
     this.headMat.emissiveIntensity = this.bodyMat.emissiveIntensity;
+    this.auraUniforms.uAmount.value = rushGlow;
+    this.auraUniforms.uTime.value = time;
+    this.aura.visible = rushGlow > 0.02;
+    this.headAura.visible = this.aura.visible && this.head.visible;
+  }
+
+  setRim(color, amount) {
+    this.rimUniforms.uRimColor.value.copy(color);
+    this.rimUniforms.uRim.value = amount;
   }
 
   dispose() {
     this.geo.dispose();
     this.bodyMat.dispose();
     this.headMat.dispose();
+    this.auraMat.dispose();
   }
 }
