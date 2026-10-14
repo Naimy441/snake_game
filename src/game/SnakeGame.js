@@ -1,4 +1,4 @@
-// Pure game state for Coil Rush. No rendering here: both camera modes read
+// Pure game state for Coil Rush. No rendering here: every camera mode reads
 // the same instance, so the rules are identical whichever view is active.
 
 export const DIRS = {
@@ -11,21 +11,56 @@ export const DIRS = {
 export const FOOD_TYPES = {
   orb: { points: 10, grow: 1, rush: 25 },
   prism: { points: 50, grow: 2, rush: 100 },
+  prey: { points: 100, grow: 2, rush: 50 },
 };
 
 export const COMBO_WINDOW_MS = 5000;
 export const MAX_COMBO = 8;
 export const PRISM_LIFETIME_MS = 9000;
 export const RUSH_DRAIN_PER_SEC = 32;
+export const MAX_LEVEL = 12;
+
+// The world changes zone every few speed levels.
+export const ZONE_STARTS = [0, 3, 6, 9];
+export const ZONE_NAMES = ['Emerald Coast', 'Golden Canyon', 'Neon Night', 'Cyber Overdrive'];
+
+// Orb chains: numbered orbs that pay out when eaten in order.
+export const CHAIN_LINK_POINTS = 20;
+export const CHAIN_LINK_RUSH = 15;
+export const CHAIN_BONUS_PER_LINK = 100;
+
+// Fleeing prey.
+export const PREY_LIFETIME_MS = 14000;
+export const PREY_FIRST_DELAY_MS = 16000;
+
+// Boost pads: free burst of speed and double points.
+export const BOOST_TICKS = 14;
+export const PAD_POINTS = 25;
+export const PAD_RUSH = 15;
+export const PAD_RESPAWN_MS = 5000;
+
+// Obstacles rise at these speed levels (level index -> how many).
+export const OBSTACLE_PLAN = { 2: 2, 4: 2, 5: 1, 7: 2, 8: 1, 10: 2, 11: 1, 12: 2 };
+export const MAX_OBSTACLES = 12;
+export const OBSTACLE_WARN_MS = 2200;
 
 const sameDir = (a, b) => a.x === b.x && a.z === b.z;
 const opposite = (a, b) => a.x === -b.x && a.z === -b.z;
+const manhattan = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
+const NEIGHBOURS = [DIRS.up, DIRS.down, DIRS.left, DIRS.right];
+
+export function zoneForLevel(level) {
+  let z = 0;
+  for (let i = 0; i < ZONE_STARTS.length; i++) if (level >= ZONE_STARTS[i]) z = i;
+  return z;
+}
 
 export class SnakeGame {
   constructor({ size = 21, rng = Math.random, best = 0 } = {}) {
     this.size = size;
     this.rng = rng;
     this.best = best;
+    this.uid = 1;
     this.reset();
   }
 
@@ -50,11 +85,19 @@ export class SnakeGame {
     this.rush = 0;
     this.rushing = false;
     this.wantRush = false;
+    this.boostTicks = 0;
     this.alive = true;
     this.won = false;
     this.deathCause = null;
     this.newBest = false;
     this.bonus = null;
+    this.chain = null;
+    this.prey = null;
+    this.preyTimer = PREY_FIRST_DELAY_MS;
+    this.obstacles = []; // { x, z, solid, solidAt, id }
+    this.pads = []; // { x, z, id }
+    this.padRespawns = []; // times at which a used pad comes back
+    this.stats = { chains: 0, prey: 0, pads: 0 };
     this.food = null;
     this.food = this.spawn('orb');
   }
@@ -64,7 +107,15 @@ export class SnakeGame {
   }
 
   get level() {
-    return Math.min(12, Math.floor(this.foodEaten / 4));
+    return Math.min(MAX_LEVEL, Math.floor(this.foodEaten / 4));
+  }
+
+  get zone() {
+    return zoneForLevel(this.level);
+  }
+
+  get boosting() {
+    return this.boostTicks > 0;
   }
 
   baseInterval() {
@@ -72,13 +123,16 @@ export class SnakeGame {
   }
 
   currentInterval() {
-    return this.rushing ? this.baseInterval() * 0.6 : this.baseInterval();
+    let f = 1;
+    if (this.rushing) f = 0.6;
+    if (this.boostTicks > 0) f = this.rushing ? 0.5 : 0.55;
+    return this.baseInterval() * f;
   }
 
   // Speed as a 0..1 value for presentation effects.
   intensity() {
-    const lvl = this.level / 12;
-    return Math.min(1, lvl * 0.7 + (this.rushing ? 0.45 : 0));
+    const lvl = this.level / MAX_LEVEL;
+    return Math.min(1, lvl * 0.7 + (this.rushing || this.boostTicks > 0 ? 0.45 : 0));
   }
 
   lastQueuedDir() {
@@ -115,10 +169,38 @@ export class SnakeGame {
     return false;
   }
 
+  obstacleAt(x, z, solidOnly = true) {
+    for (const o of this.obstacles) if (o.x === x && o.z === z && (o.solid || !solidOnly)) return o;
+    return null;
+  }
+
+  padAt(x, z) {
+    for (const p of this.pads) if (p.x === x && p.z === z) return p;
+    return null;
+  }
+
+  chainIndexAt(x, z) {
+    if (!this.chain) return -1;
+    const links = this.chain.links;
+    for (let i = this.chain.next; i < links.length; i++) if (links[i].x === x && links[i].z === z) return i;
+    return -1;
+  }
+
+  // Cells that are blocked for spawning anything new.
+  takenSet() {
+    const key = (x, z) => x * 1000 + z;
+    const taken = new Set(this.cells.map((c) => key(c.x, c.z)));
+    if (this.food) taken.add(key(this.food.x, this.food.z));
+    if (this.bonus) taken.add(key(this.bonus.x, this.bonus.z));
+    if (this.prey) taken.add(key(this.prey.x, this.prey.z));
+    if (this.chain) for (let i = this.chain.next; i < this.chain.links.length; i++) taken.add(key(this.chain.links[i].x, this.chain.links[i].z));
+    for (const o of this.obstacles) taken.add(key(o.x, o.z));
+    for (const p of this.pads) taken.add(key(p.x, p.z));
+    return taken;
+  }
+
   freeCells() {
-    const taken = new Set(this.cells.map((c) => c.x * 1000 + c.z));
-    if (this.food) taken.add(this.food.x * 1000 + this.food.z);
-    if (this.bonus) taken.add(this.bonus.x * 1000 + this.bonus.z);
+    const taken = this.takenSet();
     const out = [];
     for (let x = 0; x < this.size; x++) {
       for (let z = 0; z < this.size; z++) {
@@ -128,20 +210,218 @@ export class SnakeGame {
     return out;
   }
 
+  // Cells along the current heading, used to keep new things out of the way.
+  inFrontOfHead(c, reach = 6) {
+    const h = this.head;
+    const d = this.lastQueuedDir();
+    for (let i = 1; i <= reach; i++) if (h.x + d.x * i === c.x && h.z + d.z * i === c.z) return true;
+    return false;
+  }
+
+  pick(pool) {
+    return pool[Math.floor(this.rng() * pool.length)];
+  }
+
   spawn(type) {
     const free = this.freeCells();
     if (!free.length) return null;
     // Prefer cells that are not right in front of the head so food never
     // appears where the player can't react to it.
     const h = this.head;
-    const fair = free.filter((c) => Math.abs(c.x - h.x) + Math.abs(c.z - h.z) > 2);
+    const fair = free.filter((c) => manhattan(c, h) > 2);
     const pool = fair.length ? fair : free;
-    const c = pool[Math.floor(this.rng() * pool.length)];
-    return { x: c.x, z: c.z, type, id: Math.floor(this.rng() * 1e9), spawnedAt: this.time };
+    const c = this.pick(pool);
+    return { x: c.x, z: c.z, type, id: this.uid++, spawnedAt: this.time };
+  }
+
+  // ---------------------------------------------------------------- chains
+  spawnChain() {
+    const n = 3 + Math.min(2, this.zone);
+    const taken = this.takenSet();
+    const ok = (x, z) => x >= 1 && z >= 1 && x < this.size - 1 && z < this.size - 1 && !taken.has(x * 1000 + z);
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const start = this.pick(this.freeCells());
+      if (!start || manhattan(start, this.head) < 6 || !ok(start.x, start.z)) continue;
+      let d = this.pick(NEIGHBOURS);
+      const links = [{ x: start.x, z: start.z }];
+      let cur = start;
+      let good = true;
+      for (let i = 1; i < n && good; i++) {
+        if (this.rng() < 0.35) d = this.rng() < 0.5 ? { x: -d.z + 0, z: d.x + 0 } : { x: d.z + 0, z: -d.x + 0 };
+        const mid = { x: cur.x + d.x, z: cur.z + d.z };
+        const next = { x: cur.x + d.x * 2, z: cur.z + d.z * 2 };
+        if (!ok(mid.x, mid.z) || !ok(next.x, next.z) || this.inFrontOfHead(next, 3)) good = false;
+        else {
+          links.push(next);
+          cur = next;
+        }
+      }
+      if (good) {
+        this.chain = { links, next: 0, id: this.uid++, spawnedAt: this.time, expires: this.time + 10000 + n * 1500 };
+        return this.chain;
+      }
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------- prey
+  spawnPrey() {
+    const pool = this.freeCells().filter((c) => manhattan(c, this.head) >= 9);
+    if (!pool.length) return null;
+    const c = this.pick(pool);
+    this.prey = {
+      x: c.x, z: c.z, px: c.x, pz: c.z, id: this.uid++, spawnedAt: this.time,
+      expires: this.time + PREY_LIFETIME_MS, acc: 0, moves: 0, dir: this.pick(NEIGHBOURS), fleeing: false,
+    };
+    return this.prey;
+  }
+
+  preyMoveMs() {
+    return Math.max(150, 290 - this.level * 9);
+  }
+
+  preyCanEnter(x, z, ahead) {
+    if (!this.inBounds(x, z) || this.occupied(x, z) || this.obstacleAt(x, z, false)) return false;
+    if (ahead && ahead.x === x && ahead.z === z) return false;
+    if (this.food && this.food.x === x && this.food.z === z) return false;
+    if (this.bonus && this.bonus.x === x && this.bonus.z === z) return false;
+    if (this.chainIndexAt(x, z) >= 0) return false;
+    return true;
+  }
+
+  movePrey(ahead) {
+    const p = this.prey;
+    const h = this.head;
+    const options = [];
+    for (const d of NEIGHBOURS) {
+      const x = p.x + d.x;
+      const z = p.z + d.z;
+      if (this.preyCanEnter(x, z, ahead)) options.push({ x, z, d });
+    }
+    p.px = p.x;
+    p.pz = p.z;
+    const dist = manhattan(p, h);
+    p.fleeing = dist <= 7;
+    if (!options.length) return;
+    let choice = null;
+    if (p.fleeing) {
+      // Run from the head, preferring open cells so it doesn't trap itself
+      // too easily, with a little randomness to stay catchable.
+      let bestScore = -Infinity;
+      for (const o of options) {
+        let open = 0;
+        for (const d of NEIGHBOURS) if (this.preyCanEnter(o.x + d.x, o.z + d.z, null)) open++;
+        const s = manhattan(o, h) * 1.0 + open * 0.3 + this.rng() * 0.9;
+        if (s > bestScore) {
+          bestScore = s;
+          choice = o;
+        }
+      }
+      if (manhattan(choice, h) <= dist && this.rng() < 0.3) choice = null; // hesitates
+    } else if (this.rng() < 0.6) {
+      const straight = options.find((o) => sameDir(o.d, p.dir));
+      choice = straight && this.rng() < 0.6 ? straight : this.pick(options);
+    }
+    if (choice) {
+      p.x = choice.x;
+      p.z = choice.z;
+      p.dir = choice.d;
+      p.moves++;
+    }
+  }
+
+  // ---------------------------------------------------------------- level events
+  // Is every free cell still reachable from the head if `extra` cells were blocked?
+  stillConnected(extra) {
+    const s = this.size;
+    const blocked = new Uint8Array(s * s);
+    for (const o of this.obstacles) blocked[o.x * s + o.z] = 1;
+    for (const e of extra) blocked[e.x * s + e.z] = 1;
+    let total = 0;
+    for (let i = 0; i < blocked.length; i++) if (!blocked[i]) total++;
+    const h = this.head;
+    if (blocked[h.x * s + h.z]) return false;
+    const seen = new Uint8Array(s * s);
+    const stack = [h.x * s + h.z];
+    seen[stack[0]] = 1;
+    let count = 0;
+    while (stack.length) {
+      const k = stack.pop();
+      count++;
+      const x = Math.floor(k / s);
+      const z = k % s;
+      for (const d of NEIGHBOURS) {
+        const nx = x + d.x;
+        const nz = z + d.z;
+        if (nx < 0 || nz < 0 || nx >= s || nz >= s) continue;
+        const nk = nx * s + nz;
+        if (!blocked[nk] && !seen[nk]) {
+          seen[nk] = 1;
+          stack.push(nk);
+        }
+      }
+    }
+    return count === total;
+  }
+
+  addObstacles(n) {
+    const added = [];
+    const room = MAX_OBSTACLES - this.obstacles.length;
+    n = Math.min(n, room);
+    const h = this.head;
+    for (let i = 0; i < n; i++) {
+      const pool = this.freeCells().filter((c) => {
+        if (c.x < 2 || c.z < 2 || c.x > this.size - 3 || c.z > this.size - 3) return false;
+        if (manhattan(c, h) < 5 || this.inFrontOfHead(c, 8)) return false;
+        // keep pillars apart so they never form tight pockets
+        for (const o of this.obstacles) if (Math.abs(o.x - c.x) <= 2 && Math.abs(o.z - c.z) <= 2) return false;
+        return true;
+      });
+      for (let tries = 0; tries < 30 && pool.length; tries++) {
+        const k = Math.floor(this.rng() * pool.length);
+        const c = pool.splice(k, 1)[0];
+        if (!this.stillConnected([c])) continue;
+        const o = { x: c.x, z: c.z, solid: false, solidAt: this.time + OBSTACLE_WARN_MS, id: this.uid++ };
+        this.obstacles.push(o);
+        added.push({ ...o });
+        break;
+      }
+    }
+    return added;
+  }
+
+  spawnPad() {
+    const pool = this.freeCells().filter((c) => manhattan(c, this.head) >= 4 && !this.inFrontOfHead(c, 3) && c.x > 0 && c.z > 0 && c.x < this.size - 1 && c.z < this.size - 1);
+    if (!pool.length) return null;
+    const c = this.pick(pool);
+    const p = { x: c.x, z: c.z, id: this.uid++ };
+    this.pads.push(p);
+    return p;
+  }
+
+  padTarget() {
+    const z = this.zone;
+    return z >= 3 ? 3 : z >= 1 ? 2 : 0;
+  }
+
+  onLevelUp(ev, prevLevel) {
+    const lvl = this.level;
+    const zonePrev = zoneForLevel(prevLevel);
+    ev.levelUp = { level: lvl, zone: this.zone, zoneUp: this.zone > zonePrev };
+    let obstacles = [];
+    for (let l = prevLevel + 1; l <= lvl; l++) if (OBSTACLE_PLAN[l]) obstacles = obstacles.concat(this.addObstacles(OBSTACLE_PLAN[l]));
+    if (obstacles.length) ev.obstaclesWarned = obstacles;
+    const pads = [];
+    while (this.pads.length + this.padRespawns.length < this.padTarget()) {
+      const p = this.spawnPad();
+      if (!p) break;
+      pads.push({ ...p });
+    }
+    if (pads.length) ev.padsSpawned = pads;
   }
 
   // Cells straight ahead along the heading the snake will take next, up to the
-  // first obstacle. Used for the first-person path guide and danger warnings.
+  // first obstacle. Used for the path guide and danger warnings.
   lookAhead(max = this.size) {
     const d = this.lastQueuedDir();
     const out = { free: 0, blocked: 'wall' };
@@ -152,6 +432,10 @@ export class SnakeGame {
       z += d.z;
       if (!this.inBounds(x, z)) {
         out.blocked = 'wall';
+        return out;
+      }
+      if (this.obstacleAt(x, z)) {
+        out.blocked = 'obstacle';
         return out;
       }
       if (this.occupied(x, z, i === 0)) {
@@ -173,6 +457,16 @@ export class SnakeGame {
     }
   }
 
+  registerEat() {
+    this.combo = this.time - this.lastEatTime <= COMBO_WINDOW_MS ? Math.min(MAX_COMBO, this.combo + 1) : 1;
+    this.maxCombo = Math.max(this.maxCombo, this.combo);
+    this.lastEatTime = this.time;
+  }
+
+  get scoreMult() {
+    return this.rushing || this.boostTicks > 0 ? 2 : 1;
+  }
+
   // Advance one grid move. Returns an event object describing what happened.
   step() {
     const ev = { ate: null, died: false, cause: null, turned: false, bonusExpired: false, won: false };
@@ -183,20 +477,64 @@ export class SnakeGame {
     this.time += interval;
     this.ticks++;
     if (this.rushing) this.rush = Math.max(0, this.rush - (RUSH_DRAIN_PER_SEC * interval) / 1000);
+    if (this.boostTicks > 0) this.boostTicks--;
 
     if (this.queue.length) {
       this.dir = this.queue.shift();
       ev.turned = true;
     }
 
+    // timed things
     if (this.bonus && this.time > this.bonus.expires) {
       ev.bonusExpired = { ...this.bonus };
       this.bonus = null;
+    }
+    if (this.chain && this.time > this.chain.expires) {
+      ev.chainExpired = { ...this.chain };
+      this.chain = null;
+    }
+    for (const o of this.obstacles) {
+      // Rise only once the cell is clear, so a pillar never crushes the snake.
+      if (!o.solid && this.time >= o.solidAt && !this.occupied(o.x, o.z)) {
+        o.solid = true;
+        (ev.obstaclesRaised || (ev.obstaclesRaised = [])).push({ ...o });
+      }
+    }
+    for (let i = this.padRespawns.length - 1; i >= 0; i--) {
+      if (this.time >= this.padRespawns[i]) {
+        this.padRespawns.splice(i, 1);
+        const p = this.spawnPad();
+        if (p) (ev.padsSpawned || (ev.padsSpawned = [])).push({ ...p });
+      }
     }
 
     const h = this.head;
     const nx = h.x + this.dir.x;
     const nz = h.z + this.dir.z;
+
+    // prey moves on its own clock, never into the cell the head is entering
+    if (this.prey) {
+      if (this.time > this.prey.expires) {
+        ev.preyEscaped = { ...this.prey };
+        this.prey = null;
+        this.preyTimer = 20000 + this.rng() * 12000;
+      } else {
+        this.prey.acc += interval;
+        const ms = this.preyMoveMs();
+        let guard = 0;
+        while (this.prey.acc >= ms && guard++ < 3) {
+          this.prey.acc -= ms;
+          this.movePrey({ x: nx, z: nz });
+        }
+      }
+    } else if (this.foodEaten >= 2) {
+      this.preyTimer -= interval;
+      if (this.preyTimer <= 0) {
+        const p = this.spawnPrey();
+        if (p) ev.preySpawned = { ...p };
+        else this.preyTimer = 3000;
+      }
+    }
 
     if (!this.inBounds(nx, nz)) {
       this.die('wall');
@@ -204,12 +542,19 @@ export class SnakeGame {
       ev.cause = 'wall';
       return ev;
     }
+    if (this.obstacleAt(nx, nz)) {
+      this.die('obstacle');
+      ev.died = true;
+      ev.cause = 'obstacle';
+      return ev;
+    }
 
     let eaten = null;
     if (this.food && this.food.x === nx && this.food.z === nz) eaten = this.food;
     else if (this.bonus && this.bonus.x === nx && this.bonus.z === nz) eaten = this.bonus;
+    const caught = this.prey && this.prey.x === nx && this.prey.z === nz ? this.prey : null;
 
-    const growing = this.pendingGrowth > 0 || !!eaten;
+    const growing = this.pendingGrowth > 0 || !!eaten || !!caught;
     if (this.occupied(nx, nz, !growing)) {
       this.die('body');
       ev.died = true;
@@ -219,16 +564,63 @@ export class SnakeGame {
 
     if (eaten) {
       const def = FOOD_TYPES[eaten.type];
-      this.combo = this.time - this.lastEatTime <= COMBO_WINDOW_MS ? Math.min(MAX_COMBO, this.combo + 1) : 1;
-      this.maxCombo = Math.max(this.maxCombo, this.combo);
-      this.lastEatTime = this.time;
-      const points = def.points * this.combo * (this.rushing ? 2 : 1);
+      this.registerEat();
+      const points = def.points * this.combo * this.scoreMult;
       this.score += points;
       this.pendingGrowth += def.grow;
       this.rush = Math.min(100, this.rush + def.rush);
       const prevLevel = this.level;
       if (eaten.type === 'orb') this.foodEaten++;
-      ev.ate = { ...eaten, points, combo: this.combo, rushing: this.rushing, levelUp: this.level > prevLevel };
+      ev.ate = { ...eaten, points, combo: this.combo, rushing: this.scoreMult > 1, levelUp: this.level > prevLevel };
+      if (this.level > prevLevel) this.onLevelUp(ev, prevLevel);
+    }
+
+    if (caught) {
+      const def = FOOD_TYPES.prey;
+      this.registerEat();
+      const points = def.points * this.combo * this.scoreMult;
+      this.score += points;
+      this.pendingGrowth += def.grow;
+      this.rush = Math.min(100, this.rush + def.rush);
+      this.stats.prey++;
+      ev.caught = { ...caught, type: 'prey', points, combo: this.combo };
+      this.prey = null;
+      this.preyTimer = 18000 + this.rng() * 12000;
+    }
+
+    const link = this.chainIndexAt(nx, nz);
+    if (link >= 0) {
+      const ch = this.chain;
+      if (link === ch.next) {
+        ch.next++;
+        const points = CHAIN_LINK_POINTS * ch.next * this.scoreMult;
+        this.score += points;
+        this.rush = Math.min(100, this.rush + CHAIN_LINK_RUSH);
+        this.lastEatTime = this.time; // keeps a combo alive
+        ev.chainLink = { x: nx, z: nz, index: link, of: ch.links.length, points };
+        if (ch.next >= ch.links.length) {
+          const bonus = CHAIN_BONUS_PER_LINK * ch.links.length * this.scoreMult;
+          this.score += bonus;
+          this.rush = 100;
+          this.stats.chains++;
+          ev.chainComplete = { x: nx, z: nz, bonus, links: ch.links.length };
+          this.chain = null;
+        }
+      } else {
+        ev.chainBroken = { ...ch, x: nx, z: nz };
+        this.chain = null;
+      }
+    }
+
+    const pad = this.padAt(nx, nz);
+    if (pad) {
+      this.pads.splice(this.pads.indexOf(pad), 1);
+      this.padRespawns.push(this.time + PAD_RESPAWN_MS);
+      this.boostTicks = BOOST_TICKS;
+      this.score += PAD_POINTS * (this.rushing ? 2 : 1);
+      this.rush = Math.min(100, this.rush + PAD_RUSH);
+      this.stats.pads++;
+      ev.boost = { ...pad };
     }
 
     this.cells.unshift({ x: nx, z: nz });
@@ -241,13 +633,17 @@ export class SnakeGame {
 
     if (eaten === this.food) {
       this.food = this.spawn('orb');
-      if (!this.bonus && this.foodEaten >= 3 && this.rng() < 0.28) {
+      const r = this.rng();
+      if (!this.bonus && this.foodEaten >= 3 && r < 0.28) {
         const b = this.spawn('prism');
         if (b) {
           b.expires = this.time + PRISM_LIFETIME_MS;
           this.bonus = b;
           ev.bonusSpawned = { ...b };
         }
+      } else if (!this.chain && this.foodEaten >= 5 && r < 0.5) {
+        const c = this.spawnChain();
+        if (c) ev.chainSpawned = { ...c, links: c.links.map((l) => ({ ...l })) };
       }
     } else if (eaten && eaten === this.bonus) {
       this.bonus = null;

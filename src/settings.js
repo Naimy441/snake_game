@@ -56,8 +56,11 @@ export function saveBest(v) {
 }
 
 // Concrete rendering parameters for each quality tier.
+// maxPR caps the canvas pixel ratio (Retina screens report 2 or 3);
+// the 3D scene is then rendered at `scale` x that, adjusted on the fly
+// between minScale and 1 to hold a smooth frame rate.
 export const QUALITY = {
-  high: { pixelRatio: 2, shadows: 'high', bloom: true, particles: 600, radial: 16, foodLights: true },
-  medium: { pixelRatio: 1.5, shadows: 'medium', bloom: false, particles: 350, radial: 12, foodLights: true },
-  low: { pixelRatio: 1, shadows: 'low', bloom: false, particles: 160, radial: 10, foodLights: false },
+  high: { maxPR: 1.5, minScale: 0.6, samples: 4, bloomLevels: 5, taps: 8, shadows: 'high', particles: 600, ambient: 520, radial: 14 },
+  medium: { maxPR: 1.25, minScale: 0.6, samples: 2, bloomLevels: 4, taps: 6, shadows: 'medium', particles: 350, ambient: 320, radial: 12 },
+  low: { maxPR: 1, minScale: 0.55, samples: 0, bloomLevels: 0, taps: 0, shadows: 'low', particles: 160, ambient: 140, radial: 10 },
 };

@@ -8,9 +8,9 @@ function wrapAngle(a) {
   return a;
 }
 
-// Computes three poses every frame (orbit for menus, classic overhead and
-// first-person) and blends from a snapshot of the previous view to whichever
-// one is active, so switching is seamless mid-game.
+// Computes the active pose every frame (orbit for menus, classic overhead,
+// third-person chase and first-person) and blends from a snapshot of the
+// previous view to it, so switching is seamless mid-game.
 export class CameraRig {
   constructor(camera, size) {
     this.camera = camera;
@@ -24,6 +24,10 @@ export class CameraRig {
     this.fpYaw = null;
     this.fpYawVel = 0;
     this.fpRoll = 0;
+    this.tpYaw = null;
+    this.tpYawVel = 0;
+    this.tpRoll = 0;
+    this.tpPull = 0;
     this.shake = 0;
     this.kick = 0;
     this.orbitAngle = 0.6;
@@ -42,6 +46,14 @@ export class CameraRig {
     this.blend = instant ? 1 : 0;
     this.blendDur = reduceMotion ? 0.3 : 0.75;
     if (mode === 'fp') this.fpYaw = null;
+    if (mode === 'tp') this.tpYaw = null;
+  }
+
+  // Heading the player sees in the chase / first-person views.
+  viewYaw() {
+    if (this.mode === 'fp') return this.fpYaw;
+    if (this.mode === 'tp') return this.tpYaw;
+    return null;
   }
 
   // Find the closest distance at which the whole board, walls included, fits
@@ -97,6 +109,43 @@ export class CameraRig {
     out.fov = 50;
   }
 
+  // Damped yaw follow, substepped so long frames stay stable.
+  followYaw(target, yaw, vel, k, dt) {
+    const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
+    const h = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      const diff = wrapAngle(target - yaw);
+      vel += (k * k * diff - 2 * k * vel) * h;
+      yaw = wrapAngle(yaw + vel * h);
+    }
+    return [yaw, vel];
+  }
+
+  // Third person: behind and above the head, swinging smoothly through turns
+  // and pulling back as the speed builds.
+  computeTP(dt, snake, speedFx, reduceMotion, out) {
+    const targetYaw = Math.atan2(snake.headDir.x, snake.headDir.z);
+    if (this.tpYaw === null) {
+      this.tpYaw = targetYaw;
+      this.tpYawVel = 0;
+    }
+    [this.tpYaw, this.tpYawVel] = this.followYaw(targetYaw, this.tpYaw, this.tpYawVel, 8.5, dt);
+    const fwd = this.tmpV.set(Math.sin(this.tpYaw), 0, Math.cos(this.tpYaw));
+    this.tpPull += ((reduceMotion ? 0 : speedFx) - this.tpPull) * Math.min(1, dt * 2);
+    const dist = 4.3 + this.tpPull * 1.1;
+    const height = 2.9 + this.tpPull * 0.4;
+    const hp = snake.headPos;
+    out.pos.set(hp.x - fwd.x * dist, height, hp.z - fwd.z * dist);
+    const rollTarget = reduceMotion ? 0 : THREE.MathUtils.clamp(-this.tpYawVel * 0.02, -0.07, 0.07);
+    this.tpRoll += (rollTarget - this.tpRoll) * Math.min(1, dt * 6);
+    this.tmpObj.position.copy(out.pos);
+    this.tmpObj.up.set(0, 1, 0);
+    this.tmpObj.lookAt(hp.x + fwd.x * 4.2, 0.0, hp.z + fwd.z * 4.2);
+    this.tmpObj.rotateZ(this.tpRoll);
+    out.quat.copy(this.tmpObj.quaternion);
+    out.fov = 60 + (reduceMotion ? 0 : speedFx * 12);
+  }
+
   computeFP(dt, snake, speedFx, reduceMotion, out) {
     const targetYaw = Math.atan2(snake.headDir.x, snake.headDir.z);
     if (this.fpYaw === null) this.fpYaw = targetYaw;
@@ -129,6 +178,7 @@ export class CameraRig {
     const target = this.pose;
     if (this.mode === 'orbit') this.computeOrbit(dt, reduceMotion, target);
     else if (this.mode === 'fp') this.computeFP(dt, snake, speedFx, reduceMotion, target);
+    else if (this.mode === 'tp') this.computeTP(dt, snake, speedFx, reduceMotion, target);
     else {
       target.pos.copy(this.overhead.pos);
       target.quat.copy(this.overhead.quat);
@@ -136,6 +186,7 @@ export class CameraRig {
     }
     // keep FP yaw tracking even when not displayed so switching in is smooth
     if (this.mode !== 'fp') this.fpYaw = null;
+    if (this.mode !== 'tp') this.tpYaw = null;
 
     this.blend = Math.min(1, this.blend + dt / this.blendDur);
     const b = ease(this.blend);
@@ -149,10 +200,12 @@ export class CameraRig {
     this.kick *= Math.exp(-dt * 6);
     cam.fov = this.from.fov + (target.fov - this.from.fov) * b + (reduceMotion ? 0 : this.kick);
 
-    // Small, quickly damped shake (overhead only; never in first person).
-    if (this.shake > 0.001 && !reduceMotion && this.mode === 'overhead') {
-      cam.position.x += (Math.random() - 0.5) * this.shake;
-      cam.position.z += (Math.random() - 0.5) * this.shake;
+    // Small, quickly damped shake (never in first person).
+    if (this.shake > 0.001 && !reduceMotion && (this.mode === 'overhead' || this.mode === 'tp')) {
+      const k = this.mode === 'tp' ? 0.5 : 1;
+      cam.position.x += (Math.random() - 0.5) * this.shake * k;
+      cam.position.y += (Math.random() - 0.5) * this.shake * k * 0.5;
+      cam.position.z += (Math.random() - 0.5) * this.shake * k;
     }
     this.shake *= Math.exp(-dt * 10);
     cam.updateProjectionMatrix();
