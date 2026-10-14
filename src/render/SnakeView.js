@@ -4,6 +4,10 @@ import { skinById } from '../skins.js';
 import { buildAccessory, disposeAccessory } from './accessories.js';
 
 const STEP = 0.2; // ring spacing along the body, in cells
+// How far ahead of the old lag the drawn head runs, in cells. The game logic
+// is always up to a cell ahead of what is drawn; trimming the lag makes turns
+// show sooner, while staying small enough that a turn never visibly snaps.
+export const HEAD_LEAD = 0.2;
 const UP = new THREE.Vector3(0, 1, 0);
 
 const AURA_VS = `uniform float uPush; varying vec3 vN; varying vec3 vV;
@@ -323,7 +327,7 @@ export class SnakeView {
     path.setFromCells(game.cells, game.removedTail, toWorld);
     const L = path.length;
     const n = game.cells.length;
-    const sHead = CORNER + 1 - t - lunge;
+    const sHead = CORNER + 1 - t - lunge - HEAD_LEAD;
     const sTail = Math.min(n - t, L);
     const total = Math.max(0.5, sTail - sHead);
     this.travel = game.ticks + t;

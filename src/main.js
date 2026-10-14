@@ -10,6 +10,7 @@ import { Effects } from './render/Effects.js';
 import { CameraRig } from './render/CameraRig.js';
 import { PostFX } from './render/Post.js';
 import { CORNER } from './render/SnakePath.js';
+import { HEAD_LEAD } from './render/SnakeView.js';
 import { makeGlowTexture, makeScaleNormalMap, makeRingTexture, makeChevronTexture } from './render/textures.js';
 import { AudioEngine } from './audio/Audio.js';
 import { Input } from './Input.js';
@@ -21,7 +22,9 @@ const CAMERA_NAMES = { overhead: 'Overhead', tp: 'Chase', fp: 'First-person' };
 const CAMERA_ORDER = ['overhead', 'tp', 'fp'];
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 // Fraction of a step after a tick during which a new turn redoes that step.
-const GRACE = 0.4;
+// Together with the drawn head's lead this ends just past the turning cell's
+// centre, so a redo never visibly snaps the head by more than ~1/4 cell.
+const GRACE = 0.25;
 
 class App {
   constructor() {
@@ -281,6 +284,7 @@ class App {
 
   onDirection(dir, src) {
     if (this.state !== 'playing' && this.state !== 'countdown') return;
+    this.preAim();
     if (this.relativeSteer) {
       // In chase / first person, left/right steer relative to the snake.
       if (dir === 'left' || dir === 'right') this.steer(this.game.turnDir(dir === 'left' ? -1 : 1));
@@ -292,7 +296,15 @@ class App {
 
   onTurn(side) {
     if (this.state !== 'playing' && this.state !== 'countdown') return;
+    this.preAim();
     this.steer(this.game.turnDir(side));
+  }
+
+  // During the READY/GO countdown only one turn is kept (the latest press,
+  // relative to the starting heading), so mashing keys can't stack up moves
+  // that all fire the moment the run starts.
+  preAim() {
+    if (this.state === 'countdown') this.game.queue.length = 0;
   }
 
   // Apply a direction as early as possible: within the grace window right
@@ -474,7 +486,7 @@ class App {
 
   // Delay from a logical event to the drawn head reaching that cell.
   visualDelay() {
-    return (0.75 * this.game.currentInterval()) / 1000;
+    return (0.55 * this.game.currentInterval()) / 1000;
   }
 
   // ---------------------------------------------------------------- game events
@@ -1088,7 +1100,7 @@ class App {
 
     if (this.state === 'dying' || this.state === 'over') {
       this.dyingTime = (this.dyingTime || 0) + dt;
-      this.lunge = Math.min(CORNER + 0.05, this.dyingTime * 4);
+      this.lunge = Math.min(CORNER + 0.05 - HEAD_LEAD, this.dyingTime * 4);
     }
     this.deathFlash = Math.max(0, this.deathFlash - dt * 1.2);
 
@@ -1124,7 +1136,11 @@ class App {
     const pxScale = rs.y / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
     this.world.update(dt, { level: this.state === 'menu' ? 0 : g.level, reduceMotion: rm, pxScale });
     this.world.updateWalls(g, dt, this.state === 'playing');
-    this.rig.update(dt, this.snake, { speedFx: this.speedFx, reduceMotion: rm });
+    // Chase / first-person cameras aim along the snake's next move (a queued
+    // turn if there is one), so they start turning the moment a key is
+    // pressed, at most one move ahead of the snake.
+    const steering = this.state === 'playing' || this.state === 'countdown';
+    this.rig.update(dt, this.snake, { speedFx: this.speedFx, reduceMotion: rm, aim: steering ? g.queue[0] || g.dir : null });
     // The first-person camera sits inside the head; hide it once we're there.
     this.snake.head.visible = !(this.rig.mode === 'fp' && this.rig.blend > 0.85);
     this.effects.uniforms.scale.value = pxScale;

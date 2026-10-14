@@ -19,6 +19,8 @@ export const MAX_COMBO = 8;
 export const PRISM_LIFETIME_MS = 9000;
 export const RUSH_DRAIN_PER_SEC = 32;
 export const MAX_LEVEL = 12;
+export const MIN_INTERVAL = 72; // ~14 cells/s
+export const MIN_FAST_INTERVAL = 48; // ~21 cells/s with Rush or Boost
 
 // The world changes zone every few speed levels.
 export const ZONE_STARTS = [0, 3, 6, 9];
@@ -118,15 +120,17 @@ export class SnakeGame {
     return this.boostTicks > 0;
   }
 
+  // Milliseconds per move. Speed is capped so that a quick double tap (a
+  // tight U-turn) is still physically possible at the top speed.
   baseInterval() {
-    return Math.max(62, 140 - this.level * 7);
+    return Math.max(MIN_INTERVAL, 140 - this.level * 7);
   }
 
   currentInterval() {
     let f = 1;
     if (this.rushing) f = 0.6;
     if (this.boostTicks > 0) f = this.rushing ? 0.5 : 0.55;
-    return this.baseInterval() * f;
+    return Math.max(MIN_FAST_INTERVAL, this.baseInterval() * f);
   }
 
   // Speed as a 0..1 value for presentation effects.

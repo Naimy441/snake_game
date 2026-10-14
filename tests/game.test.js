@@ -399,3 +399,63 @@ test('skins unlock from lifetime stats', () => {
   assert.equal(unlockProgress(skinById('golden'), { ...fresh, mice: 2 }), '2 / 3');
   assert.equal(skinById('nope').id, 'viper');
 });
+
+// ---------------------------------------------------------------- responsiveness
+import { SnakePath, CORNER } from '../src/render/SnakePath.js';
+import { HEAD_LEAD } from '../src/render/SnakeView.js';
+
+test('a fast U-turn followed by a 90 runs on three consecutive moves', () => {
+  const g = new SnakeGame({ rng: seq([0.5]) });
+  g.cells = [{ x: 10, z: 10 }, { x: 10, z: 11 }, { x: 10, z: 12 }, { x: 10, z: 13 }];
+  g.dir = { ...DIRS.up };
+  // all three pressed within a single step
+  assert.ok(g.turn(-1)); // left
+  assert.ok(g.turn(-1)); // left again: now heading down (U-turn)
+  assert.ok(g.turn(1)); // then right
+  g.step();
+  assert.deepEqual(g.dir, DIRS.left);
+  g.step();
+  assert.deepEqual(g.dir, DIRS.down);
+  g.step();
+  assert.deepEqual(g.dir, DIRS.left);
+  assert.equal(g.alive, true);
+});
+
+test('the drawn head never visibly jumps when a turn lands, even via the grace window', () => {
+  const toWorld = (x, z) => ({ x, z });
+  const headAt = (cells, removed, t) => {
+    const p = new SnakePath(64);
+    p.setFromCells(cells, removed, toWorld);
+    const o = new Float32Array(4);
+    p.sample(CORNER + 1 - t - HEAD_LEAD, o);
+    return [o[0], o[1]];
+  };
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  // normal turn across a tick: last frame of a straight step vs first frame after the turning step
+  const g = new SnakeGame({ rng: seq([0.5]) });
+  g.step();
+  const before = headAt(g.cells, g.removedTail, 1);
+  g.queueDirection(DIRS.left);
+  g.step();
+  const after = headAt(g.cells, g.removedTail, 0);
+  assert.ok(dist(before, after) < 0.06, `tick turn jump ${dist(before, after).toFixed(3)}`);
+  // grace-window redo at the latest allowed moment (t = GRACE = 0.25)
+  const h = new SnakeGame({ rng: seq([0.5]) });
+  h.step();
+  h.step();
+  const pre = headAt(h.cells, h.removedTail, 0.25);
+  h.regrace(DIRS.left);
+  const post = headAt(h.cells, h.removedTail, 0.25);
+  assert.ok(dist(pre, post) < 0.26, `grace redo jump ${dist(pre, post).toFixed(3)}`);
+});
+
+test('top speed stays humanly steerable', () => {
+  const g = new SnakeGame({ rng: seq([0.5]) });
+  g.foodEaten = 48;
+  g.rush = 100;
+  g.wantRush = true;
+  g.boostTicks = 5;
+  g.step();
+  assert.ok(g.baseInterval() >= 70);
+  assert.ok(g.currentInterval() >= 45);
+});
