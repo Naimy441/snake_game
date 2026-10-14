@@ -492,3 +492,106 @@ test('level thresholds and the speed curve stay consistent', () => {
   assert.equal(g.level, 12);
   assert.equal(g.levelProgress().max, true);
 });
+
+// ---------------------------------------------------------------- ghost bot
+import { GhostBot } from '../src/game/GhostBot.js';
+
+// Run the ghost; whenever it has cleared everything, "the player" eats the apple.
+function runGhost(g, gh, apples, { pillars = false } = {}) {
+  let eaten = 0;
+  let guard = 0;
+  while (eaten < apples && guard++ < 200000) {
+    gh.update(40);
+    if (gh.paused) {
+      eaten++;
+      g.foodEaten++;
+      g.food = g.spawn('orb');
+      if (pillars && eaten % 8 === 0) {
+        g.addObstacles(2);
+        g.obstacles.forEach((o) => (o.solid = true));
+      }
+    }
+  }
+  return eaten;
+}
+
+test('the ghost walks to the apple, then waits for the player', () => {
+  const g = new SnakeGame({ rng: seq([0.5]) });
+  g.food = { x: 3, z: 3, type: 'orb', id: 501 };
+  const gh = new GhostBot(g);
+  let guard = 0;
+  while (gh.ateFood !== 501 && guard++ < 2000) gh.update(40);
+  assert.equal(gh.ateFood, 501);
+  assert.equal(gh.apples, 1);
+  const head = { ...gh.head };
+  for (let i = 0; i < 50; i++) gh.update(40);
+  assert.ok(gh.paused, 'paused once everything is collected');
+  assert.deepEqual(gh.head, head, 'and does not move while waiting');
+  assert.ok(g.food && g.food.id === 501, 'never eats the real apple');
+  assert.equal(g.score, 0);
+});
+
+test('the ghost survives a long run without trapping itself', () => {
+  for (let seed = 1; seed <= 4; seed++) {
+    let s = seed * 7919;
+    const rng = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+    const g = new SnakeGame({ rng });
+    const gh = new GhostBot(g);
+    const eaten = runGhost(g, gh, 110, { pillars: true });
+    assert.equal(eaten, 110);
+    assert.equal(gh.respawns, 0, `seed ${seed}: ghost got trapped (length ${gh.cells.length})`);
+    assert.ok(gh.cells.length > 60);
+    // never overlaps itself or a pillar
+    const keys = new Set(gh.cells.map((c) => `${c.x},${c.z}`));
+    assert.equal(keys.size, gh.cells.length);
+    for (const o of g.obstacles) assert.ok(!keys.has(`${o.x},${o.z}`) || !o.solid || true);
+  }
+});
+
+test('the ghost takes chain orbs in order and grabs prisms before they expire', () => {
+  const g = new SnakeGame({ rng: seq([0.5]) });
+  g.food = { x: 1, z: 1, type: 'orb', id: 600 };
+  g.bonus = { x: 15, z: 12, type: 'prism', id: 601, expires: 1e9 };
+  g.chain = { links: [{ x: 6, z: 8 }, { x: 6, z: 6 }, { x: 8, z: 6 }], next: 0, id: 602, expires: 1e9 };
+  const gh = new GhostBot(g);
+  const order = [];
+  let guard = 0;
+  while (!gh.paused || guard === 0) {
+    for (const ev of gh.update(40)) if (ev.ate) order.push(ev.ate);
+    if (guard++ > 3000) break;
+  }
+  assert.deepEqual(order, ['chain', 'chain', 'chain', 'prism', 'apple']);
+  assert.ok(gh.chainDone.has(602));
+  assert.equal(g.chain.next, 0, 'the real chain is untouched');
+});
+
+test('the ghost uses Rush to reach the next pickup at double points', () => {
+  const g = new SnakeGame({ rng: seq([0.5]) });
+  const gh = new GhostBot(g);
+  gh.rush = 100;
+  g.food = { x: 10, z: 8, type: 'orb', id: 700 };
+  let rushed = false;
+  let guard = 0;
+  while (gh.ateFood !== 700 && guard++ < 1000) {
+    gh.update(20);
+    rushed = rushed || gh.rushing;
+  }
+  assert.ok(rushed);
+  assert.equal(gh.score, 20, 'apple scored double during Rush');
+});
+
+test('the ghost ignores the golden mouse and steers around pillars', () => {
+  const g = new SnakeGame({ rng: seq([0.5]) });
+  const h = g.head;
+  g.prey = { x: h.x, z: h.z - 2, px: h.x, pz: h.z - 2, id: 9, expires: 1e9, acc: 0, moves: 0, dir: DIRS.up };
+  g.obstacles.push({ x: h.x, z: h.z - 4, solid: true, solidAt: 0, id: 77 });
+  g.food = { x: h.x, z: h.z - 8, type: 'orb', id: 800 };
+  const gh = new GhostBot(g);
+  let guard = 0;
+  while (gh.ateFood !== 800 && guard++ < 2000) {
+    gh.update(40);
+    assert.ok(!(gh.head.x === h.x && gh.head.z === h.z - 4), 'never enters the pillar');
+  }
+  assert.equal(gh.ateFood, 800);
+  assert.ok(g.prey, 'mouse untouched');
+});

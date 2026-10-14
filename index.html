@@ -42,6 +42,7 @@
           <div class="hrow"><span class="hl">Score</span><span id="hud-score" class="hv">0</span></div>
           <div class="hrow"><span class="hl">Time</span><span id="hud-time" class="hv">0:00</span></div>
           <div class="hrow"><span class="hl">Length</span><span id="hud-length" class="hv">4</span></div>
+          <div class="hrow ghost-row hidden" id="hud-ghost-row"><span class="hl">Ghost</span><span id="hud-ghost" class="hv">0</span></div>
           <div class="lvl" id="hud-lvl">
             <div class="lvl-top"><span class="hl">Level</span><span id="hud-level" class="hv">1</span><span id="hud-lvl-next" class="lvl-next">3 apples to Lv 2</span></div>
             <div class="lvl-bar" id="hud-lvl-bar"><i id="hud-lvl-fill"></i></div>
@@ -93,6 +94,7 @@
             <button data-cam="fp" class="seg" role="radio" aria-checked="false">First-person</button>
           </div>
           <button id="btn-play" class="primary big">Play <kbd>Enter</kbd></button>
+          <button id="btn-ghost" class="secondary wide ghost-btn" title="Toggle the ghost guide (G)">Ghost guide: <b id="btn-ghost-state">Off</b> <span class="muted small">race a perfect bot</span> <kbd>G</kbd></button>
           <button id="btn-garage" class="secondary wide garage-btn">Garage <span class="muted small">skins &amp; accessories</span></button>
           <div class="row">
             <button class="secondary" data-open="help">How to play</button>
@@ -181,6 +183,7 @@
                 <li><kbd>Q</kbd><kbd>E</kbd> <span>turn left / right relative to the snake</span></li>
                 <li><kbd>Space</kbd> hold <span>Rush: faster, double points, uses the meter</span></li>
                 <li><kbd>C</kbd> <span>cycle camera: overhead, chase, first-person</span></li>
+                <li><kbd>G</kbd> <span>ghost guide: race a perfect bot</span></li>
                 <li><kbd>P</kbd> / <kbd>Esc</kbd> <span>pause</span> · <kbd>R</kbd> <span>restart</span> · <kbd>M</kbd> <span>mute</span></li>
                 <li>Gamepad <span>D-pad / stick to steer, A rush, Y camera, Start pause</span></li>
               </ul>
@@ -222,6 +225,7 @@
           <label class="setting"><span>Reduce motion <small>no speed lines, blur, shake, roll or FOV kicks</small></span><input type="checkbox" id="set-motion" /></label>
           <label class="setting"><span>Path guide <small>floor arrows ahead of the snake (chase and first-person)</small></span><input type="checkbox" id="set-guide" /></label>
           <label class="setting"><span>Minimap &amp; compass <small>navigation aids (chase and first-person)</small></span><input type="checkbox" id="set-minimap" /></label>
+          <label class="setting"><span>Ghost guide <small>a perfect bot races the same apples, then waits for you (G)</small></span><input type="checkbox" id="set-ghost" /></label>
           <label class="setting"><span>Show FPS</span><input type="checkbox" id="set-fps" /></label>
           <label class="setting"><span>Sound effects</span><input type="range" id="set-sfx" min="0" max="1" step="0.05" /></label>
           <label class="setting"><span>Music</span><input type="range" id="set-music" min="0" max="1" step="0.05" /></label>

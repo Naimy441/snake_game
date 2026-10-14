@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 
+import { GhostBot } from './game/GhostBot.js';
 import { SnakeGame, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL } from './game/SnakeGame.js';
 import { SKINS, ACCESSORIES, skinById, accessoryById, isUnlocked, unlockProgress } from './skins.js';
 import { World } from './render/World.js';
@@ -85,7 +86,7 @@ class App {
     this.fpsFrames = 0;
     this.fpsTime = 0;
     this.lastHud = {};
-    this.dyn = { scale: 1, samples: [], timer: 0, grace: 2, good: 0, backoff: 1, lastUp: -99, slowAtMin: 0 };
+    this.dyn = { scale: 1, samples: [], timer: 0, grace: 2, good: 0, backoff: 1, lastUp: -99, slowAtMin: 0, stable: 0 };
 
     this.activeQuality = this.settings.quality === 'auto' ? (this.isTouch ? 'medium' : 'high') : this.settings.quality;
     this.applyQuality();
@@ -97,6 +98,7 @@ class App {
       rush: (on) => (this.game.wantRush = on),
       confirm: (k) => this.onConfirm(k),
       camera: () => this.cycleCamera(),
+      ghost: () => this.toggleGhost(),
       pause: (k) => this.onPause(k),
       restart: () => this.onRestart(),
       mute: () => this.toggleMute(),
@@ -114,6 +116,14 @@ class App {
       if (this.state === 'playing') this.pause();
     });
 
+    this.ghost = new GhostBot(this.game);
+    this.ghostView = new SnakeView({ maxCells: BOARD * BOARD, radial: 10, scaleMap: this.scaleMap });
+    this.ghostView.makeGhost();
+    this.ghostView.group.visible = false;
+    this.scene.add(this.ghostView.group);
+    this.ghostFade = 0;
+    this.ghostWait = 0;
+
     this.rig.setMode('orbit', { instant: true });
     this.updateCameraUI();
     this.syncFood();
@@ -124,18 +134,39 @@ class App {
     window.__coil = this; // handy for debugging and automated tests
   }
 
-  // Compile every shader before the first frame (all zones, all pickups), so
-  // nothing stalls mid-game the first time it appears.
+  // Warm up before the first frame: with every zone, pickup and pillar
+  // visible, compile all shaders and draw one real frame (offscreen, behind
+  // the loading screen). That uploads every mesh and texture to the GPU and
+  // compiles the shadow shaders too, so nothing stalls mid-game the first
+  // time a zone, chain, prism or pillar appears.
   precompile() {
-    const show = [this.food.orb.group, this.food.prism.group, this.food.prey.group, ...this.food.chain.links, ...this.board.pads];
+    const show = [this.food.orb.group, this.food.prism.group, this.food.prey.group, ...this.food.chain.links, ...this.board.pads, this.snake.aura, this.snake.headAura, ...this.effects.rings];
+    if (this.ghostView) show.push(this.ghostView.group);
     const prev = show.map((o) => o.visible);
     show.forEach((o) => (o.visible = true));
-    this.snake.aura.visible = true;
-    this.renderer.setRenderTarget(this.post.sceneRT);
-    this.world.precompile(this.camera);
-    this.renderer.setRenderTarget(null);
+    const counts = [this.board.pillars, this.board.bands, this.board.warns, this.food.chain.dots].map((m) => m.count);
+    const ident = new THREE.Matrix4();
+    for (const m of [this.board.pillars, this.board.bands, this.board.warns, this.food.chain.dots]) {
+      m.count = 1;
+      m.setMatrixAt(0, ident);
+      m.instanceMatrix.needsUpdate = true;
+    }
+    const culled = [];
+    this.scene.traverse((o) => {
+      if (o.frustumCulled) {
+        culled.push(o);
+        o.frustumCulled = false;
+      }
+    });
+    this.world.withAllZones(() => {
+      this.renderer.setRenderTarget(this.post.sceneRT);
+      this.renderer.compile(this.scene, this.camera);
+      this.renderer.setRenderTarget(null);
+      this.post.render(this.scene, this.camera);
+    });
+    for (const o of culled) o.frustumCulled = true;
+    [this.board.pillars, this.board.bands, this.board.warns, this.food.chain.dots].forEach((m, i) => (m.count = counts[i]));
     show.forEach((o, i) => (o.visible = prev[i]));
-    this.snake.aura.visible = false;
   }
 
   // ---------------------------------------------------------------- quality
@@ -165,6 +196,58 @@ class App {
     this.resize();
     const note = $('quality-note');
     if (note) note.textContent = this.settings.quality === 'auto' ? `Auto is currently using ${this.activeQuality} quality.` : '';
+  }
+
+  // ---------------------------------------------------------------- ghost
+  toggleGhost() {
+    this.setGhost(!this.settings.ghost);
+    this.toast(this.settings.ghost ? 'Ghost guide on: race the perfect snake' : 'Ghost guide off');
+  }
+
+  setGhost(on) {
+    this.settings.ghost = on;
+    saveSettings(this.settings);
+    // joining mid-run: the ghost starts from the player's current snake
+    if (on && ['playing', 'paused', 'countdown'].includes(this.state)) this.ghost.reset(this.state !== 'countdown');
+    this.ghostFade = 0;
+    const box = $('set-ghost');
+    if (box) box.checked = on;
+    this.updateGhostUI();
+    this.audio.ui();
+  }
+
+  updateGhostUI() {
+    const on = !!this.settings.ghost;
+    $('btn-ghost').classList.toggle('on', on);
+    $('btn-ghost-state').textContent = on ? 'On' : 'Off';
+    $('hud-ghost-row').classList.toggle('hidden', !on);
+  }
+
+  // Runs the ghost bot alongside the player (only while actually playing).
+  updateGhost(dt) {
+    const v = this.ghostView;
+    const inRun = ['playing', 'paused', 'countdown', 'dying', 'over'].includes(this.state);
+    const show = this.settings.ghost && inRun;
+    if (!show) {
+      v.group.visible = false;
+      return;
+    }
+    if (this.state === 'playing') {
+      for (const ev of this.ghost.update(dt * 1000)) {
+        if (ev.respawned) this.ghostFade = 0;
+        if (ev.ate) {
+          const w = this.toWorld(this.ghost.head.x, this.ghost.head.z);
+          this.effects.emit(w.x, 0.45, w.z, { count: ev.chainComplete ? 30 : 12, color: '#a8f0ff', speed: 1.8, up: 1.6, size: 0.16, life: 0.5 });
+        }
+      }
+    }
+    const target = this.state === 'dying' || this.state === 'over' ? 0 : 1;
+    this.ghostFade += (target - this.ghostFade) * Math.min(1, dt * 3);
+    this.ghostWait += ((this.ghost.paused && this.state === 'playing' ? 1 : 0) - this.ghostWait) * Math.min(1, dt * 4);
+    v.group.visible = this.ghostFade > 0.02;
+    v.ghostUniforms.uOpacity.value = this.ghostFade;
+    v.ghostUniforms.uWait.value = this.ghostWait;
+    v.update(this.ghost, clamp01(this.ghost.t), this.simTime, this.toWorld, {});
   }
 
   // ---------------------------------------------------------------- garage
@@ -419,6 +502,8 @@ class App {
     this.food.hideAll();
     this.board.clear();
     this.syncFood();
+    this.ghost.reset();
+    this.ghostFade = 0;
     if (this.world.zone !== 0 || this.world.transitioning) this.world.setZone(0, { duration: 1.4 });
     this.audio.setMusicState({ menu: false, zone: 0, level: 0, intensity: 0.1 });
     this.audio.startMusic({ menu: false });
@@ -427,6 +512,7 @@ class App {
     this.rig.setMode(this.cameraMode, { reduceMotion: this.settings.reduceMotion });
     this.updateCameraUI();
     this.state = 'countdown';
+    this.protectUntil = this.simTime + 4;
     this.countdown = this.settings.reduceMotion ? 0.9 : 1.2;
     this.showCountdown('READY');
     this.audio.countdown(false);
@@ -659,6 +745,7 @@ class App {
     lv.classList.add('bump');
     const hp = this.snake.headPos;
     this.world.pulse(hp.x, hp.z);
+    this.protectUntil = this.simTime + (lu.zoneUp ? 5 : 1.5);
     if (lu.zoneUp) {
       this.world.setZone(lu.zone);
       this.audio.zoneUp();
@@ -799,6 +886,10 @@ class App {
     bindCheck('set-guide', 'guide');
     bindCheck('set-minimap', 'minimap');
     bindCheck('set-fps', 'showFps', () => $('fps').classList.toggle('hidden', !s.showFps));
+    $('set-ghost').checked = !!s.ghost;
+    $('set-ghost').addEventListener('change', () => this.setGhost($('set-ghost').checked));
+    $('btn-ghost').addEventListener('click', () => this.toggleGhost());
+    this.updateGhostUI();
     const bindRange = (id, key) => {
       const el = $(id);
       el.value = s[key];
@@ -927,6 +1018,7 @@ class App {
     this.setText('hud-best', g.best.toLocaleString());
     this.setText('hud-length', String(g.cells.length));
     this.setText('hud-time', this.formatTime(g.time));
+    if (this.settings.ghost) this.setText('hud-ghost', this.ghost.score.toLocaleString());
     this.setText('hud-level', String(g.level + 1));
     this.setText('hud-zone', ZONE_NAMES[g.zone]);
     // progress to the next speed level and zone
@@ -1046,6 +1138,7 @@ class App {
     if (g.food) dot(g.food.x, g.food.z, '#ff4d6d', 0.75);
     if (g.bonus) dot(g.bonus.x, g.bonus.z, '#d9a3ff', 0.8);
     if (g.prey) dot(g.prey.x, g.prey.z, '#fff2b0', 0.7);
+    if (this.settings.ghost) for (const c of this.ghost.cells) dot(c.x, c.z, 'rgba(168, 240, 255, 0.55)', 0.32);
     for (let i = g.cells.length - 1; i >= 1; i--) dot(g.cells[i].x, g.cells[i].z, '#17c3b2', 0.48);
     dot(g.head.x, g.head.z, '#ffffff', 0.62);
     c.restore();
@@ -1119,6 +1212,7 @@ class App {
       deathFlash: this.deathFlash,
     });
     this.snake.setRim(this.world.p.rimColor, 0.35 + this.world.p.rimIntensity * 0.25);
+    this.updateGhost(dt);
     if (fast && this.state === 'playing' && Math.random() < 0.8) {
       const hp = this.snake.headPos;
       const hd = this.snake.headDir;
@@ -1212,33 +1306,37 @@ class App {
     }
     d.samples.push(dt * 1000);
     d.timer += dt;
-    if (d.timer < 1) return;
+    if (d.timer < 0.5) return;
     d.timer = 0;
     const s = d.samples.sort((a, b) => a - b);
     const p80 = s[Math.floor(s.length * 0.8)];
     d.samples.length = 0;
     const q = this.q;
     const nowT = this.simTime;
+    // Heavy moments (zone transitions, level-ups, run start) may borrow some
+    // resolution for a moment, but never trigger a quality-tier change: that
+    // recompiles shaders and would itself cause the stutter we're avoiding.
+    const busy = this.world.transitioning || nowT < (this.protectUntil || 0);
     if (p80 > 19.5) {
       d.good = 0;
-      if (nowT - d.lastUp < 3) d.backoff = Math.min(16, d.backoff * 2);
+      if (nowT - d.lastUp < 2) d.backoff = Math.min(8, d.backoff * 2);
       if (d.scale > q.minScale + 1e-3) {
-        d.scale = Math.max(q.minScale, d.scale * 0.85);
+        // resolution changes are free (no reallocation), so step gently and often
+        d.scale = Math.max(q.minScale, d.scale * 0.9);
         this.post.setScale(d.scale);
-        d.grace = 0.5;
-      } else if (this.settings.quality === 'auto' && this.activeQuality !== 'low' && ++d.slowAtMin >= 3) {
+      } else if (!busy && this.settings.quality === 'auto' && this.activeQuality !== 'low' && ++d.slowAtMin >= 6) {
         this.activeQuality = this.activeQuality === 'high' ? 'medium' : 'low';
         this.applyQuality();
         if (this.state === 'playing') this.toast(`Graphics set to ${this.activeQuality} for smoother play`);
       }
     } else if (p80 < 17.8) {
       d.slowAtMin = 0;
-      if (d.scale < 1 && ++d.good >= 3 * d.backoff) {
+      if (++d.stable % 20 === 0) d.backoff = Math.max(1, d.backoff / 2);
+      if (d.scale < 1 && ++d.good >= 2 * d.backoff) {
         d.good = 0;
-        d.scale = Math.min(1, d.scale * 1.1);
+        d.scale = Math.min(1, d.scale * 1.06);
         d.lastUp = nowT;
         this.post.setScale(d.scale);
-        d.grace = 0.5;
       }
     }
   }

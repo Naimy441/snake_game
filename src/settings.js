@@ -22,6 +22,7 @@ export const DEFAULTS = {
   camera: 'overhead',
   skin: 'viper',
   accessory: 'none',
+  ghost: false,
 };
 
 export function loadSettings() {

@@ -48,6 +48,7 @@ your own body.
 | Pause / resume | P or Esc | same |
 | Restart | R | same |
 | Mute | M | same |
+| Ghost guide on / off | G | same |
 
 **Touch:** swipe to steer in the overhead view; in the chase and first-person
 views, tap or swipe left/right (or use the on-screen turn buttons). Hold the
@@ -109,6 +110,21 @@ little so it can glide smoothly. A few things keep that from feeling laggy:
 - **Countdown:** keys pressed during READY/GO keep only your latest turn, so
   mashing can't stack up moves for the start.
 
+### Ghost guide
+
+Turn on the **ghost guide** (G, the button on the main menu, or Settings)
+to race a perfect bot. A translucent ghost snake plays the same board
+alongside you: it takes the shortest safe route to each pickup, grabbing
+chain orbs in order and prisms before they vanish, then the apple. It steers
+around pillars (even ones still in their warning phase), never traps itself
+on its own tail, ignores the golden mouse and fires its Rush only when the
+meter carries it all the way to the next pickup, so it scores double. Once
+it has collected everything on the board it waits in place until you eat
+the apple, so it is never more than one apple ahead. It is a ghost: it never
+takes your pickups or blocks you, and keeps its own length, Rush meter and
+score (shown under yours in the HUD and as faint dots on the minimap).
+Turning it on mid-run starts it from your snake's current position.
+
 ### Garage
 
 Open the **Garage** from the main menu (or after a run) to customise your
@@ -167,9 +183,16 @@ The renderer is built to stay smooth on laptops with high-DPI screens:
 - **Post-processing:** one fused pass (bloom, tone mapping, colour grade,
   vignette, speed blur and speed lines) with a cheap dual-filter bloom
   instead of a multi-pass bloom chain.
-- **No shader stalls:** the light count never changes (food glows are fake
-  floor glows, not lights) and every shader for every zone is compiled up
-  front, so nothing recompiles mid-game.
+- **No stalls on zone changes:** the light count never changes (food glows
+  are fake floor glows, not lights), and at startup, behind the loading
+  screen, every shader is compiled and one full frame is drawn with every
+  zone, pickup and pillar visible, so all meshes and textures are already on
+  the GPU when a zone first appears.
+- **Hitch-free resolution scaling:** the scene's render target is allocated
+  once at full size and drawn into a smaller viewport when scaled, so the
+  dynamic resolution can step down during a heavy moment (like a zone
+  transition) and back up afterwards without reallocating anything. Auto
+  quality never changes tier during or just after a transition.
 - **Cheap materials and draw calls:** standard PBR materials with an
   environment map instead of clearcoat; each zone's scenery is merged into a
   few meshes; clouds, particles and birds are single instanced draws animated
@@ -199,6 +222,7 @@ numbers aren't real frame rates; it's for before/after comparisons.
 ```
 src/
   game/SnakeGame.js      pure game state and rules: obstacles, chains, prey, pads, zones
+  game/GhostBot.js       the ghost guide: a perfect-play bot (safe pathfinding, Rush timing)
   render/World.js        orchestrates sky, sea, island, zone scenery, lighting and zone transitions
   render/zones.js        the four zones' palettes and post-processing looks
   render/Scenery.js      procedural props for each zone, revealed by a growing wave

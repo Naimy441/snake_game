@@ -271,14 +271,16 @@ export class World {
     this.island.updateWalls(game, dt, active, this.p.strip, this.time);
   }
 
-  // Compile every shader once with all zones visible, so nothing compiles
-  // (and stutters) the first time a zone appears mid-game.
-  precompile(camera) {
+  // Run fn with every zone (and the wave) visible, then restore.
+  withAllZones(fn) {
     const vis = this.scenery.zones.map((z) => z.group.visible);
     for (const z of this.scenery.zones) z.group.visible = true;
     this.wave.visible = true;
-    this.renderer.compile(this.scene, camera);
-    this.scenery.zones.forEach((z, i) => (z.group.visible = vis[i]));
-    this.wave.visible = false;
+    try {
+      fn();
+    } finally {
+      this.scenery.zones.forEach((z, i) => (z.group.visible = vis[i]));
+      this.wave.visible = false;
+    }
   }
 }
