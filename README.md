@@ -9,7 +9,7 @@ or in first person, and switch at any moment: every view plays the same game.
 
 Built with [Three.js](https://threejs.org/) and [Vite](https://vitejs.dev/).
 Every model, texture and sound is generated in code at runtime; the only
-bundled asset is the Exo 2 font (SIL Open Font License).
+bundled asset is the Exo 2 font in `src/fonts/` (SIL Open Font License).
 
 ## Launch
 
@@ -20,7 +20,10 @@ npm install
 npm run dev
 ```
 
-Open the address Vite prints (usually http://localhost:5173). The dev server
+Open the address Vite prints (usually http://localhost:5173). After pulling
+new changes, run `npm install` again in case dependencies changed. A loading
+screen shows while the world is built; if something fails to load, it says so
+there instead of leaving a blank page. The dev server
 also listens on your local network, so you can open the "Network" address on a
 phone or tablet on the same Wi-Fi.
 
@@ -224,4 +227,4 @@ exact.
 ## License
 
 MIT. See [LICENSE](LICENSE). The bundled Exo 2 font is licensed under the SIL
-Open Font License 1.1.
+Open Font License 1.1 (see `src/fonts/OFL-Exo2.txt`).
