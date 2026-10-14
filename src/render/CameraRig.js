@@ -28,6 +28,8 @@ export class CameraRig {
     this.tpYawVel = 0;
     this.tpRoll = 0;
     this.tpPull = 0;
+    this.pitch = 0; // smoothed climb (+1) / dive (-1), for flight
+    this.flying = false;
     this.shake = 0;
     this.kick = 0;
     this.orbitAngle = 0.6;
@@ -52,8 +54,14 @@ export class CameraRig {
   // Heading the player sees in the chase / first-person views.
   viewYaw() {
     if (this.mode === 'fp') return this.fpYaw;
-    if (this.mode === 'tp') return this.tpYaw;
+    if (this.mode === 'tp' || this.highChase) return this.tpYaw;
     return null;
+  }
+
+  // In the sky the overhead view becomes a high chase camera: a fixed
+  // overhead can't show altitude, and flight steering is always relative.
+  get highChase() {
+    return this.mode === 'overhead' && this.flying;
   }
 
   // Find the closest distance at which the whole board, walls included, fits
@@ -106,12 +114,12 @@ export class CameraRig {
     const a = this.showAngle;
     const hp = snake.headPos;
     const r = 3.1;
-    out.pos.set(hp.x + Math.sin(a) * r, 1.45, hp.z + Math.cos(a) * r);
+    out.pos.set(hp.x + Math.sin(a) * r, hp.y + 1.45, hp.z + Math.cos(a) * r);
     const portrait = this.camera.aspect < 0.9;
     const right = this.tmpV.set(Math.cos(a), 0, -Math.sin(a)).multiplyScalar(portrait ? 0 : 0.85);
     this.tmpObj.position.copy(out.pos);
     this.tmpObj.up.set(0, 1, 0);
-    this.tmpObj.lookAt(hp.x + right.x, portrait ? -0.35 : 0.2, hp.z + right.z);
+    this.tmpObj.lookAt(hp.x + right.x, hp.y + (portrait ? -0.35 : 0.2), hp.z + right.z);
     out.quat.copy(this.tmpObj.quaternion);
     out.fov = portrait ? 55 : 42;
   }
@@ -146,27 +154,33 @@ export class CameraRig {
 
   // Third person: behind and above the head, swinging smoothly through turns
   // and pulling back as the speed builds.
-  computeTP(dt, snake, speedFx, reduceMotion, out) {
+  // high: the sky's overhead view, further back and higher up.
+  computeTP(dt, snake, speedFx, reduceMotion, out, high = false) {
     const targetYaw = this.aimYaw(snake);
     if (this.tpYaw === null) {
       this.tpYaw = targetYaw;
       this.tpYawVel = 0;
     }
-    [this.tpYaw, this.tpYawVel] = this.followYaw(targetYaw, this.tpYaw, this.tpYawVel, 15, dt);
+    [this.tpYaw, this.tpYawVel] = this.followYaw(targetYaw, this.tpYaw, this.tpYawVel, high ? 9 : 15, dt);
     const fwd = this.tmpV.set(Math.sin(this.tpYaw), 0, Math.cos(this.tpYaw));
     this.tpPull += ((reduceMotion ? 0 : speedFx) - this.tpPull) * Math.min(1, dt * 2);
-    const dist = 4.3 + this.tpPull * 1.1;
-    const height = 2.9 + this.tpPull * 0.4;
+    const dist = high ? 8.4 + this.tpPull * 1.2 : 4.3 + this.tpPull * 1.1;
+    const height = high ? 6.2 + this.tpPull * 0.5 : 2.9 + this.tpPull * 0.4;
     const hp = snake.headPos;
-    out.pos.set(hp.x - fwd.x * dist, height, hp.z - fwd.z * dist);
+    // climbing: drop below and look up the climb; diving: rise and look down it
+    const p = this.pitch * (high ? 0.5 : 0.75);
+    const ap = Math.abs(p);
+    const back = dist * (1 - 0.3 * ap);
+    out.pos.set(hp.x - fwd.x * back, hp.y + height * (1 - 1.15 * p), hp.z - fwd.z * back);
     const rollTarget = reduceMotion ? 0 : THREE.MathUtils.clamp(-this.tpYawVel * 0.02, -0.07, 0.07);
     this.tpRoll += (rollTarget - this.tpRoll) * Math.min(1, dt * 6);
     this.tmpObj.position.copy(out.pos);
     this.tmpObj.up.set(0, 1, 0);
-    this.tmpObj.lookAt(hp.x + fwd.x * 3.3, 0.0, hp.z + fwd.z * 3.3);
+    const ahead = (high ? 3 : 3.3) * (1 - ap);
+    this.tmpObj.lookAt(hp.x + fwd.x * ahead, hp.y + p * 4.5, hp.z + fwd.z * ahead);
     this.tmpObj.rotateZ(this.tpRoll);
     out.quat.copy(this.tmpObj.quaternion);
-    out.fov = 60 + (reduceMotion ? 0 : speedFx * 12);
+    out.fov = (high ? 56 : 60) + (reduceMotion ? 0 : speedFx * (high ? 6 : 12));
   }
 
   computeFP(dt, snake, speedFx, reduceMotion, out) {
@@ -188,22 +202,40 @@ export class CameraRig {
     this.fpRoll += (rollTarget - this.fpRoll) * Math.min(1, dt * 8);
 
     const hp = snake.headPos;
-    out.pos.set(hp.x + fwd.x * 0.3, 0.66, hp.z + fwd.z * 0.3);
+    // flight: tilt to look up a climb or down a dive (never quite vertical)
+    const p = this.pitch * 0.8;
+    const ap = Math.abs(p);
+    out.pos.set(hp.x + fwd.x * 0.3 * (1 - ap), hp.y + 0.66 + p * 0.3, hp.z + fwd.z * 0.3 * (1 - ap));
     this.tmpObj.position.copy(out.pos);
     this.tmpObj.up.set(0, 1, 0);
-    this.tmpObj.lookAt(hp.x + fwd.x * 8, 0.0, hp.z + fwd.z * 8);
+    this.tmpObj.lookAt(out.pos.x + fwd.x * 8 * (1 - ap), out.pos.y - 0.66 * (1 - ap) + p * 8, out.pos.z + fwd.z * 8 * (1 - ap));
     this.tmpObj.rotateZ(this.fpRoll);
     out.quat.copy(this.tmpObj.quaternion);
     out.fov = 74 + (reduceMotion ? 0 : speedFx * 10);
   }
 
-  update(dt, snake, { speedFx = 0, reduceMotion = false, aim = null } = {}) {
+  // aim: horizontal heading to face; pitch: +1 climbing, -1 diving, 0 level.
+  update(dt, snake, { speedFx = 0, reduceMotion = false, aim = null, flying = false, pitch = 0 } = {}) {
     this.aim = aim;
+    if (flying !== this.flying) {
+      // lift-off (or back to the ground): glide between the two framings
+      this.flying = flying;
+      if (this.mode === 'overhead') {
+        this.from.pos.copy(this.camera.position);
+        this.from.quat.copy(this.camera.quaternion);
+        this.from.fov = this.camera.fov;
+        this.blend = 0;
+        this.blendDur = reduceMotion ? 0.4 : 1.4;
+        this.tpYaw = null;
+      }
+    }
+    this.pitch += ((flying ? pitch : 0) - this.pitch) * Math.min(1, dt * 5);
     const target = this.pose;
     if (this.mode === 'orbit') this.computeOrbit(dt, reduceMotion, target);
     else if (this.mode === 'showcase') this.computeShowcase(dt, snake, reduceMotion, target);
     else if (this.mode === 'fp') this.computeFP(dt, snake, speedFx, reduceMotion, target);
     else if (this.mode === 'tp') this.computeTP(dt, snake, speedFx, reduceMotion, target);
+    else if (this.highChase) this.computeTP(dt, snake, speedFx, reduceMotion, target, true);
     else {
       target.pos.copy(this.overhead.pos);
       target.quat.copy(this.overhead.quat);
@@ -211,7 +243,7 @@ export class CameraRig {
     }
     // keep FP yaw tracking even when not displayed so switching in is smooth
     if (this.mode !== 'fp') this.fpYaw = null;
-    if (this.mode !== 'tp') this.tpYaw = null;
+    if (this.mode !== 'tp' && !this.highChase) this.tpYaw = null;
 
     this.blend = Math.min(1, this.blend + dt / this.blendDur);
     const b = ease(this.blend);

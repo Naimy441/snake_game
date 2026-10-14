@@ -11,11 +11,12 @@
 // itself in; with no safe target it follows its tail to buy time.
 
 import {
-  DIRS, FOOD_TYPES, COMBO_WINDOW_MS, MAX_COMBO, RUSH_DRAIN_PER_SEC, CHAIN_LINK_POINTS, CHAIN_LINK_RUSH,
+  DIRS, NEIGHBOURS, NEIGHBOURS_3D, SKY_MID, FOOD_TYPES, COMBO_WINDOW_MS, MAX_COMBO, RUSH_DRAIN_PER_SEC, CHAIN_LINK_POINTS, CHAIN_LINK_RUSH,
   CHAIN_BONUS_PER_LINK, LEVEL_AT, LEVEL_SPEEDS, MIN_INTERVAL, MIN_FAST_INTERVAL, MAX_LEVEL,
 } from './SnakeGame.js';
 
-const NB = [DIRS.up, DIRS.down, DIRS.left, DIRS.right];
+const Y = (c) => c.y || 0;
+const at = (c, x, z, y) => c.x === x && c.z === z && Y(c) === y;
 
 export class GhostBot {
   constructor(game) {
@@ -28,8 +29,10 @@ export class GhostBot {
     const g = this.game;
     const s = g.size;
     if (fromPlayer) {
-      this.cells = g.cells.map((c) => ({ x: c.x, z: c.z }));
+      this.cells = g.cells.map((c) => ({ x: c.x, z: c.z, y: Y(c) }));
       this.dir = { ...g.dir };
+      this.facing = { ...g.facing };
+      this.flying = g.flying;
       this.removedTail = g.removedTail ? { ...g.removedTail } : null;
       this.apples = g.foodEaten;
       this.score = g.score;
@@ -37,9 +40,11 @@ export class GhostBot {
       const c = Math.floor(s / 2);
       const startZ = s - 5;
       this.cells = [];
-      for (let i = 0; i < 4; i++) this.cells.push({ x: c, z: startZ + i });
+      for (let i = 0; i < 4; i++) this.cells.push({ x: c, z: startZ + i, y: 0 });
       this.dir = { ...DIRS.up };
-      this.removedTail = { x: c, z: startZ + 4 };
+      this.facing = { ...DIRS.up };
+      this.flying = false;
+      this.removedTail = { x: c, z: startZ + 4, y: 0 };
       this.apples = 0;
       this.score = 0;
     }
@@ -63,6 +68,35 @@ export class GhostBot {
 
   get head() {
     return this.cells[0];
+  }
+
+  // Grid index of a cell: the board is size x size x game.height.
+  idx(x, z, y) {
+    const s = this.game.size;
+    return (x * s + z) * this.game.height + y;
+  }
+
+  cellOf(k) {
+    const H = this.game.height;
+    const s = this.game.size;
+    const xz = Math.floor(k / H);
+    return { x: Math.floor(xz / s), z: xz % s, y: k % H };
+  }
+
+  inside(x, z, y) {
+    const g = this.game;
+    return x >= 0 && z >= 0 && x < g.size && z < g.size && y >= 0 && y < g.height;
+  }
+
+  get nb() {
+    return this.game.flying ? NEIGHBOURS_3D : NEIGHBOURS;
+  }
+
+  // Follow the player into the sky: everything rises to the middle layer.
+  liftOff() {
+    this.flying = true;
+    this.cells = this.cells.map((c) => ({ ...c, y: SKY_MID }));
+    if (this.removedTail) this.removedTail = { ...this.removedTail, y: SKY_MID };
   }
 
   get level() {
@@ -98,16 +132,23 @@ export class GhostBot {
 
   // Cells the ghost must never enter: pillars (solid or about to rise) and
   // chain orbs other than the next one (eating out of order breaks a chain).
+  get cellCount() {
+    const g = this.game;
+    return g.size * g.size * g.height;
+  }
+
   staticBlocked(nextChain) {
     const g = this.game;
-    const s = g.size;
-    const b = new Uint8Array(s * s);
-    for (const o of g.obstacles) b[o.x * s + o.z] = 1;
+    const b = new Uint8Array(this.cellCount);
+    // pillars, or in the sky laser columns through every layer
+    for (const o of g.obstacles) for (let y = 0; y < g.height; y++) b[this.idx(o.x, o.z, y)] = 1;
     if (g.chain && !this.chainDone.has(g.chain.id)) {
       const next = this.chainId === g.chain.id ? this.chainNext : g.chain.next;
       g.chain.links.forEach((l, i) => {
-        if (i > next || (i === next && !nextChain)) b[l.x * s + l.z] = 1;
-        if (i === next && nextChain) b[l.x * s + l.z] = 0;
+        if (!this.inside(l.x, l.z, Y(l))) return;
+        const k = this.idx(l.x, l.z, Y(l));
+        if (i > next || (i === next && !nextChain)) b[k] = 1;
+        if (i === next && nextChain) b[k] = 0;
       });
     }
     return b;
@@ -115,36 +156,37 @@ export class GhostBot {
 
   // Moves until each body cell is vacated (head = longest).
   freeTimes(cells, growth) {
-    const s = this.game.size;
-    const f = new Int32Array(s * s);
+    const f = new Int32Array(this.cellCount);
     const n = cells.length;
     for (let i = 0; i < n; i++) {
       const c = cells[i];
-      f[c.x * s + c.z] = Math.max(f[c.x * s + c.z], n - i + growth);
+      if (!this.inside(c.x, c.z, Y(c))) continue;
+      const k = this.idx(c.x, c.z, Y(c));
+      f[k] = Math.max(f[k], n - i + growth);
     }
     return f;
   }
 
   // Time-aware BFS from the head. Returns parent/dist arrays.
   bfs(cells, growth, blocked) {
-    const s = this.game.size;
     const free = this.freeTimes(cells, growth);
-    const dist = new Int32Array(s * s).fill(-1);
-    const parent = new Int32Array(s * s).fill(-1);
+    const dist = new Int32Array(this.cellCount).fill(-1);
+    const parent = new Int32Array(this.cellCount).fill(-1);
     const h = cells[0];
-    const start = h.x * s + h.z;
+    const start = this.idx(h.x, h.z, Y(h));
     dist[start] = 0;
     const queue = [start];
+    const nbs = this.nb;
     for (let qi = 0; qi < queue.length; qi++) {
       const k = queue[qi];
-      const x = Math.floor(k / s);
-      const z = k % s;
+      const c = this.cellOf(k);
       const d = dist[k] + 1;
-      for (const nb of NB) {
-        const nx = x + nb.x;
-        const nz = z + nb.z;
-        if (nx < 0 || nz < 0 || nx >= s || nz >= s) continue;
-        const nk = nx * s + nz;
+      for (const nb of nbs) {
+        const nx = c.x + nb.x;
+        const nz = c.z + nb.z;
+        const ny = c.y + Y(nb);
+        if (!this.inside(nx, nz, ny)) continue;
+        const nk = this.idx(nx, nz, ny);
         if (dist[nk] >= 0 || blocked[nk] || free[nk] > d) continue;
         dist[nk] = d;
         parent[nk] = k;
@@ -155,9 +197,8 @@ export class GhostBot {
   }
 
   pathTo(parent, target) {
-    const s = this.game.size;
     const path = [];
-    for (let k = target; parent[k] >= 0; k = parent[k]) path.push({ x: Math.floor(k / s), z: k % s });
+    for (let k = target; parent[k] >= 0; k = parent[k]) path.push(this.cellOf(k));
     return path.reverse();
   }
 
@@ -177,20 +218,19 @@ export class GhostBot {
   // Can the head still reach its own tail? (the classic never-trap test)
   tailReachable(body, growth, blocked) {
     if (body.length < 3) return true;
-    const s = this.game.size;
     const tail = body[body.length - 1];
     // time-aware: the tail cell counts once it has been vacated
-    return this.bfs(body, growth, blocked).dist[tail.x * s + tail.z] > 0;
+    return this.bfs(body, growth, blocked).dist[this.idx(tail.x, tail.z, Y(tail))] > 0;
   }
 
   // Pick the next direction and whether to Rush.
   decide() {
     const g = this.game;
-    const s = g.size;
     for (const tg of this.targets()) {
+      if (!this.inside(tg.cell.x, tg.cell.z, Y(tg.cell))) continue;
       const blocked = this.staticBlocked(tg.kind === 'chain');
       const { dist, parent } = this.bfs(this.cells, this.pendingGrowth, blocked);
-      const key = tg.cell.x * s + tg.cell.z;
+      const key = this.idx(tg.cell.x, tg.cell.z, Y(tg.cell));
       const d = dist[key];
       if (d <= 0) continue;
       let rush = false;
@@ -210,7 +250,7 @@ export class GhostBot {
       if (!rush && this.rushCovers(d)) rush = true;
       const first = path[0];
       this.goal = tg;
-      return { dir: { x: first.x - this.head.x, z: first.z - this.head.z }, rush };
+      return { dir: { x: first.x - this.head.x, z: first.z - this.head.z, y: first.y - Y(this.head) }, rush };
     }
     this.goal = null;
     return { dir: this.survive(), rush: false };
@@ -223,24 +263,24 @@ export class GhostBot {
   // No safe target: follow the tail the long way round, or failing that take
   // the move that keeps the most room.
   survive() {
-    const g = this.game;
-    const s = g.size;
     const blocked = this.staticBlocked(false);
     const free = this.freeTimes(this.cells, this.pendingGrowth);
+    const h = this.head;
     let best = null;
-    for (const nb of NB) {
-      const nx = this.head.x + nb.x;
-      const nz = this.head.z + nb.z;
-      if (nx < 0 || nz < 0 || nx >= s || nz >= s) continue;
-      const k = nx * s + nz;
+    for (const nb of this.nb) {
+      const nx = h.x + nb.x;
+      const nz = h.z + nb.z;
+      const ny = Y(h) + Y(nb);
+      if (!this.inside(nx, nz, ny)) continue;
+      const k = this.idx(nx, nz, ny);
       if (blocked[k] || free[k] > 1) continue;
-      const sim = this.simulate([{ x: nx, z: nz }], 0);
+      const sim = this.simulate([{ x: nx, z: nz, y: ny }], 0);
       const safe = this.tailReachable(sim.body, sim.growth, blocked);
       const { dist } = this.bfs(sim.body, sim.growth, blocked);
       let area = 0;
       const tail = sim.body[sim.body.length - 1];
       for (let i = 0; i < dist.length; i++) if (dist[i] > 0) area++;
-      const tailD = Math.max(0, dist[tail.x * s + tail.z]);
+      const tailD = Math.max(0, dist[this.idx(tail.x, tail.z, Y(tail))]);
       const score = (safe ? 10000 : 0) + (safe ? tailD * 10 : 0) + area;
       if (!best || score > best.score) best = { score, dir: nb };
     }
@@ -251,15 +291,17 @@ export class GhostBot {
   respawn() {
     const g = this.game;
     const s = g.size;
+    const y = g.flying ? SKY_MID : 0;
     const blocked = this.staticBlocked(false);
     for (let z = s - 2; z >= 1; z--) {
       for (let x = 2; x < s - 2; x++) {
         let ok = true;
-        for (let i = 0; i < 4 && ok; i++) if (z + i >= s || blocked[x * s + z + i]) ok = false;
-        if (z - 1 < 0 || blocked[x * s + z - 1]) ok = false;
+        for (let i = 0; i < 4 && ok; i++) if (z + i >= s || blocked[this.idx(x, z + i, y)]) ok = false;
+        if (z - 1 < 0 || blocked[this.idx(x, z - 1, y)]) ok = false;
         if (ok) {
-          this.cells = [0, 1, 2, 3].map((i) => ({ x, z: z + i }));
+          this.cells = [0, 1, 2, 3].map((i) => ({ x, z: z + i, y }));
           this.dir = { ...DIRS.up };
+          this.facing = { ...DIRS.up };
           this.removedTail = null;
           this.pendingGrowth = 0;
           this.respawns++;
@@ -277,7 +319,6 @@ export class GhostBot {
   // One move.
   step() {
     const g = this.game;
-    const s = g.size;
     const plan = this.decide();
     if (!plan.dir) {
       this.respawn();
@@ -289,20 +330,22 @@ export class GhostBot {
     this.ticks++;
     if (this.rushing) this.rush = Math.max(0, this.rush - (RUSH_DRAIN_PER_SEC * interval) / 1000);
     this.dir = plan.dir;
+    if (!Y(this.dir)) this.facing = this.dir;
     const nx = this.head.x + this.dir.x;
     const nz = this.head.z + this.dir.z;
+    const ny = Y(this.head) + Y(this.dir);
     // The plan is always legal; this guards against the board changing
     // under the ghost (a pillar rising in its way). Checked before any pickup
     // adds growth: an apple may spawn on the ghost's own tail, and a ghost
     // briefly overlapping its tail is harmless.
     const free = this.freeTimes(this.cells, this.pendingGrowth);
-    if (nx < 0 || nz < 0 || nx >= s || nz >= s || free[nx * s + nz] > 1 || g.obstacleAt(nx, nz, false)) {
+    if (!this.inside(nx, nz, ny) || free[this.idx(nx, nz, ny)] > 1 || g.obstacleAt(nx, nz, false)) {
       this.respawn();
       return { respawned: true };
     }
     const ev = {};
     const mult = this.rushing ? 2 : 1;
-    if (g.food && g.food.x === nx && g.food.z === nz && this.ateFood !== g.food.id) {
+    if (g.food && at(g.food, nx, nz, ny) && this.ateFood !== g.food.id) {
       this.ateFood = g.food.id;
       this.apples++;
       this.registerEat();
@@ -311,7 +354,7 @@ export class GhostBot {
       this.rush = Math.min(100, this.rush + FOOD_TYPES.orb.rush);
       ev.ate = 'apple';
     }
-    if (g.bonus && g.bonus.x === nx && g.bonus.z === nz && this.atePrism !== g.bonus.id) {
+    if (g.bonus && at(g.bonus, nx, nz, ny) && this.atePrism !== g.bonus.id) {
       this.atePrism = g.bonus.id;
       this.registerEat();
       this.score += FOOD_TYPES.prism.points * this.combo * mult;
@@ -326,7 +369,7 @@ export class GhostBot {
         this.chainNext = ch.next;
       }
       const l = ch.links[this.chainNext];
-      if (l && l.x === nx && l.z === nz) {
+      if (l && at(l, nx, nz, ny)) {
         this.chainNext++;
         this.score += CHAIN_LINK_POINTS * this.chainNext * mult;
         this.rush = Math.min(100, this.rush + CHAIN_LINK_RUSH);
@@ -340,7 +383,7 @@ export class GhostBot {
         }
       }
     }
-    this.cells.unshift({ x: nx, z: nz });
+    this.cells.unshift({ x: nx, z: nz, y: ny });
     if (this.pendingGrowth > 0) {
       this.pendingGrowth--;
       this.removedTail = null;
@@ -352,6 +395,7 @@ export class GhostBot {
 
   // Advance by real time. Waits (paused) when nothing is left to collect.
   update(dtMs) {
+    if (this.game.flying && !this.flying) this.liftOff();
     const wanted = this.targets().length > 0;
     if (!wanted) {
       // finish gliding into the last cell, then hold still

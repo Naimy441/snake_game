@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import { compileZones, blendZones } from './zones.js';
 import { Sky } from './Sky.js';
-import { Ocean, Waterfalls } from './Water.js';
+import { Ocean, Waterfalls, WATER_Y } from './Water.js';
 import { Island, GRASS_Y } from './Island.js';
 import { Scenery } from './Scenery.js';
 import { Ambient } from './Ambient.js';
-import { makeGrassDetail, makeCloudTexture, makeWindowTexture } from './textures.js';
+import { makeGrassDetail, makeCloudTexture, makeWindowTexture, makeNoiseTexture } from './textures.js';
+import { Heavens } from './Heavens.js';
+import { SkyArena } from './SkyArena.js';
 import { ZONE_STARTS, MAX_LEVEL } from '../game/SnakeGame.js';
 
 const smooth = (t) => t * t * (3 - 2 * t);
@@ -41,6 +43,11 @@ export class World {
     for (const z of this.scenery.zones) this.scene.add(z.group);
     this.ambient = new Ambient(520);
     this.scene.add(this.ambient.group);
+    // Sunset Heavens: cloud sea + sunset sun, and the laser flight box
+    this.heavens = new Heavens(makeNoiseTexture());
+    this.scene.add(this.heavens.group);
+    this.skyArena = new SkyArena(size);
+    this.scene.add(this.skyArena.group);
 
     this.buildLights();
     this.buildWave();
@@ -49,9 +56,11 @@ export class World {
     this.applyPalette();
   }
 
-  toWorld(x, z) {
+  // Board cell to world position. y is the cell's layer in the sky (relative
+  // to yMid, the layer level with the board); on the ground it's 0.
+  toWorld(x, z, y, yMid = 0) {
     const o = (this.size - 1) / 2;
-    return { x: x - o, z: z - o };
+    return { x: x - o, y: y == null ? 0 : y - yMid, z: z - o };
   }
 
   buildLights() {
@@ -204,8 +213,20 @@ export class World {
     this.ocean.uniforms.uFogNear.value = p.fogNear * 1.6;
     this.ocean.uniforms.uFogFar.value = p.fogFar * 1.9;
     for (const z of this.scenery.zones) z.uniforms.uGlowBoost.value = 1 + lf * 0.6;
-    const birds = clamp01(1 - p.stars * 1.5 - p.cyber);
+    const birds = clamp01(1 - p.stars * 1.5 - p.cyber - p.heaven);
     this.ambient.apply(p, 0.45 + lf * 0.55, birds);
+    // lift-off: the island and the sea sink away below the clouds
+    const sink = smooth(clamp01(p.heaven)) * 170;
+    this.island.group.position.y = -sink;
+    this.island.group.visible = p.heaven < 0.995;
+    this.ocean.mesh.position.y = WATER_Y - sink;
+    this.ocean.mesh.visible = p.heaven < 0.995;
+    this.heavens.apply(p, sun);
+  }
+
+  // How much of the flight box is present (0 on the ground, 1 in the sky).
+  get skyAmount() {
+    return clamp01(this.p.heaven);
   }
 
   // Post-processing look for the current blend.
@@ -265,6 +286,7 @@ export class World {
     this.waterfalls.uniforms.uTime.value = this.time;
     this.scenery.update(dt, this.time, reduceMotion);
     this.ambient.update(dt, this.time, pxScale);
+    this.heavens.update(this.time);
   }
 
   updateWalls(game, dt, active) {
@@ -274,12 +296,16 @@ export class World {
   // Run fn with every zone (and the wave) visible, then restore.
   withAllZones(fn) {
     const vis = this.scenery.zones.map((z) => z.group.visible);
+    const extra = [this.heavens.group, this.skyArena.group, this.skyArena.line];
+    const extraVis = extra.map((o) => o.visible);
     for (const z of this.scenery.zones) z.group.visible = true;
+    extra.forEach((o) => (o.visible = true));
     this.wave.visible = true;
     try {
       fn();
     } finally {
       this.scenery.zones.forEach((z, i) => (z.group.visible = vis[i]));
+      extra.forEach((o, i) => (o.visible = extraVis[i]));
       this.wave.visible = false;
     }
   }

@@ -350,6 +350,25 @@ button { font-family: var(--display); }
 .tbtn:active, .tbtn.held { background: rgba(31, 79, 216, 0.6); }
 .rushbtn { font-size: 14px; letter-spacing: 0.1em; align-self: flex-end; font-style: italic; }
 #touch.overhead #t-left, #touch.overhead #t-right { visibility: hidden; }
+.tcol { display: none; flex-direction: column; gap: 10px; align-self: flex-end; }
+#touch.sky .tcol { display: flex; }
+.tbtn.small { width: 60px; height: 60px; font-size: 22px; }
+
+/* altitude gauge (Sunset Heavens) */
+.alt {
+  position: absolute; left: calc(14px + var(--safe-left, 0px)); top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none;
+}
+.alt-label { font-weight: 900; font-style: italic; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-shadow: var(--outline); }
+.alt-track {
+  position: relative; width: 16px; height: 190px; border-radius: 10px; background: rgba(8, 14, 38, 0.6); border: 2px solid rgba(255, 180, 106, 0.6);
+  background-image: repeating-linear-gradient(to bottom, transparent 0 calc(100% / 9 - 1px), rgba(255, 180, 106, 0.35) calc(100% / 9 - 1px) calc(100% / 9));
+}
+.alt-track i { position: absolute; left: 50%; width: 26px; height: 8px; margin: -4px 0 0 -13px; border-radius: 4px; transition: top 0.12s linear; }
+.alt-head { background: #5ff6ff; box-shadow: 0 0 10px #5ff6ff; }
+.alt-food { background: #ff3355; box-shadow: 0 0 10px #ff3355; width: 18px !important; margin-left: -9px !important; }
+.alt-text { font-weight: 900; font-style: italic; font-size: 18px; text-shadow: var(--outline); }
+@media (max-height: 520px) { .alt-track { height: 120px; } }
 .touch-device .view-aids #minimap { bottom: calc(160px + var(--safe-bottom)); }
 
 /* ---------- responsive ---------- */
@@ -463,6 +482,7 @@ button { font-family: var(--display); }
 .lvl-select.z1 { border-color: rgba(255, 166, 94, 0.55); }
 .lvl-select.z2 { border-color: rgba(255, 61, 242, 0.55); }
 .lvl-select.z3 { border-color: rgba(56, 246, 255, 0.55); }
+.lvl-select.z4 { border-color: rgba(255, 140, 82, 0.75); box-shadow: 0 0 18px rgba(255, 106, 213, 0.25) inset; }
 .lvl-arrow {
   width: 40px; height: 40px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(255, 255, 255, 0.08);
   color: var(--ink); font-size: 24px; font-weight: 900; cursor: pointer; line-height: 1;

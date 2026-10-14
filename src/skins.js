@@ -206,6 +206,25 @@ export const SKINS = [
     aura: '#38f6ff', trail: '#38f6ff',
   },
   {
+    id: 'phoenix', name: 'Phoenix', desc: 'Sunset feathers: gold at the head, burning pink to the tail.',
+    swatch: 'linear-gradient(90deg, #ffe08a, #ff9a3a 35%, #ff4f8a 70%, #7a2aa8)',
+    unlock: { stat: 'maxZone', value: 4, label: 'Reach Sunset Heavens' },
+    color(d, t, c) {
+      if (belly(t)) return c.set('#ffe2b0');
+      const k = Math.min(1, d / 14);
+      c.set('#ffd25a').lerp(c.clone().set('#ff5a8a'), Math.min(1, k * 1.6));
+      if (k > 0.6) c.lerp(c.clone().set('#7a2aa8'), (k - 0.6) * 2);
+      // feather chevrons along the back
+      if (fract(d * 1.6 - Math.abs(Math.cos(t)) * 0.5) < 0.18 && dorsal(t) > 0) c.lerp(c.clone().set('#fff2c0'), 0.7);
+      return c;
+    },
+    glow: (d, t) => (fract(d * 1.6 - Math.abs(Math.cos(t)) * 0.5) < 0.18 && dorsal(t) > 0 ? 0.9 : 0.12),
+    anim: 'pulse',
+    mat: { roughness: 0.3, metalness: 0.2 },
+    head: { top: '#ffb43a', side: '#ffd25a', belly: '#ffe2b0', accent: '#fff2c0', eye: '#ff3d8a', eyeGlow: 2.4 },
+    aura: '#ff8a3a', trail: '#ff6aa8',
+  },
+  {
     id: 'ghost', name: 'Phantom', desc: 'A pale spirit with an eerie glow.',
     swatch: 'radial-gradient(circle at 50% 40%, #ffffff, #cfe6ff 50%, #7a9ac8)',
     unlock: { stat: 'games', value: 10, label: 'Play 10 runs' },

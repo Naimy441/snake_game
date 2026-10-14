@@ -17,6 +17,21 @@ void main(){ float f = pow(1.0 - abs(dot(vN, vV)), 2.2); float a = f * uAmount *
 
 const ANIM = { none: 0, rainbow: 1, pulse: 2, flow: 3 };
 
+// Jetpack flame: white-hot at the nozzle, through gold to a pink-orange tip
+// (uv.y runs from the nozzle (0) to the tip (1)), flickering and a little
+// bluer when rushing.
+const FLAME_VS = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+const FLAME_FS = `uniform float uTime; uniform float uHot; varying vec2 vUv;
+void main(){
+  float y = vUv.y;
+  float n = 0.75 + 0.25 * sin(vUv.x * 40.0 + uTime * 60.0 + y * 12.0);
+  vec3 hot = mix(vec3(1.0, 0.97, 0.85), vec3(0.75, 0.95, 1.0), uHot);
+  vec3 col = mix(hot, vec3(1.0, 0.62, 0.15), smoothstep(0.0, 0.45, y));
+  col = mix(col, vec3(1.0, 0.25, 0.45), smoothstep(0.45, 1.0, y));
+  float a = pow(1.0 - y, 1.6) * n;
+  gl_FragColor = vec4(col * a * 2.6, a);
+}`;
+
 const GHOST_VS = `varying vec3 vN; varying vec3 vV; varying float vD;
 void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); vD = uv.x / 2.2; gl_Position = projectionMatrix * mv; }`;
 const GHOST_FS = `uniform vec3 uColor; uniform float uTime; uniform float uOpacity; uniform float uWait; varying vec3 vN; varying vec3 vV; varying float vD;
@@ -71,9 +86,16 @@ export class SnakeView {
     this.path = new SnakePath(maxCells + 4);
     this.radial = radial;
     this.maxRings = Math.ceil((maxCells + 2) / STEP) + 4;
-    this.sample = new Float32Array(4);
+    this.sample = new Float32Array(6);
     this.headPos = new THREE.Vector3();
     this.headDir = new THREE.Vector3(0, 0, -1);
+    this.headUp = new THREE.Vector3(0, 1, 0);
+    this.upRef = new THREE.Vector3(0, 1, 0);
+    this.tmpSide = new THREE.Vector3();
+    this.tmpTan = new THREE.Vector3();
+    this.tmpUp = new THREE.Vector3();
+    this.tmpX = new THREE.Vector3();
+    this.tmpM = new THREE.Matrix4();
     this.travel = 0;
     this.wiggle = 1;
 
@@ -159,6 +181,7 @@ export class SnakeView {
     this.group.add(this.aura);
 
     this.buildHead(scaleMap);
+    this.buildJetpack();
     this.applySkin(skin);
     this.setAccessory(accessory);
   }
@@ -254,6 +277,117 @@ export class SnakeView {
     this.tongue.visible = false;
     this.setAccessory('none');
     this.aura.visible = false;
+    this.group.remove(this.jetpack);
+    this.jetpack = null;
+  }
+
+  // The jetpack for Sunset Heavens: twin tanks on a harness around the body,
+  // with flickering additive flames that stretch when rushing.
+  buildJetpack() {
+    const jp = new THREE.Group();
+    const metal = new THREE.MeshStandardMaterial({ color: '#dfe4ee', metalness: 0.85, roughness: 0.22, envMapIntensity: 1.6 });
+    const dark = new THREE.MeshStandardMaterial({ color: '#262b38', metalness: 0.6, roughness: 0.4 });
+    const accent = new THREE.MeshStandardMaterial({ color: '#ff7a2a', emissive: '#ff5a1a', emissiveIntensity: 1.4, roughness: 0.3 });
+    this.jetMats = [metal, dark, accent];
+    const harness = new THREE.Mesh(new THREE.TorusGeometry(0.355, 0.035, 8, 28), dark);
+    harness.scale.set(1, 0.84, 1);
+    harness.position.y = -0.02;
+    jp.add(harness);
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.06, 0.34), dark);
+    plate.position.set(0, 0.29, -0.02);
+    jp.add(plate);
+    const tankGeo = new THREE.CylinderGeometry(0.085, 0.085, 0.44, 16);
+    tankGeo.rotateX(Math.PI / 2);
+    const capGeo = new THREE.SphereGeometry(0.085, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2);
+    capGeo.rotateX(Math.PI / 2);
+    const ringGeo = new THREE.TorusGeometry(0.088, 0.014, 6, 18);
+    const nozGeo = new THREE.CylinderGeometry(0.055, 0.08, 0.1, 14, 1, true);
+    nozGeo.rotateX(Math.PI / 2);
+    const flameGeo = new THREE.ConeGeometry(0.07, 1, 14, 1, true);
+    flameGeo.rotateX(-Math.PI / 2);
+    flameGeo.translate(0, 0, -0.5);
+    this.jetUniforms = { uTime: { value: 0 }, uHot: { value: 0 } };
+    const flameMat = new THREE.ShaderMaterial({
+      uniforms: this.jetUniforms,
+      vertexShader: FLAME_VS,
+      fragmentShader: FLAME_FS,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    this.jetMats.push(flameMat);
+    this.flames = [];
+    this.nozzles = [];
+    for (const sx of [-1, 1]) {
+      const x = sx * 0.15;
+      const tank = new THREE.Mesh(tankGeo, metal);
+      tank.position.set(x, 0.33, 0);
+      tank.castShadow = true;
+      const cap = new THREE.Mesh(capGeo, metal);
+      cap.position.set(x, 0.33, 0.22);
+      const ring = new THREE.Mesh(ringGeo, accent);
+      ring.position.set(x, 0.33, 0.08);
+      const noz = new THREE.Mesh(nozGeo, dark);
+      noz.position.set(x, 0.33, -0.27);
+      const flame = new THREE.Mesh(flameGeo, flameMat);
+      flame.position.set(x, 0.33, -0.31);
+      flame.renderOrder = 5;
+      const inner = new THREE.Mesh(flameGeo, flameMat);
+      inner.scale.set(0.55, 0.55, 0.6);
+      flame.add(inner);
+      jp.add(tank, cap, ring, noz, flame);
+      this.flames.push(flame);
+      this.nozzles.push(new THREE.Vector3(x, 0.33, -0.36));
+    }
+    this.nozzleWorld = [new THREE.Vector3(), new THREE.Vector3()];
+    this.jetBack = new THREE.Vector3(0, 0, -1);
+    this.jetAmt = 0;
+    jp.visible = false;
+    jp.scale.setScalar(0.001);
+    this.jetpack = jp;
+    this.group.add(jp);
+  }
+
+  // Up for the head: world-up while level; climbing or diving straight, the
+  // back faces away from (or towards) the heading the snake left.
+  headUpTarget(tan, facing, flying, out) {
+    if (!flying || Math.abs(tan.y) < 0.98) {
+      out.copy(UP).addScaledVector(tan, -tan.y);
+      if (out.lengthSq() > 1e-6) return out.normalize();
+    }
+    const f = facing || { x: 0, z: -1 };
+    const sg = Math.sign(tan.y) || 1;
+    return out.set(-f.x * sg, 0, -f.z * sg).normalize();
+  }
+
+  placeJetpack(cx, cy, cz, tan, up, side, r) {
+    const jp = this.jetpack;
+    jp.position.set(cx, cy, cz);
+    this.tmpX.crossVectors(up, tan).normalize();
+    this.tmpM.makeBasis(this.tmpX, up, tan);
+    jp.quaternion.setFromRotationMatrix(this.tmpM);
+    this.jetRadius = r;
+  }
+
+  updateJetpack(game, time, dt, rushGlow) {
+    const target = game.flying ? 1 : 0;
+    this.jetAmt += (target - this.jetAmt) * Math.min(1, dt * 4);
+    const jp = this.jetpack;
+    jp.visible = this.jetAmt > 0.01;
+    if (!jp.visible) return;
+    const a = this.jetAmt;
+    jp.scale.setScalar(Math.max(0.001, a + Math.sin(Math.min(1, a) * Math.PI) * 0.25));
+    this.jetUniforms.uTime.value = time;
+    this.jetUniforms.uHot.value = rushGlow;
+    const len = (0.42 + rushGlow * 0.55) * a;
+    for (const f of this.flames) {
+      const flick = 0.85 + 0.15 * Math.sin(time * 47 + f.position.x * 40) + 0.08 * Math.sin(time * 91);
+      f.scale.set(1 + rushGlow * 0.4, 1 + rushGlow * 0.4, Math.max(0.01, len * flick));
+    }
+    jp.updateMatrixWorld();
+    this.nozzles.forEach((n, i) => this.nozzleWorld[i].copy(n).applyMatrix4(jp.matrixWorld));
+    this.jetBack.set(0, 0, -1).applyQuaternion(jp.quaternion);
   }
 
   setAccessory(id) {
@@ -362,7 +496,13 @@ export class SnakeView {
 
   // t: 0..1 progress through the current step. lunge: extra forward travel
   // used by the death animation.
-  update(game, t, time, toWorld, { lunge = 0, rushGlow = 0, deathFlash = 0 } = {}) {
+  //
+  // Each ring of the body gets a frame (forward, up, side). On the ground up
+  // is always world-up. In the sky the snake climbs and dives, so the head's
+  // up comes from its heading (its back faces away from where it was flying
+  // when it pitched up) and is carried down the body by parallel transport,
+  // which bends the frame smoothly through every corner without twisting.
+  update(game, t, time, toWorld, { lunge = 0, rushGlow = 0, deathFlash = 0, dt = 1 / 60 } = {}) {
     const path = this.path;
     path.setFromCells(game.cells, game.removedTail, toWorld);
     const L = path.length;
@@ -378,13 +518,34 @@ export class SnakeView {
     const N = this.normals;
     let rings = Math.min(this.maxRings - 1, Math.floor(total / STEP) + 1);
     const tailTaper = Math.min(total * 0.55, 3.2);
-    const side = new THREE.Vector3();
-    const tan = new THREE.Vector3();
+    const side = this.tmpSide;
+    const tan = this.tmpTan;
+    const up = this.tmpUp;
+
+    // head frame
+    path.sample(sHead, s);
+    tan.set(s[3], s[4], s[5]);
+    this.headUpTarget(tan, game.facing, game.flying, up);
+    if (game.flying) {
+      // ease towards it: a change of heading reads as a quick barrel roll
+      this.upRef.lerp(up, Math.min(1, dt * 12));
+      this.upRef.addScaledVector(tan, -this.upRef.dot(tan));
+      if (this.upRef.lengthSq() < 1e-4) this.upRef.copy(up);
+      this.upRef.normalize();
+    } else this.upRef.copy(UP);
+    up.copy(this.upRef);
+
+    const jetD = 0.75;
+    let jetDone = !this.jetpack;
     for (let i = 0; i <= rings; i++) {
       const d = i === rings ? total : i * STEP;
       path.sample(sHead + d, s);
-      tan.set(s[2], 0, s[3]);
-      side.crossVectors(tan, UP).normalize();
+      tan.set(s[3], s[4], s[5]);
+      // parallel transport: drop the part of up that now points along the body
+      up.addScaledVector(tan, -up.dot(tan));
+      if (up.lengthSq() < 1e-6) up.copy(this.upRef);
+      up.normalize();
+      side.crossVectors(tan, up).normalize();
       // radius profile: slim neck, full body, long taper to the tail tip
       let r = 0.34;
       if (d < 0.5) r = 0.27 + 0.07 * (d / 0.5);
@@ -393,25 +554,35 @@ export class SnakeView {
       // gentle world-fixed slither wave, faded in behind the head
       const amp = this.wiggle * 0.07 * Math.min(1, d / 1.4) * Math.min(1, (total - d) / 1.5 + 0.3);
       const off = amp * Math.sin((this.travel - d) * 2.6);
-      const cx = s[0] + side.x * off;
-      const cz = s[1] + side.z * off;
       const rh = r * 0.82;
-      const cy = rh * 0.92;
+      const lift = rh * 0.92;
+      const cx = s[0] + side.x * off + up.x * lift;
+      const cy = s[1] + side.y * off + up.y * lift;
+      const cz = s[2] + side.z * off + up.z * lift;
       for (let j = 0; j <= R; j++) {
         const theta = (j / R) * Math.PI * 2;
         const c = Math.cos(theta);
         const sn = Math.sin(theta);
         const k = (i * (R + 1) + j) * 3;
-        P[k] = cx + side.x * c * r;
-        P[k + 1] = cy + sn * rh;
-        P[k + 2] = cz + side.z * c * r;
-        N[k] = side.x * c;
-        N[k + 1] = sn;
-        N[k + 2] = side.z * c;
+        const nx = side.x * c + up.x * sn;
+        const ny = side.y * c + up.y * sn;
+        const nz = side.z * c + up.z * sn;
+        P[k] = cx + side.x * c * r + up.x * sn * rh;
+        P[k + 1] = cy + side.y * c * r + up.y * sn * rh;
+        P[k + 2] = cz + side.z * c * r + up.z * sn * rh;
+        N[k] = nx;
+        N[k + 1] = ny;
+        N[k + 2] = nz;
       }
       if (i === 0) {
-        this.headPos.set(s[0], 0, s[1]);
-        this.headDir.copy(tan).normalize();
+        this.headPos.set(s[0], s[1], s[2]);
+        this.headDir.copy(tan);
+        this.headUp.copy(up);
+      }
+      // the jetpack rides on the back, a little behind the head
+      if (!jetDone && d >= jetD) {
+        jetDone = true;
+        this.placeJetpack(cx, cy, cz, tan, up, side, r);
       }
     }
     this.posAttr.needsUpdate = true;
@@ -423,8 +594,13 @@ export class SnakeView {
     this.geo.setDrawRange(0, rings * R * 6);
 
     // head sits slightly ahead of the first ring
-    this.head.position.set(this.headPos.x + this.headDir.x * 0.1, 0.25, this.headPos.z + this.headDir.z * 0.1);
-    this.head.rotation.set(0, Math.atan2(this.headDir.x, this.headDir.z), 0);
+    const hd = this.headDir;
+    const hu = this.headUp;
+    this.head.position.copy(this.headPos).addScaledVector(hd, 0.1).addScaledVector(hu, 0.25);
+    side.crossVectors(hu, hd).normalize();
+    this.tmpM.makeBasis(side, hu, hd);
+    this.head.quaternion.setFromRotationMatrix(this.tmpM);
+    if (this.jetpack) this.updateJetpack(game, time, dt, rushGlow);
 
     // tongue flicks every couple of seconds
     const ph = (time % 2.3) / 0.32;
@@ -462,5 +638,6 @@ export class SnakeView {
     this.bodyMat.dispose();
     this.headMat.dispose();
     this.auraMat.dispose();
+    if (this.jetMats) this.jetMats.forEach((m) => m.dispose());
   }
 }

@@ -12,7 +12,7 @@ test('snake starts with length 4 heading up and moves one cell per step', () => 
   assert.equal(g.cells.length, 4);
   const h = { ...g.head };
   g.step();
-  assert.deepEqual(g.head, { x: h.x, z: h.z - 1 });
+  assert.deepEqual(g.head, { x: h.x, z: h.z - 1, y: 0 });
   assert.equal(g.cells.length, 4);
 });
 
@@ -127,7 +127,7 @@ test('best score tracks the highest score', () => {
 
 // ---------------------------------------------------------------- new mechanics
 import {
-  LEVEL_AT, zoneForLevel, OBSTACLE_WARN_MS, BOOST_TICKS, CHAIN_BONUS_PER_LINK, PREY_LIFETIME_MS, MAX_OBSTACLES,
+  LEVEL_AT, zoneForLevel, MAX_LEVEL, ZONE_STARTS, SKY_ZONE, SKY_H, SKY_MID, OBSTACLE_WARN_MS, BOOST_TICKS, CHAIN_BONUS_PER_LINK, PREY_LIFETIME_MS, MAX_OBSTACLES,
 } from '../src/game/SnakeGame.js';
 
 const runFor = (g, ms) => {
@@ -141,7 +141,9 @@ test('zones change every few speed levels', () => {
   assert.equal(zoneForLevel(3), 1);
   assert.equal(zoneForLevel(6), 2);
   assert.equal(zoneForLevel(9), 3);
-  assert.equal(zoneForLevel(12), 3);
+  assert.equal(zoneForLevel(11), 3);
+  assert.equal(zoneForLevel(12), 4);
+  assert.equal(zoneForLevel(15), 4);
 });
 
 test('levelling up reports the level and zone change', () => {
@@ -344,7 +346,7 @@ test('a late turn redoes the last straight step in the new direction', () => {
   assert.ok(g.canRegrace());
   const ev = g.regrace(DIRS.left);
   assert.ok(ev && ev.regraced);
-  assert.deepEqual(g.head, { x: h0.x - 1, z: h0.z });
+  assert.deepEqual(g.head, { x: h0.x - 1, z: h0.z, y: 0 });
   assert.deepEqual(g.dir, DIRS.left);
   assert.equal(g.cells.length, 4);
   assert.equal(g.ticks, 1);
@@ -426,11 +428,11 @@ test('the drawn head never visibly jumps when a turn lands, even via the grace w
   const headAt = (cells, removed, t) => {
     const p = new SnakePath(64);
     p.setFromCells(cells, removed, toWorld);
-    const o = new Float32Array(4);
+    const o = new Float32Array(6);
     p.sample(CORNER + 1 - t - HEAD_LEAD, o);
-    return [o[0], o[1]];
+    return [o[0], o[1], o[2]];
   };
-  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
   // normal turn across a tick: last frame of a straight step vs first frame after the turning step
   const g = new SnakeGame({ rng: seq([0.5]) });
   g.step();
@@ -447,6 +449,24 @@ test('the drawn head never visibly jumps when a turn lands, even via the grace w
   h.regrace(DIRS.left);
   const post = headAt(h.cells, h.removedTail, 0.25);
   assert.ok(dist(pre, post) < 0.26, `grace redo jump ${dist(pre, post).toFixed(3)}`);
+  // flying: a late climb is just as smooth
+  const toWorld3 = (x, z, y) => ({ x, y: y || 0, z });
+  const headAt3 = (cells, removed, t) => {
+    const p = new SnakePath(64);
+    p.setFromCells(cells, removed, toWorld3);
+    const o = new Float32Array(6);
+    p.sample(CORNER + 1 - t - HEAD_LEAD, o);
+    return [o[0], o[1], o[2]];
+  };
+  const f = new SnakeGame({ rng: seq([0.5]) });
+  f.startAtLevel(12);
+  f.food = null;
+  f.step();
+  f.step();
+  const a = headAt3(f.cells, f.removedTail, 0.25);
+  f.regrace(f.pitchDir(true));
+  const b = headAt3(f.cells, f.removedTail, 0.25);
+  assert.ok(dist(a, b) < 0.26, `grace climb jump ${dist(a, b).toFixed(3)}`);
 });
 
 test('top speed stays humanly steerable', () => {
@@ -482,14 +502,16 @@ test('the first zone eases in: short levels, slower moves, no pillars', () => {
 test('level thresholds and the speed curve stay consistent', () => {
   const g = new SnakeGame();
   let prev = Infinity;
-  for (let l = 0; l <= 12; l++) {
+  for (let l = 0; l <= MAX_LEVEL; l++) {
     g.foodEaten = LEVEL_AT[l];
     assert.equal(g.level, l);
-    assert.ok(g.baseInterval() <= prev, 'never slows down');
+    // the sky starts slower (flying is a new skill), then speeds up again
+    if (l === ZONE_STARTS[SKY_ZONE]) assert.ok(g.baseInterval() > prev, 'lift-off slows down');
+    else assert.ok(g.baseInterval() <= prev, 'never slows down within a zone');
     prev = g.baseInterval();
   }
   g.foodEaten = 9999;
-  assert.equal(g.level, 12);
+  assert.equal(g.level, MAX_LEVEL);
   assert.equal(g.levelProgress().max, true);
 });
 
@@ -613,6 +635,154 @@ test('starting at a later level sets speed, zone, pillars and pads', () => {
   assert.equal(fresh.obstacles.length, 0);
   const top = new SnakeGame();
   top.startAtLevel(99);
-  assert.equal(top.level, 12);
-  assert.ok(top.obstacles.length <= 12);
+  assert.equal(top.level, MAX_LEVEL);
+  assert.ok(top.flying, 'the last zone is flown');
+  assert.ok(top.obstacles.length <= MAX_OBSTACLES);
+});
+
+// ---------------------------------------------------------------- Sunset Heavens (flight)
+function skyGame(rng = seq([0.5])) {
+  const g = new SnakeGame({ rng });
+  g.startAtLevel(ZONE_STARTS[SKY_ZONE]);
+  return g;
+}
+
+test('reaching Sunset Heavens lifts the snake off into a box of air', () => {
+  const g = new SnakeGame({ rng: seq([0.7]) });
+  g.foodEaten = LEVEL_AT[ZONE_STARTS[SKY_ZONE]] - 1;
+  g.prey = { x: 1, z: 1, px: 1, pz: 1, id: 9, expires: 1e9, acc: 0, moves: 0, dir: DIRS.up };
+  g.food = { x: g.head.x, z: g.head.z - 1, type: 'orb', id: 1 };
+  const ev = g.step();
+  assert.equal(ev.levelUp.zone, SKY_ZONE);
+  assert.ok(ev.levelUp.liftoff);
+  assert.ok(g.flying);
+  assert.equal(g.height, SKY_H);
+  assert.ok(g.cells.every((c) => c.y === SKY_MID), 'the snake keeps its shape, at the middle layer');
+  assert.equal(g.prey, null, 'the mouse stays on the ground');
+  assert.ok(g.food && g.food.y >= 0 && g.food.y < SKY_H);
+  // flying starts slower than the end of Cyber Overdrive
+  assert.ok(g.baseInterval() > 100);
+});
+
+test('flight controls: climb, level out, dive, and turn relative to the facing', () => {
+  const g = skyGame();
+  const h0 = { ...g.head };
+  assert.ok(g.pitch(true));
+  g.step();
+  assert.deepEqual(g.dir, DIRS.rise);
+  assert.equal(g.head.y, h0.y + 1);
+  assert.equal(g.pitch(true), false, 'already climbing');
+  // left while climbing turns left of the way we were flying (up = north)
+  assert.ok(g.turn(-1));
+  g.step();
+  assert.deepEqual(g.dir, DIRS.left);
+  assert.deepEqual(g.facing, DIRS.left);
+  // dive, then "up" levels out along the facing
+  assert.ok(g.pitch(false));
+  g.step();
+  assert.deepEqual(g.dir, DIRS.dive);
+  assert.ok(g.pitch(true));
+  g.step();
+  assert.deepEqual(g.dir, DIRS.left);
+  assert.ok(g.alive);
+  // on the ground there is no altitude to change
+  const ground = new SnakeGame();
+  assert.equal(ground.pitch(true), false);
+  assert.equal(ground.queueDirection(DIRS.rise), false);
+});
+
+test('the laser fence kills at the top and bottom of the sky box', () => {
+  for (const up of [true, false]) {
+    const g = skyGame();
+    g.food = null;
+    g.pitch(up);
+    let ev = {};
+    for (let i = 0; i < SKY_H && g.alive; i++) ev = g.step();
+    assert.equal(g.alive, false);
+    assert.equal(ev.cause, 'laser');
+    assert.equal(g.deathCause, 'laser');
+  }
+});
+
+test('pickups only count at the right altitude', () => {
+  const g = skyGame();
+  const h = g.head;
+  g.food = { x: h.x, z: h.z - 1, y: h.y + 1, type: 'orb', id: 77 };
+  let ev = g.step();
+  assert.equal(ev.ate, null, 'flew underneath it');
+  g.food = { x: g.head.x, z: g.head.z - 1, y: g.head.y, type: 'orb', id: 78 };
+  ev = g.step();
+  assert.ok(ev.ate);
+  assert.equal(ev.ate.y, g.head.y);
+});
+
+test('sky spawns fill the whole box and stay off the snake', () => {
+  const g = skyGame(Math.random);
+  const ys = new Set();
+  for (let i = 0; i < 300; i++) {
+    const f = g.spawn('orb');
+    assert.ok(g.inBounds(f.x, f.z, f.y));
+    assert.ok(!g.occupied(f.x, f.z, false, f.y));
+    assert.ok(!g.obstacleAt(f.x, f.z, false));
+    ys.add(f.y);
+  }
+  assert.ok(ys.size >= SKY_H - 1, 'apples appear at every altitude');
+  for (let i = 0; i < 20; i++) {
+    g.chain = null;
+    const ch = g.spawnChain();
+    if (!ch) continue;
+    for (let k = 1; k < ch.links.length; k++) {
+      const a = ch.links[k - 1];
+      const b = ch.links[k];
+      assert.equal(Math.abs(a.x - b.x) + Math.abs(a.z - b.z) + Math.abs(a.y - b.y), 2);
+    }
+    assert.ok(ch.links.every((l) => l.y >= 1 && l.y <= SKY_H - 2));
+  }
+  g.pads = [];
+  for (let i = 0; i < 3; i++) {
+    const p = g.spawnPad();
+    assert.ok(p.y >= 1 && p.y <= SKY_H - 2, 'boost rings float inside the box');
+  }
+  assert.equal(g.spawnPrey(), null);
+});
+
+test('laser columns block every layer of their cell', () => {
+  const g = skyGame();
+  g.obstacles = [];
+  g.food = null;
+  const h = g.head;
+  g.obstacles.push({ x: h.x, z: h.z - 2, solid: true, solidAt: 0, id: 900 });
+  g.pitch(true);
+  g.step(); // climb one layer, still in the column's line
+  g.pitch(false); // level out north
+  g.step();
+  const ev = g.step();
+  assert.equal(ev.cause, 'beam');
+});
+
+test('a late climb redoes the last straight step upwards', () => {
+  const g = skyGame();
+  g.food = null;
+  g.step();
+  const h = { ...g.head };
+  const ev = g.regrace(g.pitchDir(true));
+  assert.ok(ev && ev.regraced);
+  assert.deepEqual(g.head, { x: h.x, z: h.z + 1, y: h.y + 1 });
+});
+
+test('the ghost flies: it follows the player into the sky and races through 3D', () => {
+  const g = new SnakeGame({ rng: Math.random });
+  g.startAtLevel(ZONE_STARTS[SKY_ZONE] - 1);
+  const gh = new GhostBot(g);
+  gh.reset(true);
+  g.enterSky();
+  g.addObstacles(3);
+  g.obstacles.forEach((o) => (o.solid = true));
+  g.food = g.spawn('orb'); // never inside a laser column
+  const eaten = runGhost(g, gh, 30);
+  assert.equal(eaten, 30);
+  assert.ok(gh.flying);
+  assert.equal(gh.respawns, 0, 'never trapped itself');
+  assert.ok(gh.cells.every((c) => g.inBounds(c.x, c.z, c.y) && !g.obstacleAt(c.x, c.z)));
+  assert.ok(new Set(gh.cells.map((c) => c.y)).size > 1, 'used more than one altitude');
 });

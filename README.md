@@ -3,8 +3,9 @@
 Classic Snake reimagined as a fast, cinematic 3D browser game. Race a scaly
 serpent around a floating checkered island, grab spinning crystal apples,
 chase down a golden mouse, string together orb chains and hit boost pads, while the world
-transforms around you through four zones, each with its own adaptive
-chiptune soundtrack. Play from overhead, from a chase camera behind the head,
+transforms around you through five zones, each with its own adaptive
+chiptune soundtrack. In the last zone the snake straps on a jetpack and flies
+through a laser-fenced box of sky at sunset, in full 3D. Play from overhead, from a chase camera behind the head,
 or in first person, and switch at any moment: every view plays the same game.
 
 Built with [Three.js](https://threejs.org/) and [Vite](https://vitejs.dev/).
@@ -49,6 +50,7 @@ your own body.
 | Restart | R | same |
 | Mute | M | same |
 | Ghost guide on / off | G | same |
+| Climb / dive (Sunset Heavens) | ↑ / ↓ (the other key levels out) | same |
 | Pick the starting level (menu) | Left / Right | |
 
 **Touch:** swipe to steer in the overhead view; in the chase and first-person
@@ -89,8 +91,8 @@ camera, Start pauses, bumpers turn left/right.
 - **Zones:** every 3 speed levels the world transforms. A glowing wave sweeps
   out from the arena, the old scenery shrinks away, new scenery grows in, and
   the sky, light, water, board and music all change: Emerald Coast, Golden
-  Canyon, Neon Night, then Cyber Overdrive. The visuals get more intense with
-  each level inside a zone too.
+  Canyon, Neon Night, Cyber Overdrive, then Sunset Heavens. The visuals get
+  more intense with each level inside a zone too.
 - **Slow motion on level-ups:** while the level-up banner or a new zone's
   title card covers the screen, the game drops into slow motion (about a
   quarter speed for a new zone, a short dip for a normal level-up), with
@@ -101,6 +103,41 @@ camera, Start pauses, bumpers turn left/right.
   from any lower level) with the ‹ › buttons or Left/Right on the menu. The run
   starts with that level's speed, zone, apples-to-next-level and pillars.
 - At game over you get a rank from D to S.
+
+### Sunset Heavens: flying in 3D
+
+Reach level 13 (the end of Cyber Overdrive) and the snake lifts off. A
+jetpack ignites on its back, the island sinks away into a sea of clouds under
+a huge striped sunset sun, and the board becomes a box of air 21 x 21 cells
+wide and 9 layers tall, fenced in by lasers. The snake keeps its shape and
+starts in the middle layer, level with where the board was.
+
+- **Flight controls (every camera):** ← → turn left and right, ↑ climbs and
+  ↓ dives. While climbing or diving, the opposite key levels out again in the
+  direction you were flying, and ← → turn you back to level flight. Q/E turn
+  too. On touch, swipe in any direction or use the ▲ ▼ buttons; on a gamepad
+  the D-pad does the same.
+- **Cameras:** in the sky the overhead view becomes a high chase camera
+  behind the snake (a fixed overhead view can't show height). The chase and
+  first-person cameras tilt up a climb and down a dive.
+- **Seeing depth:** an altitude gauge on the left shows your layer (cyan) and
+  the apple's (red). The laser walls glow in a band at your altitude and the
+  apple's, light up as you get close, and the floor marks the spot right
+  under your head with a plumb line down to it. Apples and prisms drop a beam
+  to the floor, and the compass says whether the apple is above (▲) or below
+  (▼).
+- **Hazards:** flying out of the box hits the laser fence. Pillars become
+  laser columns that run through every layer of their cell, and a few more
+  switch on at the sky's level-ups (they flicker before going solid).
+- **Pickups:** apples, prisms and orb chains float at any altitude (chains
+  can run up and down). Boost pads become spinning gold boost rings to fly
+  through. The golden mouse can't fly, so it stays on the ground.
+- **Speed:** flying is a new skill, so the sky starts slower again (about 8
+  moves a second) and speeds back up over its four levels.
+- The ghost guide flies too, with the same perfect pathfinding in 3D.
+- Reaching Sunset Heavens unlocks the **Phoenix** skin in the Garage, and the
+  level select lets you start a run straight in the sky once you've been
+  there.
 
 ### Controls that feel instant
 
@@ -140,10 +177,11 @@ Turning it on mid-run starts it from your snake's current position.
 Open the **Garage** from the main menu (or after a run) to customise your
 snake. The camera swings in close for a live preview.
 
-- **16 skins:** Viper, Coral, Python, Emerald Boa, Tiger, Candy Cane, Glacier,
+- **17 skins:** Viper, Coral, Python, Emerald Boa, Tiger, Candy Cane, Glacier,
   plus unlockables: Neon Runner and Circuit (glowing light lines), Magma
   (molten cracks that pulse), Golden King, Chrome (mirror metal), Galaxy
-  (twinkling stars), Prism (an animated rainbow), Dragon and Phantom.
+  (twinkling stars), Prism (an animated rainbow), Dragon, Phoenix (sunset
+  feathers, from reaching Sunset Heavens) and Phantom.
 - **9 accessories:** shades, top hat, party hat, horns, bow, flower, plus an
   unlockable crown and halo.
 - Locked items show what unlocks them, with your progress (for example
@@ -159,7 +197,9 @@ has its own song with a verse and a chorus. Instrument layers (bass, arpeggio,
 drums, lead, chord stabs, a counter-melody and a Rush sparkle) fade in and out
 smoothly as the action heats up, the drums step through three grooves, and
 section and zone changes land on bar lines after a drum fill, so the music
-flows instead of cutting. Pausing muffles it rather than stopping it.
+flows instead of cutting. Pausing muffles it rather than stopping it. Sunset
+Heavens gets a soaring major-key synthwave song, and lift-off has its own
+jetpack-ignition roar.
 
 ### Chase and first-person aids
 
@@ -220,6 +260,7 @@ npm test           # game-rule unit tests (node:test)
 npm run build
 npm run test:e2e   # plays the built game in headless Chromium, saves screenshots to test-results/
 npm run bench      # rough frame-time benchmark of the built game (emulated Retina, High quality)
+LEVEL=12 npm run bench   # the same, flying in Sunset Heavens
 ```
 
 `npm run test:e2e` and `npm run bench` use `playwright-core` and need a
@@ -234,7 +275,9 @@ src/
   game/SnakeGame.js      pure game state and rules: obstacles, chains, prey, pads, zones
   game/GhostBot.js       the ghost guide: a perfect-play bot (safe pathfinding, Rush timing)
   render/World.js        orchestrates sky, sea, island, zone scenery, lighting and zone transitions
-  render/zones.js        the four zones' palettes and post-processing looks
+  render/zones.js        the five zones' palettes and post-processing looks
+  render/Heavens.js      Sunset Heavens backdrop: the sea of clouds and the striped sunset sun
+  render/SkyArena.js     the laser flight box: edges, force-field walls, floor grid, depth cues
   render/Scenery.js      procedural props for each zone, revealed by a growing wave
   render/Island.js       the floating island, the board, bumpers and posts
   render/Sky.js          sky dome (sun, stars, cyber grid) and instanced clouds
@@ -243,12 +286,12 @@ src/
   render/Post.js         fused post-processing pipeline with dynamic render scale
   render/materials.js    reveal, checker and board shaders on standard materials
   render/geo.js          noise and geometry helpers, prop merging
-  render/SnakeView.js    the animated snake (dynamic tube mesh, modelled head, skins, boost aura)
+  render/SnakeView.js    the animated snake (dynamic 3D tube mesh, modelled head, skins, boost aura, jetpack)
   render/accessories.js  hats, horns, shades and other head accessories
   skins.js               skin patterns, accessories and their unlock rules
   render/SnakePath.js    smooth path through grid cells with rounded corners
   render/FoodView.js     crystal apples, prisms, orb chains and the golden mouse
-  render/BoardObjects.js pillars with warnings, and boost pads
+  render/BoardObjects.js pillars with warnings, boost pads, and their sky versions (laser columns, boost rings)
   render/Effects.js      particles, shockwaves, path guide
   render/CameraRig.js    orbit / garage / overhead / chase / first-person cameras and blending
   render/textures.js     procedural textures

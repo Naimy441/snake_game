@@ -269,3 +269,46 @@ export function makeCheckerTexture(a = '#ffffff', b = '#1d3fbf', n = 16) {
   }
   return tex(c, { repeat: true });
 }
+
+// Tileable fractal value noise (grey), for the sea of clouds.
+export function makeNoiseTexture(size = 256) {
+  const rng = mulberry32(77);
+  const c = canvas(size);
+  const g = c.getContext('2d');
+  const img = g.createImageData(size, size);
+  const d = img.data;
+  const acc = new Float32Array(size * size);
+  let amp = 1;
+  let norm = 0;
+  for (let cells = 4; cells <= 64; cells *= 2) {
+    const lat = new Float32Array(cells * cells).map(() => rng());
+    const L = (x, y) => lat[((y % cells) + cells) % cells * cells + (((x % cells) + cells) % cells)];
+    for (let y = 0; y < size; y++) {
+      const fy = (y / size) * cells;
+      const y0 = Math.floor(fy);
+      let ty = fy - y0;
+      ty = ty * ty * (3 - 2 * ty);
+      for (let x = 0; x < size; x++) {
+        const fx = (x / size) * cells;
+        const x0 = Math.floor(fx);
+        let tx = fx - x0;
+        tx = tx * tx * (3 - 2 * tx);
+        const a = L(x0, y0) + (L(x0 + 1, y0) - L(x0, y0)) * tx;
+        const b = L(x0, y0 + 1) + (L(x0 + 1, y0 + 1) - L(x0, y0 + 1)) * tx;
+        acc[y * size + x] += (a + (b - a) * ty) * amp;
+      }
+    }
+    norm += amp;
+    amp *= 0.5;
+  }
+  for (let i = 0; i < size * size; i++) {
+    const v = Math.round((acc[i] / norm) * 255);
+    d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = v;
+    d[i * 4 + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const t = tex(c, { srgb: false, repeat: true });
+  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  return t;
+}

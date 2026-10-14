@@ -497,11 +497,84 @@ function buildCyber(b, rng) {
   }
 }
 
+// A floating sky island: blossom-pink meadow on top, a jagged rock root
+// below, glowing crystals, blossom trees, sometimes a waterfall pouring
+// down into the cloud sea.
+function skyIsle(b, rng, x, y, z, r, falls) {
+  const anchor = V(x, y, z);
+  b.add(xform(new THREE.CylinderGeometry(r, r * 0.94, 0.6, 28), { x, y, z }), { color: '#b2589c', top: '#ffb2d6', anchor, bucket: 'smooth', ao: 1 });
+  const root = clean(cone(r * 0.95, r * 2.1, 12, 4));
+  root.rotateX(Math.PI);
+  displace(root, r * 0.14, 0.22, rng() * 30);
+  xform(root, { x, y: y - 0.3 - r * 1.05, z, ry: rng() * TAU });
+  b.add(root, { color: '#2a1638', top: '#7a4a7a', anchor, bucket: 'flat', ao: 0.5, aoHeight: r });
+  const trees = Math.floor(r / 2.2);
+  for (let i = 0; i < trees; i++) {
+    const a = rng() * TAU;
+    const d = rng() * r * 0.7;
+    const tx = x + Math.cos(a) * d;
+    const tz = z + Math.sin(a) * d;
+    const H = 1.6 + rng() * 1.6;
+    b.add(xform(new THREE.CylinderGeometry(0.12, 0.2, H, 6), { x: tx, y: y + 0.3 + H / 2, z: tz, rz: (rng() - 0.5) * 0.3 }), { color: '#4a2a3a', anchor, bucket: 'smooth' });
+    for (let k = 0; k < 3; k++) {
+      const g = clean(new THREE.IcosahedronGeometry(0.75 + rng() * 0.5, 1));
+      displace(g, 0.18, 1.6, rng() * 10);
+      xform(g, { sy: 0.75, x: tx + (rng() - 0.5) * 0.9, y: y + 0.3 + H + (rng() - 0.3) * 0.6, z: tz + (rng() - 0.5) * 0.9 });
+      b.add(g, { color: '#ff7ab8', top: '#ffd2ea', anchor, bucket: 'foliage', glow: 0.25, ao: 0.6, aoHeight: 0.8 });
+    }
+  }
+  const crystals = 2 + Math.floor(rng() * 3);
+  for (let i = 0; i < crystals; i++) {
+    const a = rng() * TAU;
+    const d = rng() * r * 0.8;
+    const g = new THREE.OctahedronGeometry(0.4 + rng() * 0.5, 0);
+    xform(g, { sy: 2.2, x: x + Math.cos(a) * d, y: y + 1.1, z: z + Math.sin(a) * d, ry: rng() * 3, rz: (rng() - 0.5) * 0.5 });
+    b.add(g, { color: rng() < 0.5 ? '#ffd36a' : '#7ff8ff', glow: 1.6, anchor, bucket: 'flat', ao: 1 });
+  }
+  if (falls && rng() < 0.6) {
+    const a = rng() * TAU;
+    falls.push(makeWaterfall(V(x + Math.cos(a) * (r - 0.3), y + 0.25, z + Math.sin(a) * (r - 0.3)), V(Math.cos(a), 0, Math.sin(a)), 1 + rng()));
+  }
+}
+
+function buildHeavens(b, rng, falls) {
+  // sky islands all around, none close enough to crowd the flight box
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * TAU + (rng() - 0.5) * 0.3;
+    const r = 38 + rng() * 140;
+    const big = i % 4 === 0;
+    // (no waterfalls up here: falling streams read like laser columns)
+    skyIsle(b, rng, Math.cos(a) * r, -16 + rng() * 34, Math.sin(a) * r, big ? 7 + rng() * 4 : 2.5 + rng() * 3.5, null);
+  }
+  // floating gold gates on little islets
+  for (let i = 0; i < 5; i++) {
+    const a = rng() * TAU;
+    const r = 60 + rng() * 60;
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    const y = -6 + rng() * 16;
+    const anchor = V(x, y, z);
+    const yaw = Math.atan2(x, z);
+    b.add(xform(new THREE.TorusGeometry(5, 0.32, 10, 40, Math.PI), { x, y, z, ry: yaw }), { color: '#ffc85a', glow: 2.2, anchor, bucket: 'smooth', ao: 1 });
+    b.add(xform(new THREE.TorusGeometry(5.9, 0.12, 6, 40, Math.PI), { x, y, z, ry: yaw }), { color: '#ff6ad5', glow: 3, anchor, bucket: 'smooth', ao: 1 });
+    skyIsle(b, rng, x, y - 0.4, z, 5.6, null);
+  }
+  // huge distant crystals hanging in the sky
+  for (let i = 0; i < 9; i++) {
+    const a = rng() * TAU;
+    const r = 260 + rng() * 80;
+    const s = 7 + rng() * 8;
+    const g = new THREE.OctahedronGeometry(s, 0);
+    xform(g, { sy: 2.4, x: Math.cos(a) * r, y: 40 + rng() * 70, z: Math.sin(a) * r, ry: rng() * 3, rz: (rng() - 0.5) * 0.4 });
+    b.add(g, { color: rng() < 0.5 ? '#c04a9a' : '#4a7ac8', glow: 0.35, anchor: V(Math.cos(a) * r, 0, Math.sin(a) * r), bucket: 'flat', ao: 1 });
+  }
+}
+
 // One set of props per zone; World drives their reveal waves.
 export class Scenery {
   constructor({ islandChecker, windowTex, waterfallMaterial }) {
     this.zones = [];
-    const builders = [buildCoast, buildCanyon, buildNeon, buildCyber];
+    const builders = [buildCoast, buildCanyon, buildNeon, buildCyber, buildHeavens];
     builders.forEach((build, i) => {
       const rng = mulberry32(100 + i * 31);
       const uniforms = makeRevealUniforms();
@@ -539,6 +612,21 @@ export class Scenery {
           ring.position.y = 26 + k * 10;
           ring.rotation.set(Math.PI / 2 + (k - 1) * 0.35, 0, k * 0.8);
           ring.userData.spin = (k % 2 ? -1 : 1) * (0.05 + k * 0.02);
+          group.add(ring);
+          special.push(ring);
+        }
+      }
+      if (i === 4) {
+        // slow halo rings circling the flight box
+        const cols = ['#ff6ad5', '#ffb46a', '#ffe08a'];
+        for (let k = 0; k < 3; k++) {
+          const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(30 + k * 14, 0.16, 6, 200),
+            new THREE.MeshBasicMaterial({ color: new THREE.Color(cols[k]).multiplyScalar(1.15), fog: false })
+          );
+          ring.position.y = -12 + k * 9;
+          ring.rotation.set(Math.PI / 2 + (k - 1) * 0.22, 0, k * 1.3);
+          ring.userData.spin = (k % 2 ? -1 : 1) * (0.03 + k * 0.015);
           group.add(ring);
           special.push(ring);
         }

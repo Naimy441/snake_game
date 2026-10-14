@@ -112,13 +112,14 @@ class Pickup {
     this.body.add(this.glow);
     this.floor = floorGlow(glowTex, isOrb ? '#ff2a4a' : '#c77dff', 1.9);
     this.group.add(this.floor);
-    this.beam = makeBeam(isOrb ? '#ff3355' : '#c77dff', isOrb ? 7 : 10);
+    this.beamH = isOrb ? 7 : 10;
+    this.beam = makeBeam(isOrb ? '#ff3355' : '#c77dff', this.beamH);
     this.group.add(this.beam);
   }
 
   place(cell, pos) {
     this.cell = cell;
-    this.group.position.set(pos.x, 0, pos.z);
+    this.group.position.set(pos.x, pos.y || 0, pos.z);
     this.group.visible = true;
     this.appear = 0;
     this.eaten = null;
@@ -160,6 +161,19 @@ class Pickup {
     this.beam.material.uniforms.opacity.value = (opts.beam ? 0.34 : 0.14) * pop;
     this.beam.visible = scale > 0.01;
     this.floor.material.opacity = 0.75 * pop * (0.85 + 0.15 * Math.sin(time * 4));
+    // In the sky the beam drops to the floor of the box instead, ending in a
+    // glowing marker, so the pickup's altitude reads at a glance.
+    if (opts.floorY != null) {
+      const drop = Math.max(0.05, this.group.position.y + 0.3 - opts.floorY);
+      this.beam.scale.y = -drop / this.beamH;
+      this.beam.position.y = 0.3;
+      this.floor.position.y = opts.floorY - this.group.position.y + 0.03;
+      this.beam.material.uniforms.opacity.value = (opts.beam ? 0.5 : 0.36) * pop;
+    } else {
+      this.beam.scale.y = 1;
+      this.beam.position.y = 0;
+      this.floor.position.y = 0.03;
+    }
   }
 }
 
@@ -213,14 +227,21 @@ class ChainView {
       this.chainId = ch.id;
       ch.links.forEach((c, i) => {
         const l = this.links[i];
-        const w = toWorld(c.x, c.z);
-        l.position.set(w.x, 0.5, w.z);
         l.visible = true;
         l.userData.pop = -i * 0.12;
         l.userData.gone = null;
       });
       for (let i = ch.links.length; i < this.links.length; i++) this.links[i].visible = false;
     }
+    // placed every sync: links rise with the board at lift-off
+    ch.links.forEach((c, i) => {
+      const l = this.links[i];
+      const w = toWorld(c.x, c.z, c.y);
+      l.position.x = w.x;
+      l.position.z = w.z;
+      l.userData.baseY = w.y || 0;
+      l.userData.fg.visible = !game.flying;
+    });
     for (let i = 0; i < ch.links.length; i++) {
       const l = this.links[i];
       if (i < ch.next && l.visible && !l.userData.gone) l.userData.gone = { t: 0, eaten: true };
@@ -228,11 +249,16 @@ class ChainView {
     // dots between remaining links
     let k = 0;
     for (let i = Math.max(ch.next, 0); i < ch.links.length - 1; i++) {
-      const a = toWorld(ch.links[i].x, ch.links[i].z);
-      const b = toWorld(ch.links[i + 1].x, ch.links[i + 1].z);
+      const la = ch.links[i];
+      const lb = ch.links[i + 1];
+      const a = toWorld(la.x, la.z, la.y);
+      const b = toWorld(lb.x, lb.z, lb.y);
+      // dots run along the board, or straight between orbs in the sky
+      const ya = game.flying ? (a.y || 0) + 0.5 : 0.12;
+      const yb = game.flying ? (b.y || 0) + 0.5 : 0.12;
       for (let d = 1; d <= 3 && k < 16; d++) {
         const t = d / 4;
-        this.tmpM.makeTranslation(a.x + (b.x - a.x) * t, 0.12, a.z + (b.z - a.z) * t);
+        this.tmpM.makeTranslation(a.x + (b.x - a.x) * t, ya + (yb - ya) * t, a.z + (b.z - a.z) * t);
         this.dots.setMatrixAt(k++, this.tmpM);
       }
     }
@@ -262,7 +288,7 @@ class ChainView {
         }
       }
       l.scale.setScalar(Math.max(0.001, s));
-      l.position.y = 0.5 + Math.sin(time * 3 + i) * 0.06 * (rm ? 0.3 : 1);
+      l.position.y = (u.baseY || 0) + 0.5 + Math.sin(time * 3 + i) * 0.06 * (rm ? 0.3 : 1);
       u.core.rotation.y += dt * 2;
       u.shell.rotation.y -= dt * 1.2;
       u.shell.rotation.x += dt * 0.6;
@@ -426,7 +452,8 @@ export class FoodView {
       if (p.group.visible) p.hide();
       return;
     }
-    if (!p.cell || p.cell.id !== food.id) p.place(food, toWorld(food.x, food.z));
+    if (!p.cell || p.cell.id !== food.id) p.place(food, toWorld(food.x, food.z, food.y));
+    else if (!p.eaten) p.group.position.y = toWorld(food.x, food.z, food.y).y || 0; // lift-off
   }
 
   markEaten(kind, towards, duration) {
