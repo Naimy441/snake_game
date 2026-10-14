@@ -41,7 +41,40 @@ function glowSprite(tex, color, scale, opacity = 0.5) {
   return s;
 }
 
-// One collectible: orb (golden ring) or prism.
+// A faceted ruby apple: lathe-turned body with dimples, a stem and a
+// crystal leaf. Flat shading plus the environment map makes it sparkle.
+function makeCrystalApple() {
+  const g = new THREE.Group();
+  const prof = [
+    [0.001, -0.25], [0.07, -0.275], [0.17, -0.255], [0.255, -0.18], [0.3, -0.06], [0.305, 0.06],
+    [0.28, 0.16], [0.215, 0.235], [0.12, 0.265], [0.055, 0.225], [0.001, 0.2],
+  ].map(([x, y]) => new THREE.Vector2(x, y));
+  const body = new THREE.Mesh(
+    new THREE.LatheGeometry(prof, 11),
+    new THREE.MeshStandardMaterial({
+      color: '#ff1c3c', emissive: '#c0001e', emissiveIntensity: 0.55, roughness: 0.06, metalness: 0.3,
+      flatShading: true, envMapIntensity: 2.2,
+    })
+  );
+  const stem = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.018, 0.026, 0.16, 6),
+    new THREE.MeshStandardMaterial({ color: '#5a3418', roughness: 0.6 })
+  );
+  stem.position.set(0.01, 0.27, 0);
+  stem.rotation.z = -0.25;
+  const leaf = new THREE.Mesh(
+    new THREE.OctahedronGeometry(1, 0),
+    new THREE.MeshStandardMaterial({ color: '#36ff9a', emissive: '#0a9a4a', emissiveIntensity: 0.6, roughness: 0.08, metalness: 0.2, flatShading: true, envMapIntensity: 2 })
+  );
+  leaf.scale.set(0.13, 0.022, 0.065);
+  leaf.position.set(0.1, 0.3, 0);
+  leaf.rotation.z = 0.45;
+  g.add(body, stem, leaf);
+  g.scale.setScalar(1.15);
+  return g;
+}
+
+// One collectible: orb (crystal apple) or prism.
 class Pickup {
   constructor(kind, glowTex) {
     this.kind = kind;
@@ -52,13 +85,11 @@ class Pickup {
     this.eaten = null;
     const isOrb = kind === 'orb';
     if (isOrb) {
-      this.core = new THREE.Mesh(
-        new THREE.TorusGeometry(0.3, 0.075, 16, 44),
-        new THREE.MeshStandardMaterial({ color: '#ffc93a', emissive: '#ff9a00', emissiveIntensity: 0.45, roughness: 0.16, metalness: 1, envMapIntensity: 1.6 })
-      );
+      this.core = makeCrystalApple();
+      // faint sparkle ring that pulses around the apple
       this.ring = new THREE.Mesh(
-        new THREE.TorusGeometry(0.42, 0.018, 6, 48),
-        new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff1b0').multiplyScalar(2), transparent: true, opacity: 0.0 })
+        new THREE.TorusGeometry(0.42, 0.012, 6, 48),
+        new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffb0c0').multiplyScalar(2), transparent: true, opacity: 0.0 })
       );
     } else {
       this.core = new THREE.Mesh(
@@ -72,16 +103,16 @@ class Pickup {
       );
       this.ring.rotation.x = -Math.PI / 2;
     }
-    this.core.castShadow = true;
+    this.core.traverse((o) => (o.castShadow = true));
     this.body = new THREE.Group();
     this.body.add(this.core);
     this.body.add(this.ring);
     this.group.add(this.body);
-    this.glow = glowSprite(glowTex, isOrb ? '#ffcf4a' : '#d9a3ff', 1.5, 0.45);
+    this.glow = glowSprite(glowTex, isOrb ? '#ff4d6d' : '#d9a3ff', 1.5, 0.45);
     this.body.add(this.glow);
-    this.floor = floorGlow(glowTex, isOrb ? '#ffb020' : '#c77dff', 1.9);
+    this.floor = floorGlow(glowTex, isOrb ? '#ff2a4a' : '#c77dff', 1.9);
     this.group.add(this.floor);
-    this.beam = makeBeam(isOrb ? '#ffb020' : '#c77dff', isOrb ? 7 : 10);
+    this.beam = makeBeam(isOrb ? '#ff3355' : '#c77dff', isOrb ? 7 : 10);
     this.group.add(this.beam);
   }
 
@@ -116,7 +147,12 @@ class Pickup {
     this.body.position.y = y;
     this.body.scale.setScalar(Math.max(0.001, scale));
     if (this.kind === 'orb') {
-      this.core.rotation.y += dt * 4.2 * (opts.reduceMotion ? 0.4 : 1);
+      this.core.rotation.y += dt * 2.6 * (opts.reduceMotion ? 0.4 : 1);
+      this.core.rotation.z = Math.sin(time * 1.7) * 0.12 * rm;
+      const ring = (time * 0.9) % 1;
+      this.ring.scale.setScalar(0.6 + ring * 0.9);
+      this.ring.rotation.x = Math.PI / 2;
+      this.ring.material.opacity = (1 - ring) * 0.5;
     } else {
       this.core.rotation.y += dt * 1.8;
       this.core.rotation.x += dt * 0.7;

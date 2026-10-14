@@ -1,5 +1,6 @@
 const KEY = 'coilrush.settings.v1';
 const BEST_KEY = 'coilrush.best.v1';
+const STATS_KEY = 'coilrush.stats.v1';
 
 const prefersReducedMotion = () => {
   try {
@@ -19,6 +20,8 @@ export const DEFAULTS = {
   music: 0.45,
   muted: false,
   camera: 'overhead',
+  skin: 'viper',
+  accessory: 'none',
 };
 
 export function loadSettings() {
@@ -50,6 +53,27 @@ export function loadBest() {
 export function saveBest(v) {
   try {
     localStorage.setItem(BEST_KEY, String(v));
+  } catch {
+    /* ignore */
+  }
+}
+
+// Lifetime totals used to unlock skins and accessories.
+export const STAT_DEFAULTS = { games: 0, apples: 0, mice: 0, chains: 0, pads: 0, maxZone: 0 };
+
+export function loadStats() {
+  try {
+    const raw = localStorage.getItem(STATS_KEY);
+    if (raw) return { ...STAT_DEFAULTS, ...JSON.parse(raw) };
+  } catch {
+    /* storage unavailable */
+  }
+  return { ...STAT_DEFAULTS };
+}
+
+export function saveStats(s) {
+  try {
+    localStorage.setItem(STATS_KEY, JSON.stringify(s));
   } catch {
     /* ignore */
   }

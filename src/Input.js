@@ -100,7 +100,8 @@ export class Input {
         break;
       case 'Enter':
       case 'NumpadEnter':
-        if (!e.repeat) this.h.confirm('enter');
+        // when the game handles Enter, don't also activate the focused button
+        if (!e.repeat && this.h.confirm('enter')) e.preventDefault();
         break;
       case 'KeyC':
       case 'KeyV':

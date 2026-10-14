@@ -99,6 +99,23 @@ export class CameraRig {
     this.overhead.fov = cam.fov;
   }
 
+  // Garage: a slow orbit close around the snake's head, framed off-centre so
+  // the customisation panel doesn't cover it.
+  computeShowcase(dt, snake, reduceMotion, out) {
+    this.showAngle = (this.showAngle ?? 0.9) + dt * (reduceMotion ? 0.1 : 0.32);
+    const a = this.showAngle;
+    const hp = snake.headPos;
+    const r = 3.1;
+    out.pos.set(hp.x + Math.sin(a) * r, 1.45, hp.z + Math.cos(a) * r);
+    const portrait = this.camera.aspect < 0.9;
+    const right = this.tmpV.set(Math.cos(a), 0, -Math.sin(a)).multiplyScalar(portrait ? 0 : 0.85);
+    this.tmpObj.position.copy(out.pos);
+    this.tmpObj.up.set(0, 1, 0);
+    this.tmpObj.lookAt(hp.x + right.x, portrait ? -0.35 : 0.2, hp.z + right.z);
+    out.quat.copy(this.tmpObj.quaternion);
+    out.fov = portrait ? 55 : 42;
+  }
+
   computeOrbit(dt, reduceMotion, out) {
     this.orbitAngle += dt * (reduceMotion ? 0.03 : 0.08);
     const r = 26;
@@ -129,7 +146,7 @@ export class CameraRig {
       this.tpYaw = targetYaw;
       this.tpYawVel = 0;
     }
-    [this.tpYaw, this.tpYawVel] = this.followYaw(targetYaw, this.tpYaw, this.tpYawVel, 8.5, dt);
+    [this.tpYaw, this.tpYawVel] = this.followYaw(targetYaw, this.tpYaw, this.tpYawVel, 11, dt);
     const fwd = this.tmpV.set(Math.sin(this.tpYaw), 0, Math.cos(this.tpYaw));
     this.tpPull += ((reduceMotion ? 0 : speedFx) - this.tpPull) * Math.min(1, dt * 2);
     const dist = 4.3 + this.tpPull * 1.1;
@@ -140,7 +157,7 @@ export class CameraRig {
     this.tpRoll += (rollTarget - this.tpRoll) * Math.min(1, dt * 6);
     this.tmpObj.position.copy(out.pos);
     this.tmpObj.up.set(0, 1, 0);
-    this.tmpObj.lookAt(hp.x + fwd.x * 4.2, 0.0, hp.z + fwd.z * 4.2);
+    this.tmpObj.lookAt(hp.x + fwd.x * 3.3, 0.0, hp.z + fwd.z * 3.3);
     this.tmpObj.rotateZ(this.tpRoll);
     out.quat.copy(this.tmpObj.quaternion);
     out.fov = 60 + (reduceMotion ? 0 : speedFx * 12);
@@ -151,7 +168,7 @@ export class CameraRig {
     if (this.fpYaw === null) this.fpYaw = targetYaw;
     // Critically damped yaw: turns feel quick but never snap 90 degrees in a frame.
     // Substepped so it stays stable even when a frame takes a long time.
-    const k = 16;
+    const k = 21;
     const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
     const h = dt / steps;
     for (let i = 0; i < steps; i++) {
@@ -177,6 +194,7 @@ export class CameraRig {
   update(dt, snake, { speedFx = 0, reduceMotion = false } = {}) {
     const target = this.pose;
     if (this.mode === 'orbit') this.computeOrbit(dt, reduceMotion, target);
+    else if (this.mode === 'showcase') this.computeShowcase(dt, snake, reduceMotion, target);
     else if (this.mode === 'fp') this.computeFP(dt, snake, speedFx, reduceMotion, target);
     else if (this.mode === 'tp') this.computeTP(dt, snake, speedFx, reduceMotion, target);
     else {
@@ -195,7 +213,7 @@ export class CameraRig {
     cam.quaternion.copy(this.from.quat).slerp(target.quat, b);
     // Lift the camera through the middle of an overhead<->FP transition so it
     // sweeps over the board instead of cutting through the walls.
-    if (b < 1 && this.mode !== 'orbit') cam.position.y += Math.sin(b * Math.PI) * 2.5;
+    if (b < 1 && this.mode !== 'orbit' && this.mode !== 'showcase') cam.position.y += Math.sin(b * Math.PI) * 2.5;
 
     this.kick *= Math.exp(-dt * 6);
     cam.fov = this.from.fov + (target.fov - this.from.fov) * b + (reduceMotion ? 0 : this.kick);

@@ -4,7 +4,8 @@ import '@fontsource/exo-2/latin-900-italic.css';
 import './style.css';
 import * as THREE from 'three';
 
-import { SnakeGame, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, MAX_LEVEL } from './game/SnakeGame.js';
+import { SnakeGame, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL } from './game/SnakeGame.js';
+import { SKINS, ACCESSORIES, skinById, accessoryById, isUnlocked, unlockProgress } from './skins.js';
 import { World } from './render/World.js';
 import { SnakeView } from './render/SnakeView.js';
 import { FoodView } from './render/FoodView.js';
@@ -16,17 +17,20 @@ import { CORNER } from './render/SnakePath.js';
 import { makeGlowTexture, makeScaleNormalMap, makeRingTexture, makeChevronTexture } from './render/textures.js';
 import { AudioEngine } from './audio/Audio.js';
 import { Input } from './Input.js';
-import { loadSettings, saveSettings, loadBest, saveBest, QUALITY } from './settings.js';
+import { loadSettings, saveSettings, loadBest, saveBest, loadStats, saveStats, QUALITY } from './settings.js';
 
 const $ = (id) => document.getElementById(id);
 const BOARD = 21;
 const CAMERA_NAMES = { overhead: 'Overhead', tp: 'Chase', fp: 'First-person' };
 const CAMERA_ORDER = ['overhead', 'tp', 'fp'];
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
+// Fraction of a step after a tick during which a new turn redoes that step.
+const GRACE = 0.4;
 
 class App {
   constructor() {
     this.settings = loadSettings();
+    this.stats = loadStats();
     this.canvas = $('scene');
     try {
       this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: false, stencil: false, powerPreference: 'high-performance' });
@@ -145,7 +149,7 @@ class App {
     this.post.configure({ samples: q.samples, bloomLevels: q.bloomLevels, taps: q.taps });
     if (!this.snake || this.snake.radial !== q.radial) {
       const old = this.snake;
-      this.snake = new SnakeView({ maxCells: BOARD * BOARD, radial: q.radial, scaleMap: this.scaleMap });
+      this.snake = new SnakeView({ maxCells: BOARD * BOARD, radial: q.radial, scaleMap: this.scaleMap, skin: this.equippedSkin(), accessory: this.equippedAccessory() });
       if (old) {
         this.snake.headPos.copy(old.headPos);
         this.snake.headDir.copy(old.headDir);
@@ -162,6 +166,101 @@ class App {
     this.resize();
     const note = $('quality-note');
     if (note) note.textContent = this.settings.quality === 'auto' ? `Auto is currently using ${this.activeQuality} quality.` : '';
+  }
+
+  // ---------------------------------------------------------------- garage
+  unlockStats() {
+    return { ...this.stats, best: Math.max(this.game ? this.game.best : 0, loadBest()) };
+  }
+
+  equippedSkin() {
+    const s = skinById(this.settings.skin);
+    return isUnlocked(s, this.unlockStats()) ? s.id : 'viper';
+  }
+
+  equippedAccessory() {
+    const a = accessoryById(this.settings.accessory);
+    return isUnlocked(a, this.unlockStats()) ? a.id : 'none';
+  }
+
+  openGarage() {
+    if (this.state !== 'menu') this.toMenu();
+    this.garageOpen = true;
+    this.showScreen(null);
+    $('garage').classList.remove('hidden');
+    this.rig.setMode('showcase', { reduceMotion: this.settings.reduceMotion });
+    this.preview = { skin: this.equippedSkin(), accessory: this.equippedAccessory() };
+    this.garageFocus = null;
+    this.renderGarage();
+    this.audio.ui();
+  }
+
+  closeGarage() {
+    if (!this.garageOpen) return;
+    this.garageOpen = false;
+    $('garage').classList.add('hidden');
+    // anything previewed but locked goes back to what is equipped
+    if (this.snake.skin.id !== this.equippedSkin()) this.snake.applySkin(this.equippedSkin());
+    if (this.snake.accessoryId !== this.equippedAccessory()) this.snake.setAccessory(this.equippedAccessory());
+    this.showScreen('screen-start');
+    this.rig.setMode('orbit', { reduceMotion: this.settings.reduceMotion });
+    $('btn-garage').focus({ preventScroll: true });
+  }
+
+  renderGarage() {
+    const st = this.unlockStats();
+    const item = (it, kind) => {
+      const unlocked = isUnlocked(it, st);
+      const equipped = kind === 'skin' ? this.equippedSkin() === it.id : this.equippedAccessory() === it.id;
+      const previewing = this.preview[kind === 'skin' ? 'skin' : 'accessory'] === it.id;
+      const vis = kind === 'skin' ? `<span class="sw" style="background:${it.swatch}"></span>` : `<span class="ic">${it.icon}</span>`;
+      return `<button class="gar-item${unlocked ? '' : ' locked'}${equipped ? ' selected' : ''}${previewing && !equipped ? ' previewing' : ''}" data-kind="${kind}" data-id="${it.id}" role="radio" aria-checked="${equipped}" title="${it.name}">${vis}<span>${it.name}</span></button>`;
+    };
+    $('gar-skins').innerHTML = SKINS.map((it) => item(it, 'skin')).join('');
+    $('gar-acc').innerHTML = ACCESSORIES.map((it) => item(it, 'acc')).join('');
+    const focus = this.garageFocus || { kind: 'skin', id: this.preview.skin };
+    const it = focus.kind === 'skin' ? skinById(focus.id) : accessoryById(focus.id);
+    $('gar-name').textContent = it.name;
+    $('gar-desc').textContent = it.desc || (it.id === 'none' ? 'No accessory.' : 'A little something for your snake.');
+    const locked = !isUnlocked(it, st);
+    $('gar-lock').classList.toggle('hidden', !locked);
+    if (locked) {
+      const prog = unlockProgress(it, st);
+      $('gar-lock').textContent = `Locked: ${it.unlock.label}${prog ? ` (${prog})` : ''}`;
+    }
+  }
+
+  pickGarage(kind, id) {
+    const st = this.unlockStats();
+    this.garageFocus = { kind, id };
+    if (kind === 'skin') {
+      this.preview.skin = id;
+      this.snake.applySkin(id);
+      if (isUnlocked(skinById(id), st)) this.settings.skin = id;
+    } else {
+      this.preview.accessory = id;
+      this.snake.setAccessory(id);
+      if (isUnlocked(accessoryById(id), st)) this.settings.accessory = id;
+    }
+    saveSettings(this.settings);
+    this.audio.ui();
+    this.renderGarage();
+  }
+
+  // Lifetime stats after a run; returns names of anything newly unlocked.
+  recordRun() {
+    const g = this.game;
+    const before = this.unlockStats();
+    const st = this.stats;
+    st.games += 1;
+    st.apples += g.foodEaten;
+    st.mice += g.stats.prey;
+    st.chains += g.stats.chains;
+    st.pads += g.stats.pads;
+    st.maxZone = Math.max(st.maxZone, g.zone);
+    saveStats(st);
+    const after = this.unlockStats();
+    return [...SKINS, ...ACCESSORIES].filter((it) => it.unlock && !isUnlocked(it, before) && isUnlocked(it, after)).map((it) => it.name);
   }
 
   resize() {
@@ -186,21 +285,35 @@ class App {
 
   onDirection(dir, src) {
     if (this.state !== 'playing' && this.state !== 'countdown') return;
-    let ok;
     if (this.relativeSteer) {
       // In chase / first person, left/right steer relative to the snake.
-      if (dir === 'left') ok = this.game.turn(-1);
-      else if (dir === 'right') ok = this.game.turn(1);
+      if (dir === 'left' || dir === 'right') this.steer(this.game.turnDir(dir === 'left' ? -1 : 1));
       else if (src !== 'swipe') this.flashHint();
     } else {
-      ok = this.game.queueDirection(DIRS[dir]);
+      this.steer(DIRS[dir]);
     }
-    if (ok) this.audio.turn();
   }
 
   onTurn(side) {
     if (this.state !== 'playing' && this.state !== 'countdown') return;
-    if (this.game.turn(side)) this.audio.turn();
+    this.steer(this.game.turnDir(side));
+  }
+
+  // Apply a direction as early as possible: within the grace window right
+  // after a straight step, redo that step in the new direction; otherwise
+  // queue it for the next step.
+  steer(d) {
+    const g = this.game;
+    if (this.state === 'playing' && this.t < GRACE && g.canRegrace()) {
+      const wasRushing = g.rushing;
+      const ev = g.regrace(d);
+      if (ev) {
+        this.audio.turn();
+        this.handleStep(ev, wasRushing);
+        return;
+      }
+    }
+    if (g.queueDirection(d)) this.audio.turn();
   }
 
   onTap(side) {
@@ -209,6 +322,10 @@ class App {
 
   onConfirm(kind) {
     this.unlockAudio();
+    if (this.garageOpen) {
+      if (kind !== 'space') this.closeGarage();
+      return true;
+    }
     if (this.openPanel) return kind !== 'space' ? (this.closePanel(), true) : false;
     if (this.state === 'menu' || this.state === 'over') {
       this.startGame();
@@ -222,6 +339,10 @@ class App {
   }
 
   onPause() {
+    if (this.garageOpen) {
+      this.closeGarage();
+      return;
+    }
     if (this.openPanel) {
       this.closePanel();
       return;
@@ -231,7 +352,7 @@ class App {
   }
 
   onRestart() {
-    if (this.openPanel) return;
+    if (this.openPanel || this.garageOpen) return;
     if (['playing', 'paused', 'over', 'dying', 'countdown'].includes(this.state)) this.startGame();
   }
 
@@ -249,6 +370,7 @@ class App {
   }
 
   cycleCamera() {
+    if (this.garageOpen) return;
     const i = CAMERA_ORDER.indexOf(this.cameraMode);
     this.setCamera(CAMERA_ORDER[(i + 1) % CAMERA_ORDER.length]);
   }
@@ -274,6 +396,10 @@ class App {
 
   // ---------------------------------------------------------------- flow
   startGame() {
+    if (this.garageOpen) {
+      this.garageOpen = false;
+      $('garage').classList.add('hidden');
+    }
     this.unlockAudio();
     this.audio.start();
     this.timers = [];
@@ -357,9 +483,12 @@ class App {
 
   // ---------------------------------------------------------------- game events
   tick() {
+    const wasRushing = this.game.rushing;
+    this.handleStep(this.game.step(), wasRushing);
+  }
+
+  handleStep(ev, wasRushing) {
     const g = this.game;
-    const wasRushing = g.rushing;
-    const ev = g.step();
     const delay = this.visualDelay();
     const rm = this.settings.reduceMotion;
     const at = (c) => this.toWorld(c.x, c.z);
@@ -445,7 +574,7 @@ class App {
     }
     if (ev.obstaclesWarned) {
       this.audio.obstacleWarn();
-      this.toast('Pillars rising! Watch the red rings');
+      this.toast('Pillars rising! Watch the red warning rings');
     }
     if (ev.obstaclesRaised) {
       this.audio.obstacleRise();
@@ -488,13 +617,13 @@ class App {
       const rm = this.settings.reduceMotion;
       this.effects.emit(w.x, 0.45, w.z, {
         count: prism ? 70 : 34,
-        color: prism ? '#e0aaff' : '#ffd060',
+        color: prism ? '#e0aaff' : '#ff4d6d',
         speed: prism ? 4.5 : 3.2,
         up: 2.4,
         size: prism ? 0.32 : 0.24,
       });
       this.effects.emit(w.x, 0.45, w.z, { count: 14, color: '#ffffff', speed: 1.5, up: 3.5, size: 0.14, life: 0.5 });
-      this.effects.shockwave(w.x, w.z, prism ? '#c77dff' : '#ffcf4a', { max: prism ? 4.5 : 2.6 });
+      this.effects.shockwave(w.x, w.z, prism ? '#c77dff' : '#ff5a7a', { max: prism ? 4.5 : 2.6 });
       this.popup(pos, `+${ate.points}${ate.combo > 1 ? ` x${ate.combo}` : ''}`, prism ? 'prism' : '');
       const v = pos.clone().project(this.camera);
       if (prism) {
@@ -516,6 +645,10 @@ class App {
   }
 
   onLevelUp(lu) {
+    const lv = $('hud-lvl');
+    lv.classList.remove('bump');
+    void lv.offsetWidth;
+    lv.classList.add('bump');
     const hp = this.snake.headPos;
     this.world.pulse(hp.x, hp.z);
     if (lu.zoneUp) {
@@ -570,6 +703,12 @@ class App {
   showGameOver(cause) {
     const g = this.game;
     this.state = 'over';
+    const unlocked = this.recordRun();
+    $('over-unlocks').classList.toggle('hidden', !unlocked.length);
+    if (unlocked.length) {
+      $('over-unlocks').textContent = `Unlocked in the Garage: ${unlocked.join(', ')}!`;
+      this.audio.chainComplete();
+    }
     this.audio.gameOver();
     $('over-title').textContent = cause === 'win' ? 'Perfect board!' : 'Wipeout!';
     $('over-cause').textContent = {
@@ -612,6 +751,15 @@ class App {
     $('btn-menu-o').addEventListener('click', () => this.toMenu());
     $('btn-pause').addEventListener('click', () => this.onPause());
     $('btn-cam').addEventListener('click', () => this.cycleCamera());
+    $('btn-garage').addEventListener('click', () => this.openGarage());
+    $('btn-garage-o').addEventListener('click', () => this.openGarage());
+    $('gar-done').addEventListener('click', () => this.closeGarage());
+    for (const id of ['gar-skins', 'gar-acc']) {
+      $(id).addEventListener('click', (e) => {
+        const b = e.target.closest('.gar-item');
+        if (b) this.pickGarage(b.dataset.kind, b.dataset.id);
+      });
+    }
     document.querySelectorAll('.cam-select .seg').forEach((b) => b.addEventListener('click', () => this.setCamera(b.dataset.cam)));
     document.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => this.openPanelById(`panel-${b.dataset.open}`)));
     document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => this.closePanel()));
@@ -773,6 +921,16 @@ class App {
     this.setText('hud-time', this.formatTime(g.time));
     this.setText('hud-level', String(g.level + 1));
     this.setText('hud-zone', ZONE_NAMES[g.zone]);
+    // progress to the next speed level and zone
+    const lvl = g.level;
+    const maxed = lvl >= MAX_LEVEL;
+    const into = maxed ? 4 : g.foodEaten - lvl * 4;
+    const left = 4 - into;
+    this.setText('hud-lvl-next', maxed ? 'Max speed!' : `${left} apple${left === 1 ? '' : 's'} to Lv ${lvl + 2}`);
+    this.setStyle('hud-lvl-fill', 'transform', `scaleX(${(into / 4).toFixed(2)})`);
+    this.setClass($('hud-lvl'), 'max', maxed);
+    const nz = ZONE_STARTS.findIndex((z) => z > lvl);
+    this.setText('hud-zone-next', nz < 0 ? 'Final zone' : `Next zone: ${ZONE_NAMES[nz]} at Lv ${ZONE_STARTS[nz] + 1}`);
     this.setStyle('hud-rush', 'transform', `scaleX(${(g.rush / 100).toFixed(3)})`);
     const rushEl = $('hud-rush-wrap');
     this.setClass(rushEl, 'active', g.rushing);
@@ -873,7 +1031,7 @@ class App {
     for (const ob of g.obstacles) sq(ob.x, ob.z, ob.solid ? '#d8d0c0' : 'rgba(255, 60, 90, 0.7)');
     for (const p of g.pads) dot(p.x, p.z, '#ff8a2a', 0.6);
     if (g.chain) for (let i = g.chain.next; i < g.chain.links.length; i++) dot(g.chain.links[i].x, g.chain.links[i].z, '#38f6ff', i === g.chain.next ? 0.75 : 0.5);
-    if (g.food) dot(g.food.x, g.food.z, '#ffcf4a', 0.75);
+    if (g.food) dot(g.food.x, g.food.z, '#ff4d6d', 0.75);
     if (g.bonus) dot(g.bonus.x, g.bonus.z, '#d9a3ff', 0.8);
     if (g.prey) dot(g.prey.x, g.prey.z, '#fff2b0', 0.7);
     for (let i = g.cells.length - 1; i >= 1; i--) dot(g.cells[i].x, g.cells[i].z, '#17c3b2', 0.48);
@@ -953,7 +1111,7 @@ class App {
       const hp = this.snake.headPos;
       const hd = this.snake.headDir;
       this.effects.emit(hp.x - hd.x * 0.5, 0.3, hp.z - hd.z * 0.5, {
-        count: 2, color: g.boosting ? '#ffb020' : '#5ff6ff', speed: 0.6, up: 0.6, size: 0.18, life: 0.45, gravity: 0, spread: 0.5,
+        count: 2, color: g.boosting ? '#ffb020' : this.snake.trailColor || '#5ff6ff', speed: 0.6, up: 0.6, size: 0.18, life: 0.45, gravity: 0, spread: 0.5,
       });
     }
 

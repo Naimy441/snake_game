@@ -17,9 +17,14 @@
           <div class="hrow"><span class="hl">Score</span><span id="hud-score" class="hv">0</span></div>
           <div class="hrow"><span class="hl">Time</span><span id="hud-time" class="hv">0:00</span></div>
           <div class="hrow"><span class="hl">Length</span><span id="hud-length" class="hv">4</span></div>
+          <div class="lvl" id="hud-lvl">
+            <div class="lvl-top"><span class="hl">Level</span><span id="hud-level" class="hv">1</span><span id="hud-lvl-next" class="lvl-next">4 apples to Lv 2</span></div>
+            <div class="lvl-bar"><i id="hud-lvl-fill"></i></div>
+            <div id="hud-zone-next" class="lvl-zone">Golden Canyon at Lv 4</div>
+          </div>
         </div>
         <div class="hud-tr">
-          <div class="zone-pill"><span id="hud-zone">Emerald Coast</span><b>LV <span id="hud-level">1</span></b></div>
+          <div class="zone-pill"><span id="hud-zone">Emerald Coast</span></div>
           <div class="best-pill">Best <b id="hud-best">0</b></div>
           <button id="btn-cam" class="chip" title="Switch camera (C)"><span id="hud-cam">Overhead</span> <kbd>C</kbd></button>
           <button id="btn-pause" class="chip icon" title="Pause (P / Esc)" aria-label="Pause">❚❚</button>
@@ -63,6 +68,7 @@
             <button data-cam="fp" class="seg" role="radio" aria-checked="false">First-person</button>
           </div>
           <button id="btn-play" class="primary big">Play <kbd>Enter</kbd></button>
+          <button id="btn-garage" class="secondary wide garage-btn">Garage <span class="muted small">skins &amp; accessories</span></button>
           <div class="row">
             <button class="secondary" data-open="help">How to play</button>
             <button class="secondary" data-open="settings">Settings</button>
@@ -103,8 +109,27 @@
             <div><span>Mice</span><b id="over-prey">0</b></div>
             <div><span>Boosts</span><b id="over-pads">0</b></div>
           </div>
+          <div id="over-unlocks" class="unlocks hidden"></div>
           <button id="btn-again" class="primary big">Play again <kbd>Enter</kbd></button>
+          <button id="btn-garage-o" class="secondary wide">Garage</button>
           <button id="btn-menu-o" class="ghost">Main menu</button>
+        </div>
+      </section>
+
+      <!-- Garage -->
+      <section id="garage" class="garage hidden" aria-label="Garage">
+        <div class="garage-card">
+          <h2>Garage</h2>
+          <div class="gar-info">
+            <b id="gar-name">Viper</b>
+            <span id="gar-desc" class="muted"></span>
+            <span id="gar-lock" class="gar-lock hidden"></span>
+          </div>
+          <h3>Skins</h3>
+          <div id="gar-skins" class="gar-grid" role="radiogroup" aria-label="Skin"></div>
+          <h3>Accessories</h3>
+          <div id="gar-acc" class="gar-grid acc" role="radiogroup" aria-label="Accessory"></div>
+          <button id="gar-done" class="primary">Done <kbd>Esc</kbd></button>
         </div>
       </section>
 
@@ -112,7 +137,7 @@
       <section id="panel-help" class="screen panel hidden">
         <div class="card wide-card">
           <h2>How to play</h2>
-          <p class="muted">Eat golden rings to grow and score. Don't hit the walls, the pillars or your own body. Every camera plays the same game, so switch any time.</p>
+          <p class="muted">Eat crystal apples to grow and score. Don't hit the walls, the pillars or your own body. Every camera plays the same game, so switch any time.</p>
           <div class="help-grid">
             <div>
               <h3>Overhead view</h3>
@@ -138,7 +163,7 @@
             <div>
               <h3>Pickups</h3>
               <ul class="plain">
-                <li><b class="gold">Ring</b> 10 points, grows 1, adds Rush.</li>
+                <li><b class="red">Crystal apple</b> 10 points, grows 1, adds Rush.</li>
                 <li><b class="violet">Prism</b> 50 points, grows 2, fills Rush. Gone in 9 s.</li>
                 <li><b class="cyan">Orb chain</b> numbered orbs: eat them in order for rising points, a big bonus and a full Rush meter. Eat one out of order and the chain breaks. Chain orbs don't make you longer.</li>
                 <li><b class="gold">Golden mouse</b> runs away from you. Corner it for 100 points.</li>
@@ -147,7 +172,7 @@
               <h3>Speed levels and zones</h3>
               <ul class="plain">
                 <li>Eat again within 5 s to build a combo, up to <b>x8</b>.</li>
-                <li>Every 4 rings the speed level rises. Some level-ups raise <b>pillars</b>: a red ring on the floor warns you where.</li>
+                <li>Every 4 apples the speed level rises. Some level-ups raise <b>pillars</b>: a red ring on the floor warns you where.</li>
                 <li>Every 3 levels the world transforms into a new zone with its own music.</li>
               </ul>
             </div>
