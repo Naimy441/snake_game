@@ -127,7 +127,7 @@ test('best score tracks the highest score', () => {
 
 // ---------------------------------------------------------------- new mechanics
 import {
-  zoneForLevel, OBSTACLE_WARN_MS, BOOST_TICKS, CHAIN_BONUS_PER_LINK, PREY_LIFETIME_MS, MAX_OBSTACLES,
+  LEVEL_AT, zoneForLevel, OBSTACLE_WARN_MS, BOOST_TICKS, CHAIN_BONUS_PER_LINK, PREY_LIFETIME_MS, MAX_OBSTACLES,
 } from '../src/game/SnakeGame.js';
 
 const runFor = (g, ms) => {
@@ -146,7 +146,7 @@ test('zones change every few speed levels', () => {
 
 test('levelling up reports the level and zone change', () => {
   const g = new SnakeGame({ rng: seq([0.9]) });
-  g.foodEaten = 11; // next orb -> level 3 = zone 1
+  g.foodEaten = 8; // next apple (the 9th) -> level 3 = zone 1
   g.food = { x: g.head.x, z: g.head.z - 1, type: 'orb', id: 1 };
   const ev = g.step();
   assert.deepEqual(ev.levelUp, { level: 3, zone: 1, zoneUp: true });
@@ -458,4 +458,37 @@ test('top speed stays humanly steerable', () => {
   g.step();
   assert.ok(g.baseInterval() >= 70);
   assert.ok(g.currentInterval() >= 45);
+});
+
+test('the first zone eases in: short levels, slower moves, no pillars', () => {
+  const g = new SnakeGame({ rng: seq([0.5]) });
+  const start = g.baseInterval();
+  assert.ok(start >= 170, `starts gently (${start} ms per move)`);
+  // 9 apples reach the second zone
+  for (let i = 0; i < 9; i++) {
+    const before = g.level;
+    g.food = { x: g.head.x + g.dir.x, z: g.head.z + g.dir.z, type: 'orb', id: 1000 + i };
+    if (!g.inBounds(g.food.x, g.food.z)) { g.turn(1); g.step(); i--; continue; }
+    const ev = g.step();
+    assert.ok(ev.ate);
+    if (g.level < 3) assert.equal(g.obstacles.length, 0, 'no pillars in Emerald Coast');
+    assert.ok(g.level >= before);
+  }
+  assert.equal(g.zone, 1);
+  assert.ok(g.baseInterval() < start, 'gets faster');
+  assert.deepEqual(g.levelProgress(), { into: 0, need: 4, max: false });
+});
+
+test('level thresholds and the speed curve stay consistent', () => {
+  const g = new SnakeGame();
+  let prev = Infinity;
+  for (let l = 0; l <= 12; l++) {
+    g.foodEaten = LEVEL_AT[l];
+    assert.equal(g.level, l);
+    assert.ok(g.baseInterval() <= prev, 'never slows down');
+    prev = g.baseInterval();
+  }
+  g.foodEaten = 9999;
+  assert.equal(g.level, 12);
+  assert.equal(g.levelProgress().max, true);
 });

@@ -20,6 +20,14 @@ export const PRISM_LIFETIME_MS = 9000;
 export const RUSH_DRAIN_PER_SEC = 32;
 export const MAX_LEVEL = 12;
 export const MIN_INTERVAL = 72; // ~14 cells/s
+
+// Difficulty ramp. Apples needed to clear each level: short levels in the
+// first zone, longer ones later. Milliseconds per move at each level: a
+// gentle warm-up in Emerald Coast that builds to the top speed by the end.
+export const LEVEL_COSTS = [3, 3, 3, 4, 4, 4, 5, 5, 5, 5, 5, 5];
+export const LEVEL_SPEEDS = [175, 163, 152, 142, 133, 124, 115, 106, 98, 90, 83, 77, 72];
+// Total apples eaten at which each level starts.
+export const LEVEL_AT = LEVEL_COSTS.reduce((acc, c) => (acc.push(acc[acc.length - 1] + c), acc), [0]);
 export const MIN_FAST_INTERVAL = 48; // ~21 cells/s with Rush or Boost
 
 // The world changes zone every few speed levels.
@@ -42,7 +50,8 @@ export const PAD_RUSH = 15;
 export const PAD_RESPAWN_MS = 5000;
 
 // Obstacles rise at these speed levels (level index -> how many).
-export const OBSTACLE_PLAN = { 2: 2, 4: 2, 5: 1, 7: 2, 8: 1, 10: 2, 11: 1, 12: 2 };
+// No pillars in the first zone; they start partway into the second.
+export const OBSTACLE_PLAN = { 4: 2, 5: 1, 7: 2, 8: 1, 10: 2, 11: 1, 12: 2 };
 export const MAX_OBSTACLES = 12;
 export const OBSTACLE_WARN_MS = 2200;
 
@@ -109,7 +118,16 @@ export class SnakeGame {
   }
 
   get level() {
-    return Math.min(MAX_LEVEL, Math.floor(this.foodEaten / 4));
+    let l = 0;
+    while (l < MAX_LEVEL && this.foodEaten >= LEVEL_AT[l + 1]) l++;
+    return l;
+  }
+
+  // Apples eaten into the current level and how many it takes.
+  levelProgress() {
+    const l = this.level;
+    if (l >= MAX_LEVEL) return { into: 1, need: 1, max: true };
+    return { into: this.foodEaten - LEVEL_AT[l], need: LEVEL_COSTS[l], max: false };
   }
 
   get zone() {
@@ -123,7 +141,7 @@ export class SnakeGame {
   // Milliseconds per move. Speed is capped so that a quick double tap (a
   // tight U-turn) is still physically possible at the top speed.
   baseInterval() {
-    return Math.max(MIN_INTERVAL, 140 - this.level * 7);
+    return Math.max(MIN_INTERVAL, LEVEL_SPEEDS[this.level]);
   }
 
   currentInterval() {

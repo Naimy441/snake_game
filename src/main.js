@@ -931,11 +931,15 @@ class App {
     this.setText('hud-zone', ZONE_NAMES[g.zone]);
     // progress to the next speed level and zone
     const lvl = g.level;
-    const maxed = lvl >= MAX_LEVEL;
-    const into = maxed ? 4 : g.foodEaten - lvl * 4;
-    const left = 4 - into;
+    const prog = g.levelProgress();
+    const maxed = prog.max;
+    const left = prog.need - prog.into;
     this.setText('hud-lvl-next', maxed ? 'Max speed!' : `${left} apple${left === 1 ? '' : 's'} to Lv ${lvl + 2}`);
-    this.setStyle('hud-lvl-fill', 'transform', `scaleX(${(into / 4).toFixed(2)})`);
+    this.setStyle('hud-lvl-fill', 'transform', `scaleX(${(prog.into / prog.need).toFixed(2)})`);
+    if (this.lastHud.segs !== prog.need) {
+      this.lastHud.segs = prog.need;
+      $('hud-lvl-bar').style.setProperty('--segs', String(prog.need));
+    }
     this.setClass($('hud-lvl'), 'max', maxed);
     const nz = ZONE_STARTS.findIndex((z) => z > lvl);
     this.setText('hud-zone-next', nz < 0 ? 'Final zone' : `Next zone: ${ZONE_NAMES[nz]} at Lv ${ZONE_STARTS[nz] + 1}`);

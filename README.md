@@ -70,7 +70,7 @@ camera, Start pauses, bumpers turn left/right.
   14 seconds.
 - **Boost pad:** from zone 2 on. Driving over one gives a free burst of speed
   and double points, then it reappears somewhere else.
-- **Pillars:** some level-ups raise pillars on the board. A pulsing red ring
+- **Pillars:** from Golden Canyon on, some level-ups raise pillars on the board. A pulsing red ring
   marks each spot for a couple of seconds first. Pillars never rise under the
   snake and never wall off part of the board.
 
@@ -78,9 +78,12 @@ camera, Start pauses, bumpers turn left/right.
 
 - **Combo:** eat again within 5 seconds to raise the multiplier, up to x8.
 - **Rush:** hold Space to move 1.7x faster and score double while the meter lasts.
-- **Speed levels:** every 4 apples the snake speeds up. The HUD shows how
-  many apples are left until the next level and which level brings the next
-  zone.
+- **Speed levels:** eating apples raises your speed level. The difficulty
+  eases in: Emerald Coast levels take 3 apples each, start slow (about 6
+  moves a second) and have no pillars, so 9 apples reach Golden Canyon. Later
+  levels take 4, then 5 apples and keep speeding up to the top speed. The HUD
+  shows how many apples are left until the next level and which level brings
+  the next zone.
 - **Zones:** every 3 speed levels the world transforms. A glowing wave sweeps
   out from the arena, the old scenery shrinks away, new scenery grows in, and
   the sky, light, water, board and music all change: Emerald Coast, Golden
