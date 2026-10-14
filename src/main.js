@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 import { GhostBot } from './game/GhostBot.js';
-import { SnakeGame, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL } from './game/SnakeGame.js';
+import { SnakeGame, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, zoneForLevel } from './game/SnakeGame.js';
 import { SKINS, ACCESSORIES, skinById, accessoryById, isUnlocked, unlockProgress } from './skins.js';
 import { World } from './render/World.js';
 import { SnakeView } from './render/SnakeView.js';
@@ -198,6 +198,40 @@ class App {
     if (note) note.textContent = this.settings.quality === 'auto' ? `Auto is currently using ${this.activeQuality} quality.` : '';
   }
 
+  // ---------------------------------------------------------------- level select
+  // Highest level the player has reached in any run (older saves only
+  // recorded the furthest zone, so that counts too).
+  unlockedLevel() {
+    return Math.min(MAX_LEVEL, Math.max(this.stats.maxLevel || 0, ZONE_STARTS[this.stats.maxZone || 0] || 0));
+  }
+
+  startLevel() {
+    return Math.max(0, Math.min(this.unlockedLevel(), this.settings.startLevel || 0));
+  }
+
+  stepStartLevel(delta) {
+    const next = Math.max(0, Math.min(this.unlockedLevel(), this.startLevel() + delta));
+    if (next === this.startLevel()) return;
+    this.settings.startLevel = next;
+    saveSettings(this.settings);
+    this.audio.ui();
+    this.renderLevelSelect();
+  }
+
+  renderLevelSelect() {
+    const L = this.startLevel();
+    const max = this.unlockedLevel();
+    const zone = zoneForLevel(L);
+    const speed = (1000 / LEVEL_SPEEDS[L]).toFixed(1);
+    $('lvl-sel-name').textContent = `Level ${L + 1}`;
+    $('lvl-sel-zone').textContent = `${ZONE_NAMES[zone]} · ${speed} moves/s`;
+    $('lvl-prev').disabled = L <= 0;
+    $('lvl-next').disabled = L >= max;
+    const box = $('lvl-select');
+    box.className = `lvl-select z${zone}`;
+    $('lvl-sel-hint').textContent = max === 0 ? 'Reach new levels to start from them here.' : max >= MAX_LEVEL ? 'Every level unlocked.' : `Unlocked up to level ${max + 1}. Reach further to unlock more.`;
+  }
+
   // ---------------------------------------------------------------- ghost
   toggleGhost() {
     this.setGhost(!this.settings.ghost);
@@ -340,6 +374,7 @@ class App {
     st.chains += g.stats.chains;
     st.pads += g.stats.pads;
     st.maxZone = Math.max(st.maxZone, g.zone);
+    st.maxLevel = Math.max(st.maxLevel || 0, g.level);
     saveStats(st);
     const after = this.unlockStats();
     return [...SKINS, ...ACCESSORIES].filter((it) => it.unlock && !isUnlocked(it, before) && isUnlocked(it, after)).map((it) => it.name);
@@ -366,6 +401,10 @@ class App {
   }
 
   onDirection(dir, src) {
+    if (this.state === 'menu' && !this.openPanel && !this.garageOpen && (dir === 'left' || dir === 'right')) {
+      this.stepStartLevel(dir === 'left' ? -1 : 1);
+      return;
+    }
     if (this.state !== 'playing' && this.state !== 'countdown') return;
     this.preAim();
     if (this.relativeSteer) {
@@ -502,10 +541,13 @@ class App {
     this.food.hideAll();
     this.board.clear();
     this.syncFood();
-    this.ghost.reset();
+    const startLevel = this.startLevel();
+    this.game.startAtLevel(startLevel);
+    this.ghost.reset(true);
     this.ghostFade = 0;
-    if (this.world.zone !== 0 || this.world.transitioning) this.world.setZone(0, { duration: 1.4 });
-    this.audio.setMusicState({ menu: false, zone: 0, level: 0, intensity: 0.1 });
+    const zone = this.game.zone;
+    if (this.world.zone !== zone || this.world.transitioning) this.world.setZone(zone, { duration: 1.4 });
+    this.audio.setMusicState({ menu: false, zone, level: startLevel, intensity: 0.1 });
     this.audio.startMusic({ menu: false });
     this.showScreen(null);
     $('hud').classList.remove('hidden');
@@ -558,6 +600,7 @@ class App {
     this.rig.setMode('orbit', { reduceMotion: this.settings.reduceMotion });
     this.showScreen('screen-start');
     this.updateCameraUI();
+    this.renderLevelSelect();
   }
 
   showCountdown(text) {
@@ -739,6 +782,12 @@ class App {
   }
 
   onLevelUp(lu) {
+    // unlock the level for the level select right away (zone-based garage
+    // unlocks are still tallied at the end of the run, where they're announced)
+    if (lu.level > (this.stats.maxLevel || 0)) {
+      this.stats.maxLevel = lu.level;
+      saveStats(this.stats);
+    }
     const lv = $('hud-lvl');
     lv.classList.remove('bump');
     void lv.offsetWidth;
@@ -750,6 +799,7 @@ class App {
       this.world.setZone(lu.zone);
       this.audio.zoneUp();
       this.titleCard(lu.zone);
+      this.slowMo(2.5, 0.28);
       if (!this.settings.reduceMotion) {
         this.flash(0.35, '#ffffff');
         this.rig.kick += 10;
@@ -757,6 +807,7 @@ class App {
     } else {
       this.audio.levelUp();
       this.banner(lu.level >= MAX_LEVEL ? 'Max speed!' : 'Speed up!');
+      this.slowMo(1.1, 0.6);
       if (!this.settings.reduceMotion) this.rig.kick += 4;
     }
   }
@@ -889,6 +940,9 @@ class App {
     $('set-ghost').checked = !!s.ghost;
     $('set-ghost').addEventListener('change', () => this.setGhost($('set-ghost').checked));
     $('btn-ghost').addEventListener('click', () => this.toggleGhost());
+    $('lvl-prev').addEventListener('click', () => this.stepStartLevel(-1));
+    $('lvl-next').addEventListener('click', () => this.stepStartLevel(1));
+    this.renderLevelSelect();
     this.updateGhostUI();
     const bindRange = (id, key) => {
       const el = $(id);
@@ -949,9 +1003,37 @@ class App {
   toast(text) {
     const el = $('toast');
     el.textContent = text;
+    this.placeToast(el);
     el.classList.add('show');
     clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => el.classList.remove('show'), 1900);
+  }
+
+  // While a menu card is up, put the toast in free space next to it (below,
+  // above, then beside) so it never covers the card; otherwise use the CSS spot.
+  placeToast(el) {
+    el.style.top = el.style.left = el.style.transform = '';
+    const holder = this.openPanel ? $(this.openPanel) : document.querySelector('.screen:not(.hidden):not(.panel)');
+    const card = holder?.querySelector('.card');
+    if (!card) return;
+    const c = card.getBoundingClientRect();
+    const app = $('app').getBoundingClientRect();
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const gap = 12;
+    const W = app.width;
+    const H = app.height;
+    let top;
+    let left = W / 2 - w / 2;
+    if (H - c.bottom >= h + gap * 2) top = c.bottom + (H - c.bottom - h) / 2;
+    else if (c.top >= h + gap * 2) top = (c.top - h) / 2;
+    else if (W - c.right >= w + gap * 2) {
+      top = c.top + gap;
+      left = c.right + (W - c.right - w) / 2;
+    } else top = H - h - gap;
+    el.style.top = `${Math.round(top)}px`;
+    el.style.left = `${Math.round(Math.max(gap, left))}px`;
+    el.style.transform = 'none';
   }
 
   banner(text) {
@@ -1151,9 +1233,23 @@ class App {
   }
 
   // ---------------------------------------------------------------- loop
+  // Slow motion while a level-up card covers the screen, so nobody dies
+  // behind it. Eases in and out; gameplay slows, camera and world don't.
+  slowMo(seconds, scale) {
+    this.slowUntil = Math.max(this.slowUntil || 0, performance.now() / 1000 + seconds);
+    this.slowScale = Math.min(this.slowScale ?? 1, scale);
+  }
+
   frame(now) {
     const rawDt = Math.max(0, (now - this.last) / 1000);
     const dt = Math.min(0.1, rawDt);
+    const slowing = this.state === 'playing' && now / 1000 < (this.slowUntil || 0);
+    if (!slowing) this.slowScale = 1;
+    const tsTarget = slowing ? this.slowScale : 1;
+    this.timeScale = (this.timeScale ?? 1) + (tsTarget - (this.timeScale ?? 1)) * Math.min(1, dt * (slowing ? 7 : 3));
+    // gameplay time: snake, game clock, ghost, pickups and particles
+    const gdt = dt * this.timeScale;
+    this.audio.setSlow(this.timeScale < 0.8);
     this.last = now;
     this.renderer.info.reset();
     this.input.pollGamepad();
@@ -1161,7 +1257,7 @@ class App {
     const rm = this.settings.reduceMotion;
 
     if (this.state !== 'paused') {
-      this.simTime += dt;
+      this.simTime += gdt;
       for (let i = 0; i < this.timers.length; ) {
         if (this.timers[i].at <= this.simTime) {
           const t = this.timers.splice(i, 1)[0];
@@ -1186,7 +1282,7 @@ class App {
     }
 
     if (this.state === 'playing') {
-      this.t += (dt * 1000) / g.currentInterval();
+      this.t += (gdt * 1000) / g.currentInterval();
       let guard = 0;
       while (this.t >= 1 && this.state === 'playing' && guard++ < 4) {
         this.t -= 1;
@@ -1212,7 +1308,7 @@ class App {
       deathFlash: this.deathFlash,
     });
     this.snake.setRim(this.world.p.rimColor, 0.35 + this.world.p.rimIntensity * 0.25);
-    this.updateGhost(dt);
+    this.updateGhost(gdt);
     if (fast && this.state === 'playing' && Math.random() < 0.8) {
       const hp = this.snake.headPos;
       const hd = this.snake.headDir;
@@ -1222,14 +1318,14 @@ class App {
     }
 
     const view = this.rig.mode === 'fp' || this.rig.mode === 'tp';
-    this.food.update(dt, this.simTime, { reduceMotion: rm, beam: view });
+    this.food.update(gdt, this.simTime, { reduceMotion: rm, beam: view });
     this.syncFood();
     const headingYaw = Math.atan2(this.snake.headDir.x, this.snake.headDir.z);
     this.board.applyPalette(this.world.p);
-    this.board.sync(g, this.toWorld, dt, this.simTime, headingYaw);
+    this.board.sync(g, this.toWorld, gdt, this.simTime, headingYaw);
     const playing = this.state === 'playing' || this.state === 'countdown' || this.state === 'paused';
     this.effects.updateGuide(g, this.toWorld, playing && this.settings.guide && view);
-    this.effects.update(dt);
+    this.effects.update(gdt);
     const rs = this.post.renderSize;
     const pxScale = rs.y / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
     this.world.update(dt, { level: this.state === 'menu' ? 0 : g.level, reduceMotion: rm, pxScale });
@@ -1266,15 +1362,16 @@ class App {
     }
     const speed = rm ? 0 : Math.max(0, this.speedFx - 0.25) * (view ? 1.3 : 0.45) + this.rushGlow * (view ? 0.5 : 0.15);
     const trans = this.world.transitioning ? 0.5 : 0;
+    const slow = 1 - (this.timeScale ?? 1);
     P.uBloom.value = pp.bloom + this.rushGlow * 0.18 + this.flashAmt * 0.5;
-    P.uSat.value = pp.sat;
+    P.uSat.value = pp.sat * (1 - slow * 0.3);
     P.uContrast.value = pp.contrast;
     P.uTint.value.copy(pp.tint);
     P.uLift.value.copy(pp.lift);
-    P.uVignette.value = pp.vignette + this.rushGlow * 0.1;
+    P.uVignette.value = pp.vignette + this.rushGlow * 0.1 + slow * 0.35;
     P.uSpeed.value = speed;
     P.uLines.value = rm ? 0 : Math.max(0, this.speedFx - 0.2) * (view ? 1.2 : 0.5) + this.rushGlow * 0.6;
-    P.uChroma.value = rm ? 0 : this.rushGlow * 0.7 + trans;
+    P.uChroma.value = rm ? 0 : this.rushGlow * 0.7 + trans + slow * 0.6;
     P.uDanger.value = danger;
     P.uFlash.value = Math.min(0.6, this.flashAmt);
     P.uFlashColor.value.copy(this.flashColor);
@@ -1348,7 +1445,7 @@ function showBootError(err) {
   console.error(err);
   document.body.classList.add('boot-failed');
   const el = document.getElementById('loader-msg');
-  if (el) el.textContent = `Coil Rush couldn't start: ${err && err.message ? err.message : err}. Try reloading; if you're running it locally, run "npm install" first.`;
+  if (el) el.textContent = `Snake Rush couldn't start: ${err && err.message ? err.message : err}. Try reloading; if you're running it locally, run "npm install" first.`;
 }
 
 requestAnimationFrame(() =>

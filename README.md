@@ -1,4 +1,4 @@
-# Coil Rush
+# Snake Rush
 
 Classic Snake reimagined as a fast, cinematic 3D browser game. Race a scaly
 serpent around a floating checkered island, grab spinning crystal apples,
@@ -49,6 +49,7 @@ your own body.
 | Restart | R | same |
 | Mute | M | same |
 | Ghost guide on / off | G | same |
+| Pick the starting level (menu) | Left / Right | |
 
 **Touch:** swipe to steer in the overhead view; in the chase and first-person
 views, tap or swipe left/right (or use the on-screen turn buttons). Hold the
@@ -90,6 +91,15 @@ camera, Start pauses, bumpers turn left/right.
   the sky, light, water, board and music all change: Emerald Coast, Golden
   Canyon, Neon Night, then Cyber Overdrive. The visuals get more intense with
   each level inside a zone too.
+- **Slow motion on level-ups:** while the level-up banner or a new zone's
+  title card covers the screen, the game drops into slow motion (about a
+  quarter speed for a new zone, a short dip for a normal level-up), with
+  muffled music and a softer, desaturated look. It eases back to full speed
+  once the card clears, so the card never gets you killed.
+- **Level select:** the start menu has a "Start at" picker. Once you have
+  reached a level in any run, you can start a new run straight from it (or
+  from any lower level) with the ‹ › buttons or Left/Right on the menu. The run
+  starts with that level's speed, zone, apples-to-next-level and pillars.
 - At game over you get a rank from D to S.
 
 ### Controls that feel instant

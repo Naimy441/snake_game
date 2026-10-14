@@ -1,4 +1,4 @@
-// Pure game state for Coil Rush. No rendering here: every camera mode reads
+// Pure game state for Snake Rush. No rendering here: every camera mode reads
 // the same instance, so the rules are identical whichever view is active.
 
 export const DIRS = {
@@ -440,6 +440,18 @@ export class SnakeGame {
       pads.push({ ...p });
     }
     if (pads.length) ev.padsSpawned = pads;
+  }
+
+  // Begin a fresh run at a later level (level select): that level's speed,
+  // and the pillars and boost pads every earlier level would have added.
+  // The snake starts short; pillars are already standing.
+  startAtLevel(level) {
+    const L = Math.max(0, Math.min(MAX_LEVEL, Math.floor(level)));
+    if (L === 0) return;
+    this.foodEaten = LEVEL_AT[L];
+    for (let l = 1; l <= L; l++) if (OBSTACLE_PLAN[l]) this.addObstacles(OBSTACLE_PLAN[l]);
+    for (const o of this.obstacles) o.solid = true;
+    while (this.pads.length < this.padTarget()) if (!this.spawnPad()) break;
   }
 
   // Cells straight ahead along the heading the snake will take next, up to the

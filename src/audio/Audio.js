@@ -178,7 +178,11 @@ export class AudioEngine {
     this.musicFilter.frequency.value = 18000;
     this.musicFilter.Q.value = 0.7;
     this.musicFade = c.createGain();
-    this.music.connect(this.musicFilter).connect(this.musicFade).connect(this.master);
+    // separate low-pass for slow-motion moments (pause/death use musicFilter)
+    this.slowFilter = c.createBiquadFilter();
+    this.slowFilter.type = 'lowpass';
+    this.slowFilter.frequency.value = 20000;
+    this.music.connect(this.musicFilter).connect(this.slowFilter).connect(this.musicFade).connect(this.master);
 
     // echo + small room for the lead and sfx
     this.delay = c.createDelay(1);
@@ -456,6 +460,15 @@ export class AudioEngine {
         clearInterval(this.timer);
       }
     }, fade * 1000 + 100);
+  }
+
+  // Slow motion: the music sinks under water for a moment.
+  setSlow(on) {
+    if (!this.ctx || this.slowOn === on) return;
+    this.slowOn = on;
+    const now = this.ctx.currentTime;
+    this.slowFilter.frequency.cancelScheduledValues(now);
+    this.slowFilter.frequency.setTargetAtTime(on ? 1200 : 20000, now, on ? 0.08 : 0.35);
   }
 
   // Muffled and quieter while paused, so the music keeps flowing.
