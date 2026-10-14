@@ -10,6 +10,7 @@ import fs from 'node:fs';
 const quality = process.env.Q || 'high';
 const camera = process.env.CAM || 'overhead';
 const seconds = Number(process.env.SECS || 8);
+const level = Number(process.env.LEVEL || 0); // 12 = Sunset Heavens (flight)
 const server = await preview({ preview: { port: 4174, strictPort: true } });
 const executablePath = process.env.CHROMIUM_PATH || (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
 const browser = await chromium.launch({
@@ -17,10 +18,11 @@ const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
 });
 const page = await browser.newPage({ viewport: { width: 960, height: 600 }, deviceScaleFactor: 2 });
-await page.addInitScript(([q, cam]) => {
+await page.addInitScript(([q, cam, lvl]) => {
   const key = Object.keys(localStorage).find((k) => k.endsWith('.settings.v1')) || 'coilrush.settings.v1';
-  localStorage.setItem(key, JSON.stringify({ quality: q, camera: cam, music: 0, sfx: 0, fixedResolution: true }));
-}, [quality, camera]);
+  localStorage.setItem(key, JSON.stringify({ quality: q, camera: cam, music: 0, sfx: 0, fixedResolution: true, startLevel: lvl }));
+  localStorage.setItem('coilrush.stats.v1', JSON.stringify({ maxLevel: lvl, maxZone: 0 }));
+}, [quality, camera, level]);
 await page.goto('http://localhost:4174/');
 await page.waitForFunction(() => window.__coil && window.__coil.state === 'menu', null, { timeout: 60000 });
 await page.keyboard.press('Enter');
@@ -32,7 +34,7 @@ const result = await page.evaluate(async (seconds) => {
     if (!g.alive) return;
     const look = g.lookAhead(3);
     if (look.blocked && look.free < 3) {
-      if (!g.turn(1)) g.turn(-1);
+      if (!g.turn(1)) if (!g.turn(-1)) if (!g.pitch(true)) g.pitch(false);
     }
   }, 16);
   await new Promise((r) => setTimeout(r, 1500));
@@ -65,6 +67,6 @@ const result = await page.evaluate(async (seconds) => {
     alive: g.alive,
   };
 }, seconds);
-console.log(JSON.stringify({ quality, camera, ...result }, null, 2));
+console.log(JSON.stringify({ quality, camera, level, ...result }, null, 2));
 await browser.close();
 server.httpServer.close();

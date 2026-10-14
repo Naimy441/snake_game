@@ -1,11 +1,15 @@
 // Pure game state for Snake Rush. No rendering here: every camera mode reads
 // the same instance, so the rules are identical whichever view is active.
 
+// x/z run across the board ("up" is screen-north in the overhead view); y is
+// altitude, which only exists once the snake flies in Sunset Heavens.
 export const DIRS = {
-  up: { x: 0, z: -1 },
-  down: { x: 0, z: 1 },
-  left: { x: -1, z: 0 },
-  right: { x: 1, z: 0 },
+  up: { x: 0, z: -1, y: 0 },
+  down: { x: 0, z: 1, y: 0 },
+  left: { x: -1, z: 0, y: 0 },
+  right: { x: 1, z: 0, y: 0 },
+  rise: { x: 0, z: 0, y: 1 },
+  dive: { x: 0, z: 0, y: -1 },
 };
 
 export const FOOD_TYPES = {
@@ -18,21 +22,30 @@ export const COMBO_WINDOW_MS = 5000;
 export const MAX_COMBO = 8;
 export const PRISM_LIFETIME_MS = 9000;
 export const RUSH_DRAIN_PER_SEC = 32;
-export const MAX_LEVEL = 12;
+export const MAX_LEVEL = 15;
 export const MIN_INTERVAL = 72; // ~14 cells/s
 
 // Difficulty ramp. Apples needed to clear each level: short levels in the
 // first zone, longer ones later. Milliseconds per move at each level: a
-// gentle warm-up in Emerald Coast that builds to the top speed by the end.
-export const LEVEL_COSTS = [3, 3, 3, 4, 4, 4, 5, 5, 5, 5, 5, 5];
-export const LEVEL_SPEEDS = [175, 163, 152, 142, 133, 124, 115, 106, 98, 90, 83, 77, 72];
+// gentle warm-up in Emerald Coast that builds to the top speed in Cyber
+// Overdrive. Flying in three dimensions is a new skill, so Sunset Heavens
+// starts slower again and builds back up.
+export const LEVEL_COSTS = [3, 3, 3, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 6];
+export const LEVEL_SPEEDS = [175, 163, 152, 142, 133, 124, 115, 106, 98, 90, 83, 77, 128, 116, 105, 95];
 // Total apples eaten at which each level starts.
 export const LEVEL_AT = LEVEL_COSTS.reduce((acc, c) => (acc.push(acc[acc.length - 1] + c), acc), [0]);
 export const MIN_FAST_INTERVAL = 48; // ~21 cells/s with Rush or Boost
 
 // The world changes zone every few speed levels.
-export const ZONE_STARTS = [0, 3, 6, 9];
-export const ZONE_NAMES = ['Emerald Coast', 'Golden Canyon', 'Neon Night', 'Cyber Overdrive'];
+export const ZONE_STARTS = [0, 3, 6, 9, 12];
+export const ZONE_NAMES = ['Emerald Coast', 'Golden Canyon', 'Neon Night', 'Cyber Overdrive', 'Sunset Heavens'];
+
+// Sunset Heavens: the snake straps on a jetpack and the board becomes a box
+// of air SKY_H cells tall, fenced in by lasers. It lifts off at layer SKY_MID,
+// level with where the board was.
+export const SKY_ZONE = 4;
+export const SKY_H = 9;
+export const SKY_MID = 4;
 
 // Orb chains: numbered orbs that pay out when eaten in order.
 export const CHAIN_LINK_POINTS = 20;
@@ -51,14 +64,20 @@ export const PAD_RESPAWN_MS = 5000;
 
 // Obstacles rise at these speed levels (level index -> how many).
 // No pillars in the first zone; they start partway into the second.
-export const OBSTACLE_PLAN = { 4: 2, 5: 1, 7: 2, 8: 1, 10: 2, 11: 1, 12: 2 };
-export const MAX_OBSTACLES = 12;
+// In the sky they become laser columns that span the full height.
+export const OBSTACLE_PLAN = { 4: 2, 5: 1, 7: 2, 8: 1, 10: 2, 11: 1, 12: 2, 13: 1, 14: 1, 15: 1 };
+export const MAX_OBSTACLES = 14;
 export const OBSTACLE_WARN_MS = 2200;
 
-const sameDir = (a, b) => a.x === b.x && a.z === b.z;
-const opposite = (a, b) => a.x === -b.x && a.z === -b.z;
-const manhattan = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
-const NEIGHBOURS = [DIRS.up, DIRS.down, DIRS.left, DIRS.right];
+// Cells and directions carry y (altitude); anything without one is on the ground.
+const Y = (c) => c.y || 0;
+const sameDir = (a, b) => a.x === b.x && a.z === b.z && Y(a) === Y(b);
+const opposite = (a, b) => a.x === -b.x && a.z === -b.z && Y(a) === -Y(b);
+const manhattan = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z) + Math.abs(Y(a) - Y(b));
+const at = (c, x, z, y) => c.x === x && c.z === z && Y(c) === y;
+export const NEIGHBOURS = [DIRS.up, DIRS.down, DIRS.left, DIRS.right];
+export const NEIGHBOURS_3D = [...NEIGHBOURS, DIRS.rise, DIRS.dive];
+export const cellKey = (x, z, y = 0) => (x * 64 + z) * 16 + y;
 
 export function zoneForLevel(level) {
   let z = 0;
@@ -79,11 +98,16 @@ export class SnakeGame {
     const c = Math.floor(this.size / 2);
     const startZ = this.size - 5;
     this.dir = { ...DIRS.up };
+    // last horizontal heading: what "left" and "right" turn from while climbing or diving
+    this.facing = { ...DIRS.up };
+    this.flying = false;
+    this.height = 1;
+    this.yMid = 0;
     this.cells = [];
-    for (let i = 0; i < 4; i++) this.cells.push({ x: c, z: startZ + i });
+    for (let i = 0; i < 4; i++) this.cells.push({ x: c, z: startZ + i, y: 0 });
     // The cell the tail vacated on the last step (null when the snake grew).
     // The renderer uses it to slide the tail smoothly.
-    this.removedTail = { x: c, z: startZ + 4 };
+    this.removedTail = { x: c, z: startZ + 4, y: 0 };
     this.queue = [];
     this.pendingGrowth = 0;
     this.score = 0;
@@ -161,33 +185,61 @@ export class SnakeGame {
     return this.queue.length ? this.queue[this.queue.length - 1] : this.dir;
   }
 
+  // Horizontal heading once the queued moves have been made.
+  lastFacing() {
+    let f = this.facing;
+    for (const q of this.queue) if (!Y(q)) f = q;
+    return f;
+  }
+
   queueDirection(d) {
-    if (!this.alive) return false;
+    if (!this.alive || !d) return false;
+    if (Y(d) && !this.flying) return false;
     const last = this.lastQueuedDir();
     if (sameDir(d, last) || opposite(d, last)) return false;
     if (this.queue.length >= 3) return false;
-    this.queue.push({ x: d.x, z: d.z });
+    this.queue.push({ x: d.x, z: d.z, y: Y(d) });
     return true;
   }
 
   // side: -1 = turn left, +1 = turn right, relative to the heading the snake
   // will have once already-queued turns are applied.
   turn(side) {
+    return this.queueDirection(this.turnDir(side));
+  }
+
+  // Flight controls: climb (up = true) or dive from level flight; the
+  // opposite key levels out again along the facing. null if it does nothing.
+  pitchDir(up) {
+    if (!this.flying) return null;
     const l = this.lastQueuedDir();
-    const d = side > 0 ? { x: -l.z + 0, z: l.x + 0 } : { x: l.z + 0, z: -l.x + 0 };
-    return this.queueDirection(d);
+    const f = this.lastFacing();
+    if (!Y(l)) return up ? { ...DIRS.rise } : { ...DIRS.dive };
+    if (Y(l) > 0) return up ? null : { x: f.x, z: f.z, y: 0 };
+    return up ? { x: f.x, z: f.z, y: 0 } : null;
   }
 
-  inBounds(x, z) {
-    return x >= 0 && z >= 0 && x < this.size && z < this.size;
+  pitch(up) {
+    return this.queueDirection(this.pitchDir(up));
   }
 
-  occupied(x, z, ignoreTail = false) {
+  get neighbours() {
+    return this.flying ? NEIGHBOURS_3D : NEIGHBOURS;
+  }
+
+  inBounds(x, z, y = 0) {
+    return x >= 0 && z >= 0 && x < this.size && z < this.size && y >= 0 && y < this.height;
+  }
+
+  occupied(x, z, ignoreTail = false, y = 0) {
     const n = ignoreTail ? this.cells.length - 1 : this.cells.length;
-    for (let i = 0; i < n; i++) {
-      const c = this.cells[i];
-      if (c.x === x && c.z === z) return true;
-    }
+    for (let i = 0; i < n; i++) if (at(this.cells[i], x, z, y)) return true;
+    return false;
+  }
+
+  // Is any layer of this board cell taken by the snake?
+  columnOccupied(x, z) {
+    for (const c of this.cells) if (c.x === x && c.z === z) return true;
     return false;
   }
 
@@ -196,47 +248,53 @@ export class SnakeGame {
     return null;
   }
 
-  padAt(x, z) {
-    for (const p of this.pads) if (p.x === x && p.z === z) return p;
+  padAt(x, z, y = 0) {
+    for (const p of this.pads) if (at(p, x, z, y)) return p;
     return null;
   }
 
-  chainIndexAt(x, z) {
+  chainIndexAt(x, z, y = 0) {
     if (!this.chain) return -1;
     const links = this.chain.links;
-    for (let i = this.chain.next; i < links.length; i++) if (links[i].x === x && links[i].z === z) return i;
+    for (let i = this.chain.next; i < links.length; i++) if (at(links[i], x, z, y)) return i;
     return -1;
   }
 
-  // Cells that are blocked for spawning anything new.
-  takenSet() {
-    const key = (x, z) => x * 1000 + z;
-    const taken = new Set(this.cells.map((c) => key(c.x, c.z)));
-    if (this.food) taken.add(key(this.food.x, this.food.z));
-    if (this.bonus) taken.add(key(this.bonus.x, this.bonus.z));
-    if (this.prey) taken.add(key(this.prey.x, this.prey.z));
-    if (this.chain) for (let i = this.chain.next; i < this.chain.links.length; i++) taken.add(key(this.chain.links[i].x, this.chain.links[i].z));
-    for (const o of this.obstacles) taken.add(key(o.x, o.z));
-    for (const p of this.pads) taken.add(key(p.x, p.z));
+  // Cells that are blocked for spawning anything new (keys from cellKey).
+  // flat: project everything onto the board, for placing full-height columns.
+  takenSet(flat = false) {
+    const taken = new Set();
+    const add = (c) => taken.add(cellKey(c.x, c.z, flat ? 0 : Y(c)));
+    this.cells.forEach(add);
+    if (this.food) add(this.food);
+    if (this.bonus) add(this.bonus);
+    if (this.prey) add(this.prey);
+    if (this.chain) for (let i = this.chain.next; i < this.chain.links.length; i++) add(this.chain.links[i]);
+    for (const o of this.obstacles) for (let y = 0; y < (flat ? 1 : this.height); y++) taken.add(cellKey(o.x, o.z, y));
+    for (const p of this.pads) add(p);
     return taken;
   }
 
-  freeCells() {
-    const taken = this.takenSet();
+  freeCells(flat = false) {
+    const taken = this.takenSet(flat);
+    const H = flat ? 1 : this.height;
     const out = [];
     for (let x = 0; x < this.size; x++) {
       for (let z = 0; z < this.size; z++) {
-        if (!taken.has(x * 1000 + z)) out.push({ x, z });
+        for (let y = 0; y < H; y++) if (!taken.has(cellKey(x, z, y))) out.push({ x, z, y });
       }
     }
     return out;
   }
 
   // Cells along the current heading, used to keep new things out of the way.
-  inFrontOfHead(c, reach = 6) {
+  // flat: compare on the board only (for columns).
+  inFrontOfHead(c, reach = 6, flat = false) {
     const h = this.head;
     const d = this.lastQueuedDir();
-    for (let i = 1; i <= reach; i++) if (h.x + d.x * i === c.x && h.z + d.z * i === c.z) return true;
+    for (let i = 1; i <= reach; i++) {
+      if (h.x + d.x * i === c.x && h.z + d.z * i === c.z && (flat || Y(h) + Y(d) * i === Y(c))) return true;
+    }
     return false;
   }
 
@@ -253,26 +311,28 @@ export class SnakeGame {
     const fair = free.filter((c) => manhattan(c, h) > 2);
     const pool = fair.length ? fair : free;
     const c = this.pick(pool);
-    return { x: c.x, z: c.z, type, id: this.uid++, spawnedAt: this.time };
+    return { x: c.x, z: c.z, y: c.y, type, id: this.uid++, spawnedAt: this.time };
   }
 
   // ---------------------------------------------------------------- chains
   spawnChain() {
     const n = 3 + Math.min(2, this.zone);
     const taken = this.takenSet();
-    const ok = (x, z) => x >= 1 && z >= 1 && x < this.size - 1 && z < this.size - 1 && !taken.has(x * 1000 + z);
+    const nb = this.neighbours;
+    const yOk = (y) => (this.flying ? y >= 1 && y < this.height - 1 : y === 0);
+    const ok = (c) => c.x >= 1 && c.z >= 1 && c.x < this.size - 1 && c.z < this.size - 1 && yOk(c.y) && !taken.has(cellKey(c.x, c.z, c.y));
     for (let attempt = 0; attempt < 60; attempt++) {
       const start = this.pick(this.freeCells());
-      if (!start || manhattan(start, this.head) < 6 || !ok(start.x, start.z)) continue;
-      let d = this.pick(NEIGHBOURS);
-      const links = [{ x: start.x, z: start.z }];
+      if (!start || manhattan(start, this.head) < 6 || !ok(start)) continue;
+      let d = this.pick(nb);
+      const links = [{ x: start.x, z: start.z, y: start.y }];
       let cur = start;
       let good = true;
       for (let i = 1; i < n && good; i++) {
-        if (this.rng() < 0.35) d = this.rng() < 0.5 ? { x: -d.z + 0, z: d.x + 0 } : { x: d.z + 0, z: -d.x + 0 };
-        const mid = { x: cur.x + d.x, z: cur.z + d.z };
-        const next = { x: cur.x + d.x * 2, z: cur.z + d.z * 2 };
-        if (!ok(mid.x, mid.z) || !ok(next.x, next.z) || this.inFrontOfHead(next, 3)) good = false;
+        if (this.rng() < 0.35) d = this.pick(nb.filter((e) => e.x * d.x + e.z * d.z + Y(e) * Y(d) === 0));
+        const mid = { x: cur.x + d.x, z: cur.z + d.z, y: cur.y + Y(d) };
+        const next = { x: cur.x + d.x * 2, z: cur.z + d.z * 2, y: cur.y + Y(d) * 2 };
+        if (!ok(mid) || !ok(next) || this.inFrontOfHead(next, 3)) good = false;
         else {
           links.push(next);
           cur = next;
@@ -288,6 +348,7 @@ export class SnakeGame {
 
   // ---------------------------------------------------------------- prey
   spawnPrey() {
+    if (this.flying) return null; // mice can't fly
     const pool = this.freeCells().filter((c) => manhattan(c, this.head) >= 9);
     if (!pool.length) return null;
     const c = this.pick(pool);
@@ -390,11 +451,12 @@ export class SnakeGame {
     const added = [];
     const room = MAX_OBSTACLES - this.obstacles.length;
     n = Math.min(n, room);
-    const h = this.head;
+    const h = { x: this.head.x, z: this.head.z };
     for (let i = 0; i < n; i++) {
-      const pool = this.freeCells().filter((c) => {
+      // judged on the board: in the sky an obstacle is a column through every layer
+      const pool = this.freeCells(true).filter((c) => {
         if (c.x < 2 || c.z < 2 || c.x > this.size - 3 || c.z > this.size - 3) return false;
-        if (manhattan(c, h) < 5 || this.inFrontOfHead(c, 8)) return false;
+        if (manhattan(c, h) < 5 || this.inFrontOfHead(c, 8, true)) return false;
         // keep pillars apart so they never form tight pockets
         for (const o of this.obstacles) if (Math.abs(o.x - c.x) <= 2 && Math.abs(o.z - c.z) <= 2) return false;
         return true;
@@ -413,10 +475,11 @@ export class SnakeGame {
   }
 
   spawnPad() {
-    const pool = this.freeCells().filter((c) => manhattan(c, this.head) >= 4 && !this.inFrontOfHead(c, 3) && c.x > 0 && c.z > 0 && c.x < this.size - 1 && c.z < this.size - 1);
+    const yOk = (y) => !this.flying || (y >= 1 && y < this.height - 1);
+    const pool = this.freeCells().filter((c) => manhattan(c, this.head) >= 4 && !this.inFrontOfHead(c, 3) && c.x > 0 && c.z > 0 && c.x < this.size - 1 && c.z < this.size - 1 && yOk(c.y));
     if (!pool.length) return null;
     const c = this.pick(pool);
-    const p = { x: c.x, z: c.z, id: this.uid++ };
+    const p = { x: c.x, z: c.z, y: c.y, id: this.uid++ };
     this.pads.push(p);
     return p;
   }
@@ -430,6 +493,10 @@ export class SnakeGame {
     const lvl = this.level;
     const zonePrev = zoneForLevel(prevLevel);
     ev.levelUp = { level: lvl, zone: this.zone, zoneUp: this.zone > zonePrev };
+    if (this.zone >= SKY_ZONE && !this.flying) {
+      this.enterSky();
+      ev.levelUp.liftoff = true;
+    }
     let obstacles = [];
     for (let l = prevLevel + 1; l <= lvl; l++) if (OBSTACLE_PLAN[l]) obstacles = obstacles.concat(this.addObstacles(OBSTACLE_PLAN[l]));
     if (obstacles.length) ev.obstaclesWarned = obstacles;
@@ -449,9 +516,29 @@ export class SnakeGame {
     const L = Math.max(0, Math.min(MAX_LEVEL, Math.floor(level)));
     if (L === 0) return;
     this.foodEaten = LEVEL_AT[L];
+    if (this.zone >= SKY_ZONE) this.enterSky();
     for (let l = 1; l <= L; l++) if (OBSTACLE_PLAN[l]) this.addObstacles(OBSTACLE_PLAN[l]);
     for (const o of this.obstacles) o.solid = true;
     while (this.pads.length < this.padTarget()) if (!this.spawnPad()) break;
+  }
+
+  // Lift off: the board becomes a box of air. The snake and everything on the
+  // board rise to the middle layer, so nothing moves on screen; the golden
+  // mouse is left behind on the ground.
+  enterSky() {
+    if (this.flying) return;
+    this.flying = true;
+    this.height = SKY_H;
+    this.yMid = SKY_MID;
+    const lift = (c) => c && (c.y = SKY_MID);
+    this.cells = this.cells.map((c) => ({ ...c, y: SKY_MID }));
+    if (this.removedTail) this.removedTail = { ...this.removedTail, y: SKY_MID };
+    lift(this.food);
+    lift(this.bonus);
+    if (this.chain) this.chain.links.forEach(lift);
+    this.pads.forEach(lift);
+    this.prey = null;
+    this.undoOk = false;
   }
 
   // Cells straight ahead along the heading the snake will take next, up to the
@@ -461,10 +548,12 @@ export class SnakeGame {
     const out = { free: 0, blocked: 'wall' };
     let x = this.head.x;
     let z = this.head.z;
+    let y = Y(this.head);
     for (let i = 0; i < max; i++) {
       x += d.x;
       z += d.z;
-      if (!this.inBounds(x, z)) {
+      y += Y(d);
+      if (!this.inBounds(x, z, y)) {
         out.blocked = 'wall';
         return out;
       }
@@ -472,7 +561,7 @@ export class SnakeGame {
         out.blocked = 'obstacle';
         return out;
       }
-      if (this.occupied(x, z, i === 0)) {
+      if (this.occupied(x, z, i === 0, y)) {
         out.blocked = 'body';
         return out;
       }
@@ -508,7 +597,7 @@ export class SnakeGame {
     // Snapshot for the late-turn grace window (see regrace).
     this.undo = {
       cells: this.cells.slice(), removedTail: this.removedTail, pendingGrowth: this.pendingGrowth,
-      dir: this.dir, queue: this.queue.slice(), time: this.time, ticks: this.ticks,
+      dir: this.dir, facing: this.facing, queue: this.queue.slice(), time: this.time, ticks: this.ticks,
       rush: this.rush, rushing: this.rushing, boostTicks: this.boostTicks,
       prey: this.prey ? { ...this.prey } : null, preyTimer: this.preyTimer,
     };
@@ -535,6 +624,7 @@ export class SnakeGame {
     this.removedTail = u.removedTail;
     this.pendingGrowth = u.pendingGrowth;
     this.dir = u.dir;
+    this.facing = u.facing;
     this.time = u.time;
     this.ticks = u.ticks;
     this.rush = u.rush;
@@ -542,17 +632,17 @@ export class SnakeGame {
     this.boostTicks = u.boostTicks;
     this.prey = u.prey;
     this.preyTimer = u.preyTimer;
-    this.queue = [{ x: d.x, z: d.z }];
+    this.queue = [{ x: d.x, z: d.z, y: Y(d) }];
     this.undoOk = false;
     const ev = this.step();
     ev.regraced = true;
     return ev;
   }
 
-  // Relative turn resolved against the current heading (for regrace).
+  // Relative turn resolved against the heading (the facing while climbing or diving).
   turnDir(side) {
-    const l = this.lastQueuedDir();
-    return side > 0 ? { x: -l.z + 0, z: l.x + 0 } : { x: l.z + 0, z: -l.x + 0 };
+    const l = this.lastFacing();
+    return side > 0 ? { x: -l.z + 0, z: l.x + 0, y: 0 } : { x: l.z + 0, z: -l.x + 0, y: 0 };
   }
 
   advance(ev) {
@@ -566,6 +656,7 @@ export class SnakeGame {
 
     if (this.queue.length) {
       this.dir = this.queue.shift();
+      if (!Y(this.dir)) this.facing = this.dir;
       ev.turned = true;
     }
 
@@ -580,7 +671,7 @@ export class SnakeGame {
     }
     for (const o of this.obstacles) {
       // Rise only once the cell is clear, so a pillar never crushes the snake.
-      if (!o.solid && this.time >= o.solidAt && !this.occupied(o.x, o.z)) {
+      if (!o.solid && this.time >= o.solidAt && !this.columnOccupied(o.x, o.z)) {
         o.solid = true;
         (ev.obstaclesRaised || (ev.obstaclesRaised = [])).push({ ...o });
       }
@@ -596,6 +687,7 @@ export class SnakeGame {
     const h = this.head;
     const nx = h.x + this.dir.x;
     const nz = h.z + this.dir.z;
+    let ny = Y(h) + Y(this.dir);
 
     // prey moves on its own clock, never into the cell the head is entering
     if (this.prey) {
@@ -612,7 +704,7 @@ export class SnakeGame {
           this.movePrey({ x: nx, z: nz });
         }
       }
-    } else if (this.foodEaten >= 2) {
+    } else if (this.foodEaten >= 2 && !this.flying) {
       this.preyTimer -= interval;
       if (this.preyTimer <= 0) {
         const p = this.spawnPrey();
@@ -621,26 +713,29 @@ export class SnakeGame {
       }
     }
 
-    if (!this.inBounds(nx, nz)) {
-      this.die('wall');
+    // in the sky the walls are a laser fence and pillars are laser columns
+    if (!this.inBounds(nx, nz, ny)) {
+      const cause = this.flying ? 'laser' : 'wall';
+      this.die(cause);
       ev.died = true;
-      ev.cause = 'wall';
+      ev.cause = cause;
       return ev;
     }
     if (this.obstacleAt(nx, nz)) {
-      this.die('obstacle');
+      const cause = this.flying ? 'beam' : 'obstacle';
+      this.die(cause);
       ev.died = true;
-      ev.cause = 'obstacle';
+      ev.cause = cause;
       return ev;
     }
 
     let eaten = null;
-    if (this.food && this.food.x === nx && this.food.z === nz) eaten = this.food;
-    else if (this.bonus && this.bonus.x === nx && this.bonus.z === nz) eaten = this.bonus;
-    const caught = this.prey && this.prey.x === nx && this.prey.z === nz ? this.prey : null;
+    if (this.food && at(this.food, nx, nz, ny)) eaten = this.food;
+    else if (this.bonus && at(this.bonus, nx, nz, ny)) eaten = this.bonus;
+    const caught = this.prey && at(this.prey, nx, nz, ny) ? this.prey : null;
 
     const growing = this.pendingGrowth > 0 || !!eaten || !!caught;
-    if (this.occupied(nx, nz, !growing)) {
+    if (this.occupied(nx, nz, !growing, ny)) {
       this.die('body');
       ev.died = true;
       ev.cause = 'body';
@@ -657,7 +752,10 @@ export class SnakeGame {
       const prevLevel = this.level;
       if (eaten.type === 'orb') this.foodEaten++;
       ev.ate = { ...eaten, points, combo: this.combo, rushing: this.scoreMult > 1, levelUp: this.level > prevLevel };
-      if (this.level > prevLevel) this.onLevelUp(ev, prevLevel);
+      if (this.level > prevLevel) {
+        this.onLevelUp(ev, prevLevel);
+        if (ev.levelUp.liftoff) ny = ev.ate.y = SKY_MID; // the whole board just rose with us
+      }
     }
 
     if (caught) {
@@ -673,7 +771,7 @@ export class SnakeGame {
       this.preyTimer = 18000 + this.rng() * 12000;
     }
 
-    const link = this.chainIndexAt(nx, nz);
+    const link = this.chainIndexAt(nx, nz, ny);
     if (link >= 0) {
       const ch = this.chain;
       if (link === ch.next) {
@@ -682,22 +780,22 @@ export class SnakeGame {
         this.score += points;
         this.rush = Math.min(100, this.rush + CHAIN_LINK_RUSH);
         this.lastEatTime = this.time; // keeps a combo alive
-        ev.chainLink = { x: nx, z: nz, index: link, of: ch.links.length, points };
+        ev.chainLink = { x: nx, z: nz, y: ny, index: link, of: ch.links.length, points };
         if (ch.next >= ch.links.length) {
           const bonus = CHAIN_BONUS_PER_LINK * ch.links.length * this.scoreMult;
           this.score += bonus;
           this.rush = 100;
           this.stats.chains++;
-          ev.chainComplete = { x: nx, z: nz, bonus, links: ch.links.length };
+          ev.chainComplete = { x: nx, z: nz, y: ny, bonus, links: ch.links.length };
           this.chain = null;
         }
       } else {
-        ev.chainBroken = { ...ch, x: nx, z: nz };
+        ev.chainBroken = { ...ch, x: nx, z: nz, y: ny };
         this.chain = null;
       }
     }
 
-    const pad = this.padAt(nx, nz);
+    const pad = this.padAt(nx, nz, ny);
     if (pad) {
       this.pads.splice(this.pads.indexOf(pad), 1);
       this.padRespawns.push(this.time + PAD_RESPAWN_MS);
@@ -708,7 +806,7 @@ export class SnakeGame {
       ev.boost = { ...pad };
     }
 
-    this.cells.unshift({ x: nx, z: nz });
+    this.cells.unshift({ x: nx, z: nz, y: ny });
     if (this.pendingGrowth > 0) {
       this.pendingGrowth--;
       this.removedTail = null;

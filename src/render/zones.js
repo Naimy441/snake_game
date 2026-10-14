@@ -19,7 +19,7 @@ export const ZONES = [
     cloudLit: '#ffffff', cloudShade: '#b9cde6', cloudOpacity: 1,
     particle: '#fff6c0', particleSize: 0.09, particleRise: -0.15, particleTwinkle: 0.2,
     bloom: 0.32, threshold: 1.05, sat: 1.3, contrast: 1.14, tint: '#ffffff', lift: '#000000', exposure: 0.92, vignette: 0.3,
-    envIntensity: 0.8,
+    envIntensity: 0.8, heaven: 0,
   },
   {
     name: 'Golden Canyon',
@@ -37,7 +37,7 @@ export const ZONES = [
     cloudLit: '#ffd2a0', cloudShade: '#a0628a', cloudOpacity: 1,
     particle: '#ffd38a', particleSize: 0.08, particleRise: 0.12, particleTwinkle: 0.4,
     bloom: 0.45, threshold: 1.0, sat: 1.22, contrast: 1.12, tint: '#fff1e0', lift: '#140600', exposure: 1.0, vignette: 0.34,
-    envIntensity: 1.0,
+    envIntensity: 1.0, heaven: 0,
   },
   {
     name: 'Neon Night',
@@ -55,7 +55,7 @@ export const ZONES = [
     cloudLit: '#5a3c9a', cloudShade: '#1a1238', cloudOpacity: 0.7,
     particle: '#b6ff6a', particleSize: 0.1, particleRise: 0.05, particleTwinkle: 1,
     bloom: 0.8, threshold: 0.85, sat: 1.25, contrast: 1.1, tint: '#e8e8ff', lift: '#06001a', exposure: 1.05, vignette: 0.42,
-    envIntensity: 0.8,
+    envIntensity: 0.8, heaven: 0,
   },
   {
     name: 'Cyber Overdrive',
@@ -73,7 +73,28 @@ export const ZONES = [
     cloudLit: '#ff4fd8', cloudShade: '#2a0050', cloudOpacity: 0.25,
     particle: '#38f6ff', particleSize: 0.11, particleRise: 0.6, particleTwinkle: 0.6,
     bloom: 1.0, threshold: 0.8, sat: 1.2, contrast: 1.12, tint: '#f0e8ff', lift: '#0a0018', exposure: 1.05, vignette: 0.45,
-    envIntensity: 0.7,
+    envIntensity: 0.7, heaven: 0,
+  },
+  {
+    // High above Neon Night at sunset: the island sinks into a sea of clouds,
+    // a huge low sun lights everything gold and pink. heaven drives the
+    // lift-off (island sinks, cloud sea and laser box appear).
+    name: 'Sunset Heavens',
+    skyTop: '#1c1658', skyHorizon: '#ff8c52', skyGround: '#ff6a86',
+    sunColor: '#ffb27a', sunIntensity: 3.1, sunElev: 6, sunAzim: 196, sunSize: 2.8,
+    rimColor: '#ff8ac0', rimIntensity: 1.8,
+    stars: 0.3, cyber: 0,
+    hemiSky: '#ffc8b0', hemiGround: '#6a3a8a', hemiIntensity: 1.3,
+    fogColor: '#f0907e', fogNear: 150, fogFar: 640,
+    waterDeep: '#2a1040', waterShallow: '#ff7a6a', waterGlow: 0.2, waterGrid: 0,
+    boardA: '#2a1a4a', boardB: '#3a2060', boardRough: 0.3, boardGrid: 0.8, gridColor: '#ff9ad8', boardLines: 0.0,
+    strip: '#ff6ad5', wallA: '#1a1030', wallB: '#ff8a3a',
+    grass: '#3a1a5a', grassDark: '#1a0a2a', cliffA: '#5a2a6a', cliffB: '#2a1038', cliffEdge: 1,
+    rock: '#4a2a5a', waterfall: '#ffb0d0', waterfallGlow: 1,
+    cloudLit: '#ffc48a', cloudShade: '#6a3a8e', cloudOpacity: 1,
+    particle: '#ffe2b8', particleSize: 0.1, particleRise: 0.25, particleTwinkle: 0.7,
+    bloom: 0.5, threshold: 1.0, sat: 1.28, contrast: 1.16, tint: '#fff2ee', lift: '#08020e', exposure: 0.95, vignette: 0.4,
+    envIntensity: 1.0, heaven: 1,
   },
 ];
 

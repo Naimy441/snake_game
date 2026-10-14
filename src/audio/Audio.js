@@ -99,6 +99,28 @@ const SONGS = [
       ],
     },
   },
+  {
+    // soaring synthwave in a bright major key for the flight above the clouds
+    name: 'Sunset Heavens', key: 5, scale: 'major', tempo: 150, lead: 0.5,
+    A: {
+      chords: [[0, 'maj7'], [7, 'maj'], [9, 'm7'], [5, 'maj7']],
+      melody: [
+        '5 - - 6 - - 8 - - - 9 - 8 - 6 -', '5 - - - - - 3 - 5 - - - . . . .',
+        '5 - - 6 - - 8 - - - 10 - 9 - 8 -', '9 - - - 8 - - - 6 - - - . . 5 6',
+        '8 - - 9 - - 10 - - - 12 - 10 - 9 -', '8 - - - - - 6 - 8 - - - 9 - 10 -',
+        '12 - - 10 - - 9 - 10 - - - 8 - 9 -', '8 - - - - - - - . . 5 . 6 . 7 .',
+      ],
+    },
+    B: {
+      chords: [[2, 'm7'], [5, 'maj7'], [0, 'maj'], [7, '7']],
+      melody: [
+        '10 - - 9 - - 10 - 12 - - - 13 - 12 -', '12 - - 10 - - 9 - 8 - - - 9 - 10 -',
+        '9 - - - 8 - 6 - 8 - - - 10 - - -', '12 - - 10 - - 12 - 14 - - - - - . .',
+        '15 - - 14 - - 12 - 14 - - - 12 - 10 -', '12 - - 10 - - 9 - 10 - - - 12 - 13 -',
+        '14 - - 12 - - 10 - 12 - - - 10 - 9 -', '8 - - - - - - - 12 . 13 . 14 . 15 .',
+      ],
+    },
+  },
 ];
 
 const BASS = {
@@ -386,6 +408,14 @@ export class AudioEngine {
     this.noiseHit({ at: 0.45, dur: 1.2, gain: 0.09, freq: 6000, type: 'highpass' });
   }
 
+  // Jetpack ignition: a rising roar, a climbing saw and a bright arpeggio.
+  liftoff() {
+    this.noiseHit({ dur: 1.8, gain: 0.22, freq: 180, sweep: 22, q: 0.9 });
+    this.noiseHit({ at: 0.1, dur: 1.2, gain: 0.12, freq: 900, type: 'lowpass', sweep: 0.3 });
+    this.voice(90, { wave: 'sawtooth', dur: 1.4, gain: 0.07, slide: 6 });
+    [0, 4, 7, 12, 16, 19, 24, 28].forEach((n, i) => this.voice(midi(72 + n), { wave: 0.25, at: 0.5 + i * 0.06, dur: 0.24, gain: 0.07 }));
+  }
+
   obstacleWarn() {
     this.voice(midi(57), { wave: 0.5, dur: 0.09, gain: 0.07 });
     this.voice(midi(57), { wave: 0.5, at: 0.14, dur: 0.09, gain: 0.07 });
@@ -548,7 +578,7 @@ export class AudioEngine {
     this.step = 0;
     this.bar++;
     const song = SONGS[this.zone];
-    const target = this.state.menu ? 112 : song.tempo + Math.min(4, this.state.level - [0, 3, 6, 9][this.zone]) * 1.5;
+    const target = this.state.menu ? 112 : song.tempo + Math.min(4, this.state.level - [0, 3, 6, 9, 12][this.zone]) * 1.5;
     this.tempo += (target - this.tempo) * 0.35;
     if (this.fill) {
       this.fill = false;

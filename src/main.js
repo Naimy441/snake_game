@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 import { GhostBot } from './game/GhostBot.js';
-import { SnakeGame, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, zoneForLevel } from './game/SnakeGame.js';
+import { SnakeGame, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, SKY_H, zoneForLevel } from './game/SnakeGame.js';
 import { SKINS, ACCESSORIES, skinById, accessoryById, isUnlocked, unlockProgress } from './skins.js';
 import { World } from './render/World.js';
 import { SnakeView } from './render/SnakeView.js';
@@ -55,7 +55,8 @@ class App {
     this.game = new SnakeGame({ size: BOARD, best: loadBest() });
     this.world = new World({ size: BOARD, renderer: r });
     this.scene = this.world.scene;
-    this.toWorld = (x, z) => this.world.toWorld(x, z);
+    // y: the cell's altitude layer in the sky (undefined on the ground)
+    this.toWorld = (x, z, y) => this.world.toWorld(x, z, y, this.game.yMid);
 
     this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 1500);
     this.rig = new CameraRig(this.camera, BOARD);
@@ -94,6 +95,7 @@ class App {
     this.input = new Input(this.canvas, {
       direction: (d, src) => this.onDirection(d, src),
       turn: (s) => this.onTurn(s),
+      pitch: (up) => this.onPitch(up),
       tap: (side) => this.onTap(side),
       rush: (on) => (this.game.wantRush = on),
       confirm: (k) => this.onConfirm(k),
@@ -103,7 +105,7 @@ class App {
       restart: () => this.onRestart(),
       mute: () => this.toggleMute(),
     });
-    this.input.bindTouchButtons($('t-left'), $('t-right'), $('t-rush'));
+    this.input.bindTouchButtons($('t-left'), $('t-right'), $('t-rush'), $('t-up'), $('t-down'));
 
     this.bindUI();
     this.resize();
@@ -141,12 +143,15 @@ class App {
   // time a zone, chain, prism or pillar appears.
   precompile() {
     const show = [this.food.orb.group, this.food.prism.group, this.food.prey.group, ...this.food.chain.links, ...this.board.pads, this.snake.aura, this.snake.headAura, ...this.effects.rings];
+    show.push(...this.board.pads.map((p) => p.userData.air));
+    if (this.snake.jetpack) show.push(this.snake.jetpack);
     if (this.ghostView) show.push(this.ghostView.group);
     const prev = show.map((o) => o.visible);
     show.forEach((o) => (o.visible = true));
-    const counts = [this.board.pillars, this.board.bands, this.board.warns, this.food.chain.dots].map((m) => m.count);
+    const instanced = [this.board.pillars, this.board.bands, this.board.warns, this.board.beams, this.board.halos, this.food.chain.dots];
+    const counts = instanced.map((m) => m.count);
     const ident = new THREE.Matrix4();
-    for (const m of [this.board.pillars, this.board.bands, this.board.warns, this.food.chain.dots]) {
+    for (const m of instanced) {
       m.count = 1;
       m.setMatrixAt(0, ident);
       m.instanceMatrix.needsUpdate = true;
@@ -165,7 +170,7 @@ class App {
       this.post.render(this.scene, this.camera);
     });
     for (const o of culled) o.frustumCulled = true;
-    [this.board.pillars, this.board.bands, this.board.warns, this.food.chain.dots].forEach((m, i) => (m.count = counts[i]));
+    instanced.forEach((m, i) => (m.count = counts[i]));
     show.forEach((o, i) => (o.visible = prev[i]));
   }
 
@@ -270,8 +275,9 @@ class App {
       for (const ev of this.ghost.update(dt * 1000)) {
         if (ev.respawned) this.ghostFade = 0;
         if (ev.ate) {
-          const w = this.toWorld(this.ghost.head.x, this.ghost.head.z);
-          this.effects.emit(w.x, 0.45, w.z, { count: ev.chainComplete ? 30 : 12, color: '#a8f0ff', speed: 1.8, up: 1.6, size: 0.16, life: 0.5 });
+          const gh = this.ghost.head;
+          const w = this.toWorld(gh.x, gh.z, gh.y);
+          this.effects.emit(w.x, w.y + 0.45, w.z, { count: ev.chainComplete ? 30 : 12, color: '#a8f0ff', speed: 1.8, up: 1.6, size: 0.16, life: 0.5 });
         }
       }
     }
@@ -281,7 +287,7 @@ class App {
     v.group.visible = this.ghostFade > 0.02;
     v.ghostUniforms.uOpacity.value = this.ghostFade;
     v.ghostUniforms.uWait.value = this.ghostWait;
-    v.update(this.ghost, clamp01(this.ghost.t), this.simTime, this.toWorld, {});
+    v.update(this.ghost, clamp01(this.ghost.t), this.simTime, this.toWorld, { dt });
   }
 
   // ---------------------------------------------------------------- garage
@@ -396,8 +402,9 @@ class App {
   }
 
   // ---------------------------------------------------------------- input
+  // Chase / first-person steer relative to the snake; so does all flight.
   get relativeSteer() {
-    return this.cameraMode === 'fp' || this.cameraMode === 'tp';
+    return this.cameraMode === 'fp' || this.cameraMode === 'tp' || this.game.flying;
   }
 
   onDirection(dir, src) {
@@ -407,7 +414,11 @@ class App {
     }
     if (this.state !== 'playing' && this.state !== 'countdown') return;
     this.preAim();
-    if (this.relativeSteer) {
+    if (this.game.flying) {
+      // Flight: left/right turn, up/down climb and dive (or level out).
+      if (dir === 'left' || dir === 'right') this.steer(this.game.turnDir(dir === 'left' ? -1 : 1));
+      else this.steer(this.game.pitchDir(dir === 'up'));
+    } else if (this.relativeSteer) {
       // In chase / first person, left/right steer relative to the snake.
       if (dir === 'left' || dir === 'right') this.steer(this.game.turnDir(dir === 'left' ? -1 : 1));
       else if (src !== 'swipe') this.flashHint();
@@ -422,6 +433,12 @@ class App {
     this.steer(this.game.turnDir(side));
   }
 
+  onPitch(up) {
+    if ((this.state !== 'playing' && this.state !== 'countdown') || !this.game.flying) return;
+    this.preAim();
+    this.steer(this.game.pitchDir(up));
+  }
+
   // During the READY/GO countdown only one turn is kept (the latest press,
   // relative to the starting heading), so mashing keys can't stack up moves
   // that all fire the moment the run starts.
@@ -434,6 +451,7 @@ class App {
   // queue it for the next step.
   steer(d) {
     const g = this.game;
+    if (!d) return;
     if (this.state === 'playing' && this.t < GRACE && g.canRegrace()) {
       const wasRushing = g.rushing;
       const ev = g.regrace(d);
@@ -519,6 +537,7 @@ class App {
 
   flashHint() {
     const el = $('fp-hint');
+    el.textContent = this.game.flying ? '↑ climb  ·  ↓ dive  ·  ← → turn' : '← → turn';
     el.classList.add('hidden');
     void el.offsetWidth;
     if (this.state === 'playing' || this.state === 'countdown') el.classList.remove('hidden');
@@ -560,6 +579,7 @@ class App {
     this.audio.countdown(false);
     this.saidGo = false;
     if (this.relativeSteer) this.flashHint();
+    if (this.game.flying) this.toast('Fly! ↑ climb · ↓ dive · ← → turn');
   }
 
   pause() {
@@ -628,29 +648,29 @@ class App {
     const g = this.game;
     const delay = this.visualDelay();
     const rm = this.settings.reduceMotion;
-    const at = (c) => this.toWorld(c.x, c.z);
+    const at = (c) => this.toWorld(c.x, c.z, c.y);
 
     if (ev.ate) this.onEat(ev.ate, ev.levelUp);
     if (ev.bonusSpawned) this.toast('A prism appeared! Grab it fast');
     if (ev.bonusExpired) {
       const w = at(ev.bonusExpired);
-      this.effects.emit(w.x, 0.5, w.z, { count: 20, color: '#c77dff', speed: 1.5, up: 1, life: 0.6 });
+      this.effects.emit(w.x, w.y + 0.5, w.z, { count: 20, color: '#c77dff', speed: 1.5, up: 1, life: 0.6 });
     }
     if (ev.chainSpawned) {
       this.toast('Orb chain! Eat them in order');
       this.audio.chainLink(0);
       for (const l of ev.chainSpawned.links) {
         const w = at(l);
-        this.effects.emit(w.x, 0.4, w.z, { count: 10, color: '#38f6ff', speed: 1.2, up: 2, size: 0.18, life: 0.6 });
+        this.effects.emit(w.x, w.y + 0.4, w.z, { count: 10, color: '#38f6ff', speed: 1.2, up: 2, size: 0.18, life: 0.6 });
       }
     }
     if (ev.chainLink) {
       const c = ev.chainLink;
       this.later(delay, () => {
         const w = at(c);
-        this.effects.emit(w.x, 0.5, w.z, { count: 26, color: '#38f6ff', speed: 3, up: 2.2, size: 0.22 });
-        this.effects.shockwave(w.x, w.z, '#38f6ff', { max: 2.2, dur: 0.4 });
-        this.popup(new THREE.Vector3(w.x, 0, w.z), `+${c.points}  ${c.index + 1}/${c.of}`, 'chain');
+        this.effects.emit(w.x, w.y + 0.5, w.z, { count: 26, color: '#38f6ff', speed: 3, up: 2.2, size: 0.22 });
+        this.effects.shockwave(w.x, w.z, '#38f6ff', { y: w.y, max: 2.2, dur: 0.4 });
+        this.popup(new THREE.Vector3(w.x, w.y, w.z), `+${c.points}  ${c.index + 1}/${c.of}`, 'chain');
         this.audio.chainLink(c.index + 1);
       });
     }
@@ -658,9 +678,9 @@ class App {
       const c = ev.chainComplete;
       this.later(delay + 0.05, () => {
         const w = at(c);
-        this.popup(new THREE.Vector3(w.x, 0.6, w.z), `CHAIN! +${c.bonus}`, 'chain big');
-        this.effects.emit(w.x, 0.6, w.z, { count: 80, color: '#7ff8ff', speed: 5, up: 3, size: 0.3 });
-        this.effects.shockwave(w.x, w.z, '#38f6ff', { max: 6, dur: 0.7 });
+        this.popup(new THREE.Vector3(w.x, w.y + 0.6, w.z), `CHAIN! +${c.bonus}`, 'chain big');
+        this.effects.emit(w.x, w.y + 0.6, w.z, { count: 80, color: '#7ff8ff', speed: 5, up: 3, size: 0.3 });
+        this.effects.shockwave(w.x, w.z, '#38f6ff', { y: w.y, max: 6, dur: 0.7 });
         this.audio.chainComplete();
         this.banner('Rush full!');
         if (!rm) {
@@ -678,15 +698,15 @@ class App {
       this.toast('A golden mouse! Catch it');
       this.audio.preySpotted();
       const w = at(ev.preySpawned);
-      this.effects.emit(w.x, 0.2, w.z, { count: 24, color: '#d8c49a', speed: 1.6, up: 1.5, size: 0.2, life: 0.7 });
+      this.effects.emit(w.x, w.y + 0.2, w.z, { count: 24, color: '#d8c49a', speed: 1.6, up: 1.5, size: 0.2, life: 0.7 });
     }
     if (ev.caught) {
       const c = ev.caught;
       this.later(delay, () => {
         const w = at(c);
-        this.popup(new THREE.Vector3(w.x, 0, w.z), `+${c.points}${c.combo > 1 ? ` x${c.combo}` : ''}`, 'prey');
-        this.effects.emit(w.x, 0.4, w.z, { count: 60, color: '#ffd36a', speed: 4, up: 3, size: 0.28 });
-        this.effects.shockwave(w.x, w.z, '#ffd36a', { max: 4, dur: 0.55 });
+        this.popup(new THREE.Vector3(w.x, w.y, w.z), `+${c.points}${c.combo > 1 ? ` x${c.combo}` : ''}`, 'prey');
+        this.effects.emit(w.x, w.y + 0.4, w.z, { count: 60, color: '#ffd36a', speed: 4, up: 3, size: 0.28 });
+        this.effects.shockwave(w.x, w.z, '#ffd36a', { y: w.y, max: 4, dur: 0.55 });
         this.audio.preyCaught();
         if (!rm) {
           this.flash(0.15, '#fff2b0');
@@ -698,14 +718,14 @@ class App {
       this.toast('The mouse got away');
       this.audio.preyEscaped();
       const w = at(ev.preyEscaped);
-      this.effects.emit(w.x, 0.15, w.z, { count: 30, color: '#b8a888', speed: 2, up: 1.2, size: 0.22, life: 0.6 });
+      this.effects.emit(w.x, w.y + 0.15, w.z, { count: 30, color: '#b8a888', speed: 2, up: 1.2, size: 0.22, life: 0.6 });
     }
     if (ev.boost) {
       this.later(delay * 0.8, () => {
         const w = at(ev.boost);
         this.audio.boost();
-        this.popup(new THREE.Vector3(w.x, 0, w.z), 'BOOST!', 'boost');
-        this.effects.emit(w.x, 0.2, w.z, { count: 40, color: '#ffb020', speed: 3.5, up: 1.2, size: 0.24, life: 0.5 });
+        this.popup(new THREE.Vector3(w.x, w.y, w.z), 'BOOST!', 'boost');
+        this.effects.emit(w.x, w.y + 0.2, w.z, { count: 40, color: '#ffb020', speed: 3.5, up: 1.2, size: 0.24, life: 0.5 });
         if (!rm) this.rig.kick += 8;
       });
     }
@@ -717,15 +737,15 @@ class App {
       this.audio.obstacleRise();
       for (const o of ev.obstaclesRaised) {
         const w = at(o);
-        this.effects.emit(w.x, 0.1, w.z, { count: 26, color: '#c8b8a0', speed: 2.4, up: 1.6, size: 0.24, life: 0.6 });
-        this.effects.shockwave(w.x, w.z, '#ff8a5c', { max: 1.6, dur: 0.35 });
+        this.effects.emit(w.x, w.y + 0.1, w.z, { count: 26, color: '#c8b8a0', speed: 2.4, up: 1.6, size: 0.24, life: 0.6 });
+        this.effects.shockwave(w.x, w.z, '#ff8a5c', { y: w.y, max: 1.6, dur: 0.35 });
       }
       if (!rm) this.rig.shake += 0.08;
     }
     if (ev.padsSpawned) {
       for (const p of ev.padsSpawned) {
         const w = at(p);
-        this.effects.emit(w.x, 0.1, w.z, { count: 14, color: '#ffd23f', speed: 1.2, up: 1.4, size: 0.18, life: 0.5 });
+        this.effects.emit(w.x, w.y + 0.1, w.z, { count: 14, color: '#ffd23f', speed: 1.2, up: 1.4, size: 0.18, life: 0.5 });
       }
     }
     if (ev.died) {
@@ -745,22 +765,22 @@ class App {
 
   onEat(ate, levelUp) {
     const g = this.game;
-    const w = this.toWorld(ate.x, ate.z);
-    const pos = new THREE.Vector3(w.x, 0, w.z);
+    const w = this.toWorld(ate.x, ate.z, ate.y);
+    const pos = new THREE.Vector3(w.x, w.y, w.z);
     const delay = this.visualDelay();
     this.food.markEaten(ate.type, pos, delay);
     const prism = ate.type === 'prism';
     this.later(delay, () => {
       const rm = this.settings.reduceMotion;
-      this.effects.emit(w.x, 0.45, w.z, {
+      this.effects.emit(w.x, w.y + 0.45, w.z, {
         count: prism ? 70 : 34,
         color: prism ? '#e0aaff' : '#ff4d6d',
         speed: prism ? 4.5 : 3.2,
         up: 2.4,
         size: prism ? 0.32 : 0.24,
       });
-      this.effects.emit(w.x, 0.45, w.z, { count: 14, color: '#ffffff', speed: 1.5, up: 3.5, size: 0.14, life: 0.5 });
-      this.effects.shockwave(w.x, w.z, prism ? '#c77dff' : '#ff5a7a', { max: prism ? 4.5 : 2.6 });
+      this.effects.emit(w.x, w.y + 0.45, w.z, { count: 14, color: '#ffffff', speed: 1.5, up: 3.5, size: 0.14, life: 0.5 });
+      this.effects.shockwave(w.x, w.z, prism ? '#c77dff' : '#ff5a7a', { y: w.y, max: prism ? 4.5 : 2.6 });
       this.popup(pos, `+${ate.points}${ate.combo > 1 ? ` x${ate.combo}` : ''}`, prism ? 'prism' : '');
       const v = pos.clone().project(this.camera);
       if (prism) {
@@ -795,7 +815,26 @@ class App {
     const hp = this.snake.headPos;
     this.world.pulse(hp.x, hp.z);
     this.protectUntil = this.simTime + (lu.zoneUp ? 5 : 1.5);
-    if (lu.zoneUp) {
+    if (lu.liftoff) {
+      // Sunset Heavens: jetpack on, the island falls away into the clouds
+      this.world.setZone(lu.zone, { duration: 4 });
+      this.audio.zoneUp();
+      this.audio.liftoff();
+      this.titleCard(lu.zone);
+      this.slowMo(3.2, 0.24);
+      this.protectUntil = this.simTime + 6;
+      this.later(0.5, () => {
+        this.toast('Jetpack on! ↑ climb · ↓ dive · ← → turn');
+        this.flashHint();
+      });
+      const s = this.snake;
+      for (const p of s.nozzleWorld) this.effects.emit(p.x, p.y, p.z, { count: 40, color: '#ffb347', speed: 3, up: 1, size: 0.26, life: 0.7, gravity: 1 });
+      if (!this.settings.reduceMotion) {
+        this.flash(0.45, '#ffd0a0');
+        this.rig.kick += 12;
+        this.rig.shake += 0.15;
+      }
+    } else if (lu.zoneUp) {
       this.world.setZone(lu.zone);
       this.audio.zoneUp();
       this.titleCard(lu.zone);
@@ -823,14 +862,15 @@ class App {
     const hp = this.snake.headPos;
     const won = ev.cause === 'win';
     this.later(0.08, () => {
-      this.effects.emit(hp.x + this.snake.headDir.x * 0.4, 0.4, hp.z + this.snake.headDir.z * 0.4, {
+      const hd = this.snake.headDir;
+      this.effects.emit(hp.x + hd.x * 0.4, hp.y + hd.y * 0.4 + 0.4, hp.z + hd.z * 0.4, {
         count: 60,
         color: won ? '#7dffb0' : '#ff5470',
         speed: 4,
         up: 3,
         size: 0.28,
       });
-      this.effects.shockwave(hp.x, hp.z, won ? '#7dffb0' : '#ff3b5c', { max: 5, dur: 0.6 });
+      this.effects.shockwave(hp.x, hp.z, won ? '#7dffb0' : '#ff3b5c', { max: 5, dur: 0.6, y: hp.y });
       this.deathFlash = 1;
       if (!this.settings.reduceMotion) {
         this.flash(0.25, won ? '#ffffff' : '#ff8090');
@@ -861,6 +901,8 @@ class App {
       wall: 'You crashed into the wall.',
       body: 'You ran into your own body.',
       obstacle: 'You smashed into a pillar.',
+      laser: 'You flew into the laser fence.',
+      beam: 'You flew into a laser column.',
       win: 'You filled the entire board!',
     }[cause];
     const rank = this.rank(g.score);
@@ -1063,7 +1105,7 @@ class App {
   }
 
   popup(pos, text, cls) {
-    const v = pos.clone().setY(0.9).project(this.camera);
+    const v = pos.clone().setY(pos.y + 0.9).project(this.camera);
     if (v.z > 1 || Math.abs(v.x) > 1.1 || Math.abs(v.y) > 1.1) return;
     const el = document.createElement('div');
     el.className = `popup ${cls}`;
@@ -1143,7 +1185,7 @@ class App {
       this.setClass($('hud-chain'), 'urgent', left < 3);
     }
 
-    const view = this.relativeSteer && (this.rig.mode === 'fp' || this.rig.mode === 'tp') && (this.state === 'playing' || this.state === 'countdown' || this.state === 'paused');
+    const view = this.relativeSteer && (this.rig.mode === 'fp' || this.rig.mode === 'tp' || this.rig.highChase) && (this.state === 'playing' || this.state === 'countdown' || this.state === 'paused');
     this.setClass($('app'), 'view-aids', view && this.settings.minimap);
     const aids = view && this.settings.minimap;
     this.setClass($('compass'), 'hidden', !aids);
@@ -1155,6 +1197,17 @@ class App {
     const showTouch = this.isTouch && (this.state === 'playing' || this.state === 'countdown');
     this.setClass($('touch'), 'hidden', !showTouch);
     this.setClass($('touch'), 'overhead', !this.relativeSteer);
+    this.setClass($('touch'), 'sky', g.flying);
+    // altitude gauge while flying: head (cyan) and apple (red) on a 9-layer scale
+    const flyingHud = g.flying && this.state !== 'menu';
+    this.setClass($('alt'), 'hidden', !flyingHud);
+    if (flyingHud) {
+      const pct = (y) => `${((1 - (y + 0.5) / SKY_H) * 100).toFixed(1)}%`;
+      this.setStyle('alt-head', 'top', pct(g.head.y));
+      this.setClass($('alt-food'), 'hidden', !g.food);
+      if (g.food) this.setStyle('alt-food', 'top', pct(g.food.y));
+      this.setText('alt-text', String(g.head.y + 1));
+    }
     if (this.state !== 'playing' && this.state !== 'countdown') this.setClass($('fp-hint'), 'hidden', true);
     else this.lastHud['fp-hint:hidden'] = undefined;
   }
@@ -1179,12 +1232,14 @@ class App {
       const vz = w.z - hp.z;
       const rel = Math.atan2(f.x * vz - f.z * vx, f.x * vx + f.z * vz);
       needle.style.transform = `rotate(${rel.toFixed(3)}rad)`;
-      return Math.abs(target.x - g.head.x) + Math.abs(target.z - g.head.z);
+      return Math.abs(target.x - g.head.x) + Math.abs(target.z - g.head.z) + Math.abs((target.y || 0) - (g.head.y || 0));
     };
     const d = aim(g.food, $('needle-orb'));
     aim(g.bonus, $('needle-prism'));
     aim(g.prey, $('needle-prey'));
-    this.setText('compass-text', d == null ? '' : String(d));
+    // in the sky, also say whether the apple is above or below
+    const dy = g.food && g.flying ? g.food.y - g.head.y : 0;
+    this.setText('compass-text', d == null ? '' : `${d}${dy > 0 ? '▲' : dy < 0 ? '▼' : ''}`);
   }
 
   drawMinimap() {
@@ -1230,6 +1285,23 @@ class App {
     c.lineTo(W / 2 - 5, 14);
     c.lineTo(W / 2 + 5, 14);
     c.fill();
+  }
+
+  // Jetpack flames shed sparks behind the snake while it flies.
+  jetExhaust(g) {
+    const s = this.snake;
+    if (!s.jetpack || !s.jetpack.visible || this.state === 'menu') return;
+    const back = s.jetBack;
+    const hot = this.rushGlow;
+    const n = this.state === 'playing' ? (Math.random() < 0.6 + hot * 0.4 ? 1 : 0) : 0;
+    for (let i = 0; i < n; i++) {
+      for (const p of s.nozzleWorld) {
+        this.effects.emit(p.x, p.y, p.z, {
+          count: 1, color: Math.random() < 0.5 ? '#ffb347' : '#ff6aa8', speed: 0.5, up: 0.2, size: 0.13 + hot * 0.06,
+          life: 0.35, gravity: 0.6, spread: 0.06, vel: { x: back.x * (2.5 + hot * 2), y: back.y * (2.5 + hot * 2), z: back.z * (2.5 + hot * 2) },
+        });
+      }
+    }
   }
 
   // ---------------------------------------------------------------- loop
@@ -1306,23 +1378,29 @@ class App {
       lunge: this.lunge,
       rushGlow: this.rushGlow,
       deathFlash: this.deathFlash,
+      dt,
     });
+    this.jetExhaust(g);
     this.snake.setRim(this.world.p.rimColor, 0.35 + this.world.p.rimIntensity * 0.25);
     this.updateGhost(gdt);
     if (fast && this.state === 'playing' && Math.random() < 0.8) {
       const hp = this.snake.headPos;
       const hd = this.snake.headDir;
-      this.effects.emit(hp.x - hd.x * 0.5, 0.3, hp.z - hd.z * 0.5, {
+      this.effects.emit(hp.x - hd.x * 0.5, hp.y - hd.y * 0.5 + 0.3, hp.z - hd.z * 0.5, {
         count: 2, color: g.boosting ? '#ffb020' : this.snake.trailColor || '#5ff6ff', speed: 0.6, up: 0.6, size: 0.18, life: 0.45, gravity: 0, spread: 0.5,
       });
     }
 
-    const view = this.rig.mode === 'fp' || this.rig.mode === 'tp';
-    this.food.update(gdt, this.simTime, { reduceMotion: rm, beam: view });
+    const view = this.rig.mode === 'fp' || this.rig.mode === 'tp' || this.rig.highChase;
+    const arena = this.world.skyArena;
+    const sky = g.flying ? { floorY: arena.floorY, ceilY: arena.ceilY } : null;
+    this.effects.floorY = g.flying ? -1e9 : 0.03;
+    this.food.update(gdt, this.simTime, { reduceMotion: rm, beam: view, floorY: sky ? sky.floorY : null });
     this.syncFood();
-    const headingYaw = Math.atan2(this.snake.headDir.x, this.snake.headDir.z);
+    const f = g.lastFacing();
+    const headingYaw = Math.atan2(f.x, f.z);
     this.board.applyPalette(this.world.p);
-    this.board.sync(g, this.toWorld, gdt, this.simTime, headingYaw);
+    this.board.sync(g, this.toWorld, gdt, this.simTime, headingYaw, sky);
     const playing = this.state === 'playing' || this.state === 'countdown' || this.state === 'paused';
     this.effects.updateGuide(g, this.toWorld, playing && this.settings.guide && view);
     this.effects.update(gdt);
@@ -1330,11 +1408,19 @@ class App {
     const pxScale = rs.y / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
     this.world.update(dt, { level: this.state === 'menu' ? 0 : g.level, reduceMotion: rm, pxScale });
     this.world.updateWalls(g, dt, this.state === 'playing');
+    const food = g.food ? this.toWorld(g.food.x, g.food.z, g.food.y) : null;
+    arena.update(dt, this.simTime, this.world.skyAmount, this.snake.headPos, food, g.flying && this.state !== 'menu');
     // Chase / first-person cameras aim along the snake's next move (a queued
     // turn if there is one), so they start turning the moment a key is
     // pressed, at most one move ahead of the snake.
     const steering = this.state === 'playing' || this.state === 'countdown';
-    this.rig.update(dt, this.snake, { speedFx: this.speedFx, reduceMotion: rm, aim: steering ? g.queue[0] || g.dir : null });
+    // flight: yaw follows the horizontal facing, pitch the next climb or dive
+    const next = g.queue[0] || g.dir;
+    const aim = g.flying ? (next.y ? g.facing : next) : next;
+    this.rig.update(dt, this.snake, {
+      speedFx: this.speedFx, reduceMotion: rm, aim: steering || g.flying ? aim : null,
+      flying: g.flying && this.state !== 'menu', pitch: steering ? next.y || 0 : 0,
+    });
     // The first-person camera sits inside the head; hide it once we're there.
     this.snake.head.visible = !(this.rig.mode === 'fp' && this.rig.blend > 0.85);
     this.effects.uniforms.scale.value = pxScale;

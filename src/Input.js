@@ -46,7 +46,7 @@ export class Input {
     target.addEventListener('pointercancel', () => (start = null));
   }
 
-  bindTouchButtons(left, right, rush) {
+  bindTouchButtons(left, right, rush, up = null, down = null) {
     const press = (el, fn) => {
       el.addEventListener('pointerdown', (e) => {
         e.preventDefault();
@@ -65,6 +65,9 @@ export class Input {
     };
     press(left, (down) => down && this.h.turn(-1));
     press(right, (down) => down && this.h.turn(1));
+    // flight (Sunset Heavens): climb / dive
+    if (up) press(up, (d) => d && this.h.pitch && this.h.pitch(true));
+    if (down) press(down, (d) => d && this.h.pitch && this.h.pitch(false));
     press(rush, (down) => {
       this.touchRush = down;
       this.emitRush();

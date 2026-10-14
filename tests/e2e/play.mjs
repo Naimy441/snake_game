@@ -128,7 +128,8 @@ const pilot = (on) => page.evaluate((on) => {
   clearInterval(window.__camPilot);
   if (!on) return;
   const g = window.__coil.game;
-  window.__camPilot = setInterval(() => { const l = g.lookAhead(3); if (l.blocked && l.free < 3 && !g.queue.length) { if (!g.turn(1)) g.turn(-1); } }, 15);
+  // in the sky it can also climb or dive out of trouble
+  window.__camPilot = setInterval(() => { const l = g.lookAhead(3); if (l.blocked && l.free < 3 && !g.queue.length) { if (!g.turn(1)) if (!g.turn(-1)) if (!g.pitch(true)) g.pitch(false); } }, 15);
 }, on);
 await pilot(true);
 const before = await state();
@@ -290,6 +291,54 @@ await page.waitForFunction(() => (window.__coil.timeScale ?? 1) > 0.95 || window
 s = await page.evaluate(() => ({ ts: window.__coil.timeScale, state: window.__coil.state }));
 check(s.ts > 0.95 || s.state !== 'playing', 'and returns to full speed afterwards');
 await pilot(false);
+
+// --- Sunset Heavens: lift off from Cyber Overdrive and fly in 3D
+await page.evaluate(() => window.__coil.toMenu());
+await waitState('menu');
+await page.evaluate(() => { const a = window.__coil; a.stats.maxLevel = 11; a.settings.startLevel = 11; a.renderLevelSelect(); });
+ls = await page.evaluate(() => document.getElementById('lvl-sel-name').textContent);
+check(ls === 'Level 12', `level select reaches the end of Cyber Overdrive (${ls})`);
+await page.keyboard.press('Enter');
+await waitState('playing');
+await pilot(true);
+await page.evaluate(() => {
+  const g = window.__coil.game;
+  g.foodEaten = 50; // one apple before level 13 = Sunset Heavens
+  g.queue = [];
+  let nx = g.head.x + g.dir.x;
+  let nz = g.head.z + g.dir.z;
+  g.food = { x: nx, z: nz, y: 0, type: 'orb', id: 9191 };
+});
+await page.waitForFunction(() => window.__coil.game.flying, null, { timeout: 20000 }).catch(() => {});
+s = await page.evaluate(() => { const g = window.__coil.game; return { flying: g.flying, zone: g.zone, y: g.head.y, alive: g.alive }; });
+check(s.flying && s.zone === 4, `eating into level 13 lifts off into Sunset Heavens (${JSON.stringify(s)})`);
+await page.waitForFunction(() => window.__coil.world.skyAmount > 0.999 || !window.__coil.game.alive, null, { timeout: 30000 }).catch(() => {});
+s = await page.evaluate(() => { const a = window.__coil; return { sky: a.world.skyAmount, island: a.world.island.group.visible, jet: !!a.snake.jetpack && a.snake.jetpack.visible, arena: a.world.skyArena.group.visible, alive: a.game.alive, unlocked: a.unlockedLevel() }; });
+check(s.sky > 0.999 && !s.island && s.arena, `the island sinks away and the laser box appears (${JSON.stringify(s)})`);
+check(s.jet || !s.alive, 'the snake wears a jetpack');
+check(s.unlocked >= 12, 'reaching the sky unlocks it in the level select');
+check(await page.isVisible('#alt') || !s.alive, 'altitude gauge shows while flying');
+await shot('09-sunset-heavens');
+await pilot(false);
+s = await page.evaluate(() => {
+  const g = window.__coil.game;
+  g.queue = [];
+  g.dir = { x: 0, z: -1, y: 0 };
+  g.facing = { x: 0, z: -1, y: 0 };
+  g.obstacles = [];
+  g.cells = [9, 10, 11, 12, 13].map((z) => ({ x: 10, z, y: 4 }));
+  return g.alive;
+});
+if (s) {
+  await page.keyboard.press('ArrowUp');
+  await page.waitForFunction(() => window.__coil.game.head.y > 4, null, { timeout: 5000 }).catch(() => {});
+  s = await page.evaluate(() => ({ y: window.__coil.game.head.y, dir: window.__coil.game.dir }));
+  check(s.y > 4 && s.dir.y === 1, `ArrowUp climbs (${JSON.stringify(s)})`);
+  await page.keyboard.press('ArrowDown');
+  await page.waitForFunction(() => window.__coil.game.dir.y === 0, null, { timeout: 5000 }).catch(() => {});
+  check(await page.evaluate(() => window.__coil.game.dir.y === 0), 'ArrowDown levels out again');
+  await shot('10-flying');
+}
 
 check(errors.length === 0, `no console errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
 await browser.close();

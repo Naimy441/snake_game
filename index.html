@@ -74,6 +74,11 @@
       </div>
       <canvas id="minimap" class="hidden" width="160" height="160" aria-hidden="true"></canvas>
       <div id="fp-hint" class="hidden">← → turn</div>
+      <div id="alt" class="alt hidden" aria-hidden="true">
+        <span class="alt-label">Alt</span>
+        <div class="alt-track"><i class="alt-food" id="alt-food"></i><i class="alt-head" id="alt-head"></i></div>
+        <span id="alt-text" class="alt-text">5</span>
+      </div>
       <div id="popups" aria-hidden="true"></div>
       <div id="toast" role="status" aria-live="polite"></div>
       <div id="countdown" class="hidden"></div>
@@ -187,6 +192,7 @@
                 <li><kbd>←</kbd><kbd>→</kbd> or <kbd>A</kbd><kbd>D</kbd> <span>turn left / right</span></li>
                 <li>Tap or swipe left / right <span>(touch) turn</span></li>
                 <li>Arrows on the floor show your path; the compass and minimap point to food</li>
+                <li>Sunset Heavens <span>(zone 5) jetpack flight: ↑ climb, ↓ dive (the other key levels out), ← → turn; on touch, swipe or use ▲ ▼</span></li>
               </ul>
               <h3>Everywhere</h3>
               <ul class="keys">
@@ -246,6 +252,7 @@
 
       <div id="touch" class="hidden">
         <button id="t-left" class="tbtn" aria-label="Turn left">⟲</button>
+        <div class="tcol"><button id="t-up" class="tbtn small" aria-label="Climb">▲</button><button id="t-down" class="tbtn small" aria-label="Dive">▼</button></div>
         <button id="t-rush" class="tbtn rushbtn" aria-label="Rush">RUSH</button>
         <button id="t-right" class="tbtn" aria-label="Turn right">⟳</button>
       </div>

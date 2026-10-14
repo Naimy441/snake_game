@@ -76,13 +76,19 @@ export class Effects {
     this.tmpQ = new THREE.Quaternion();
     this.tmpS = new THREE.Vector3();
     this.tmpP = new THREE.Vector3();
+    this.tmpQ2 = new THREE.Quaternion();
+    this.xAxis = new THREE.Vector3(1, 0, 0);
+    this.yAxis = new THREE.Vector3(0, 1, 0);
+    // particles bounce off the board; in the sky they fall away freely
+    this.floorY = 0.03;
   }
 
   setParticleBudget(n) {
     this.limit = Math.min(this.max, n);
   }
 
-  emit(x, y, z, { count = 30, color = '#ffd060', speed = 3, up = 2, size = 0.25, life = 0.8, gravity = 5, spread = 0.1 } = {}) {
+  // vel: an optional base velocity added to every particle (jet exhaust)
+  emit(x, y, z, { count = 30, color = '#ffd060', speed = 3, up = 2, size = 0.25, life = 0.8, gravity = 5, spread = 0.1, vel = null } = {}) {
     const c = new THREE.Color(color);
     for (let i = 0; i < count; i++) {
       if (this.alive >= this.limit) return;
@@ -95,6 +101,11 @@ export class Effects {
       this.vel[k * 3] = Math.cos(a) * v;
       this.vel[k * 3 + 1] = up * (0.5 + Math.random());
       this.vel[k * 3 + 2] = Math.sin(a) * v;
+      if (vel) {
+        this.vel[k * 3] += vel.x;
+        this.vel[k * 3 + 1] += vel.y;
+        this.vel[k * 3 + 2] += vel.z;
+      }
       const tint = 0.8 + Math.random() * 0.4;
       this.col[k * 3] = c.r * tint;
       this.col[k * 3 + 1] = c.g * tint;
@@ -105,9 +116,9 @@ export class Effects {
     }
   }
 
-  shockwave(x, z, color, { max = 3, dur = 0.5 } = {}) {
+  shockwave(x, z, color, { max = 3, dur = 0.5, y = 0 } = {}) {
     const r = this.rings.find((m) => m.userData.t >= 1) || this.rings[0];
-    r.position.set(x, 0.05, z);
+    r.position.set(x, y + 0.05, z);
     r.material.color.set(color);
     r.userData = { t: 0, dur, max };
     r.visible = true;
@@ -120,12 +131,17 @@ export class Effects {
     }
     const look = game.lookAhead(24);
     const d = game.lastQueuedDir();
+    const dy = d.y || 0;
     const n = Math.min(24, look.free);
-    const yaw = Math.atan2(d.x, d.z);
-    this.tmpQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw + Math.PI);
+    // climbing or diving: the chevrons stand up and point along the climb
+    const f = dy ? game.lastFacing() : d;
+    this.tmpQ.setFromAxisAngle(this.yAxis, Math.atan2(f.x, f.z) + Math.PI);
+    if (dy) this.tmpQ.multiply(this.tmpQ2.setFromAxisAngle(this.xAxis, (dy * Math.PI) / 2));
+    const h = game.head;
+    const lift = game.flying ? 0.27 : 0.03;
     for (let i = 0; i < n; i++) {
-      const w = toWorld(game.head.x + d.x * (i + 1), game.head.z + d.z * (i + 1));
-      this.tmpP.set(w.x, 0.03, w.z);
+      const w = toWorld(h.x + d.x * (i + 1), h.z + d.z * (i + 1), (h.y || 0) + dy * (i + 1));
+      this.tmpP.set(w.x, (w.y || 0) + lift, w.z);
       const s = 1 - (i / 24) * 0.4;
       this.tmpS.set(s, s, s);
       this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
@@ -162,7 +178,7 @@ export class Effects {
       this.vel[i * 3] *= drag;
       this.vel[i * 3 + 2] *= drag;
       this.pos[i * 3] += this.vel[i * 3] * dt;
-      this.pos[i * 3 + 1] = Math.max(0.03, this.pos[i * 3 + 1] + this.vel[i * 3 + 1] * dt);
+      this.pos[i * 3 + 1] = Math.max(this.floorY, this.pos[i * 3 + 1] + this.vel[i * 3 + 1] * dt);
       this.pos[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
       const l = this.life[i] / this.maxLife[i];
       this.alpha[i] = Math.min(1, l * 2);
