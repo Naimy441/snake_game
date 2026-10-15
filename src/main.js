@@ -71,7 +71,7 @@ class App {
     this.scene.add(this.board.group);
 
     this.audio = new AudioEngine();
-    this.audio.setVolumes({ sfx: this.settings.sfx, music: this.settings.music, muted: this.settings.muted });
+    this.audio.setVolumes({ sfx: this.settings.sfx, muted: this.settings.muted });
 
     this.state = 'menu';
     this.t = 0;
@@ -512,9 +512,7 @@ class App {
   }
 
   unlockAudio() {
-    const first = !this.audio.ctx;
     this.audio.unlock();
-    if (first && this.audio.ctx && this.state === 'menu') this.audio.startMusic({ menu: true });
   }
 
   cycleCamera() {
@@ -566,8 +564,6 @@ class App {
     this.ghostFade = 0;
     const zone = this.game.zone;
     if (this.world.zone !== zone || this.world.transitioning) this.world.setZone(zone, { duration: 1.4 });
-    this.audio.setMusicState({ menu: false, zone, level: startLevel, intensity: 0.1 });
-    this.audio.startMusic({ menu: false });
     this.showScreen(null);
     $('hud').classList.remove('hidden');
     this.rig.cine = null;
@@ -588,14 +584,12 @@ class App {
     this.prevState = this.state;
     this.state = 'paused';
     this.showScreen('screen-pause');
-    this.audio.setPaused(true);
     $('countdown').classList.add('hidden');
   }
 
   resume() {
     if (this.state !== 'paused') return;
     this.unlockAudio();
-    this.audio.setPaused(false);
     this.showScreen(null);
     this.state = 'countdown';
     this.countdown = 0.6;
@@ -605,9 +599,6 @@ class App {
 
   toMenu() {
     this.state = 'menu';
-    this.audio.setPaused(false);
-    this.audio.setMusicState({ menu: true, zone: 0, intensity: 0 });
-    this.audio.startMusic({ menu: true });
     this.timers = [];
     this.game.reset();
     this.t = 0;
@@ -861,7 +852,6 @@ class App {
     this.t = 1; // the failed move never happened: hold the last pose
     this.dyingTime = 0;
     this.audio.death();
-    this.audio.stopMusic({ fade: 1.0 });
     saveBest(g.best);
     const hp = this.snake.headPos;
     const won = ev.cause === 'win';
@@ -994,7 +984,7 @@ class App {
       el.value = s[key];
       el.addEventListener('input', () => {
         s[key] = Number(el.value);
-        this.audio.setVolumes({ sfx: s.sfx, music: s.music });
+        this.audio.setVolumes({ sfx: s.sfx });
         saveSettings(s);
       });
       el.addEventListener('change', () => {
@@ -1003,11 +993,10 @@ class App {
       });
     };
     bindRange('set-sfx', 'sfx');
-    bindRange('set-music', 'music');
     $('fps').classList.toggle('hidden', !s.showFps);
     this.applyMotion();
 
-    // first interaction anywhere unlocks audio (and starts the menu music)
+    // first interaction anywhere unlocks audio
     const unlock = () => this.unlockAudio();
     window.addEventListener('pointerdown', unlock, { once: true });
     window.addEventListener('keydown', unlock, { once: true });
@@ -1328,7 +1317,6 @@ class App {
     this.timeScale = (this.timeScale ?? 1) + (tsTarget - (this.timeScale ?? 1)) * Math.min(1, dt * (slowing ? 7 : 3));
     // gameplay time: snake, game clock, ghost, pickups and particles
     const gdt = dt * this.timeScale;
-    this.audio.setSlow(this.timeScale < 0.8);
     this.last = now;
     this.renderer.info.reset();
     this.input.pollGamepad();
@@ -1431,11 +1419,6 @@ class App {
     // The first-person camera sits inside the head; hide it once we're there.
     this.snake.head.visible = !(this.rig.mode === 'fp' && this.rig.blend > 0.85);
     this.effects.uniforms.scale.value = pxScale;
-
-    // music follows the action
-    const inGame = this.state === 'playing' || this.state === 'countdown' || this.state === 'paused';
-    const intensity = clamp01(0.12 + (g.level / MAX_LEVEL) * 0.6 + ((g.combo - 1) / 7) * 0.2 + (fast ? 0.15 : 0));
-    this.audio.setMusicState({ menu: !inGame && this.state !== 'dying' && this.state !== 'over', intensity, rush: fast && this.state === 'playing', zone: this.state === 'menu' ? 0 : g.zone, level: g.level });
 
     this.renderFrame(dt, view, rm);
     if (this.state !== 'menu') this.updateHud();

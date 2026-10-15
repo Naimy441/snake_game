@@ -19,7 +19,6 @@ export const DEFAULTS = {
   minimap: true,
   showFps: false,
   sfx: 0.8,
-  music: 0.45,
   muted: false,
   camera: 'overhead',
   skin: 'viper',

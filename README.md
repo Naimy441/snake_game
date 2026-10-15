@@ -3,8 +3,7 @@
 Classic Snake reimagined as a fast, cinematic 3D browser game. Race a scaly
 serpent around a floating checkered island, grab spinning crystal apples,
 chase down a golden mouse, string together orb chains and hit boost pads, while the world
-transforms around you through five zones, each with its own adaptive
-chiptune soundtrack. In the last zone the snake straps on a jetpack and flies
+transforms around you through five zones. In the last zone the snake straps on a jetpack and flies
 through a laser-fenced box of sky at sunset, in full 3D. Play from overhead, from a chase camera behind the head,
 or in first person, and switch at any moment: every view plays the same game.
 
@@ -90,13 +89,13 @@ camera, Start pauses, bumpers turn left/right.
   the next zone.
 - **Zones:** every 3 speed levels the world transforms. A glowing wave sweeps
   out from the arena, the old scenery shrinks away, new scenery grows in, and
-  the sky, light, water, board and music all change: Emerald Coast, Golden
+  the sky, light, water and board all change: Emerald Coast, Golden
   Canyon, Neon Night, Cyber Overdrive, then Sunset Heavens. The visuals get
   more intense with each level inside a zone too.
 - **Slow motion on level-ups:** while the level-up banner or a new zone's
   title card covers the screen, the game drops into slow motion (about a
   quarter speed for a new zone, a short dip for a normal level-up), with
-  muffled music and a softer, desaturated look. It eases back to full speed
+  a softer, desaturated look. It eases back to full speed
   once the card clears, so the card never gets you killed.
 - **Level select:** the start menu has a "Start at" picker. Once you have
   reached a level in any run, you can start a new run straight from it (or
@@ -205,16 +204,12 @@ snake. The camera swings in close for a live preview.
   and the furthest zone reached. New unlocks are announced on the results
   screen. You can preview a locked item, but it only equips once unlocked.
 
-### Music
+### Sound
 
-The soundtrack is an adaptive chiptune engine (Web Audio, no files). Each zone
-has its own song with a verse and a chorus. Instrument layers (bass, arpeggio,
-drums, lead, chord stabs, a counter-melody and a Rush sparkle) fade in and out
-smoothly as the action heats up, the drums step through three grooves, and
-section and zone changes land on bar lines after a drum fill, so the music
-flows instead of cutting. Pausing muffles it rather than stopping it. Sunset
-Heavens gets a soaring major-key synthwave song, and lift-off has its own
-jetpack-ignition roar.
+There is no music, only sound effects, all synthesised with Web Audio at
+runtime (no audio files): chimes that climb with the combo, chain and prism
+arpeggios, the boost whoosh, level-up and zone fanfares, and a
+jetpack-ignition roar at lift-off.
 
 ### Chase and first-person aids
 
@@ -231,7 +226,7 @@ can be turned off in Settings.
 - **Reduce motion:** removes speed lines, motion blur, camera shake, camera
   roll and FOV kicks, softens animations and shortens camera transitions. It
   is on by default if your system asks for reduced motion.
-- Path guide, minimap and compass, FPS counter, sound effect and music volume.
+- Path guide, minimap and compass, FPS counter, sound effect volume.
 
 Settings, your snake's look, lifetime stats and your best score are saved in
 the browser.
@@ -310,7 +305,7 @@ src/
   render/Effects.js      particles, shockwaves, path guide
   render/CameraRig.js    orbit / garage / overhead / chase / first-person cameras and blending
   render/textures.js     procedural textures
-  audio/Audio.js         synthesized sound effects and the adaptive music engine
+  audio/Audio.js         synthesized sound effects
   Input.js               keyboard, touch and gamepad
   main.js                app shell, game loop, HUD and menus
 ```
