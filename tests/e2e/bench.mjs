@@ -20,7 +20,7 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 960, height: 600 }, deviceScaleFactor: 2 });
 await page.addInitScript(([q, cam, lvl]) => {
   const key = Object.keys(localStorage).find((k) => k.endsWith('.settings.v1')) || 'coilrush.settings.v1';
-  localStorage.setItem(key, JSON.stringify({ quality: q, camera: cam, music: 0, sfx: 0, fixedResolution: true, startLevel: lvl }));
+  localStorage.setItem(key, JSON.stringify({ quality: q, camera: cam, sfx: 0, fixedResolution: true, startLevel: lvl }));
   localStorage.setItem('coilrush.stats.v1', JSON.stringify({ maxLevel: lvl, maxZone: 0 }));
 }, [quality, camera, level]);
 await page.goto('http://localhost:4174/');
