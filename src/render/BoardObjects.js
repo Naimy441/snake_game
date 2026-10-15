@@ -15,26 +15,8 @@ void main(){
   gl_FragColor = vec4(col * uOn, a);
 }`;
 
-const BEAM_VS = `varying vec2 vUv; varying float vI; varying float vFace;
-void main(){
-  vUv = uv; vec4 p = instanceMatrix * vec4(position, 1.0); vI = p.y;
-  vec4 mv = modelViewMatrix * p;
-  vec3 n = normalize(normalMatrix * mat3(instanceMatrix) * normal);
-  vFace = abs(dot(n, normalize(-mv.xyz)));
-  gl_Position = projectionMatrix * mv;
-}`;
-// Laser column: a hot core with energy pulses running up it. uWarn > 0 is a
-// flickering, thinner preview before the column switches on.
-const BEAM_FS = `uniform float uTime; uniform vec3 uColor; uniform float uGain; uniform float uSharp; varying vec2 vUv; varying float vI; varying float vFace;
-void main(){
-  float pulse = 0.75 + 0.25 * sin(vI * 3.0 - uTime * 9.0);
-  float a = pow(vFace, uSharp) * (0.6 + 0.4 * pulse) * uGain;
-  gl_FragColor = vec4(uColor * a * 1.3, a);
-}`;
-
 // Pillars that rise at level-ups (after a warning on the floor) and boost pads.
-// In the sky pillars become laser columns through the whole box and the pads
-// become floating boost rings to fly through.
+// In the sky there are no pillars and the pads become floating boost rings.
 export class BoardObjects {
   constructor({ glowTex, ringTex, chevronTex, checker }) {
     this.group = new THREE.Group();
@@ -70,29 +52,6 @@ export class BoardObjects {
     this.warns.renderOrder = 3;
     this.group.add(this.pillars, this.bands, this.warns);
 
-    // sky: laser columns (unit height, scaled to the box) with a soft halo
-    const beamGeo = new THREE.CylinderGeometry(0.1, 0.1, 1, 12, 1, true);
-    beamGeo.translate(0, 0.5, 0);
-    this.beamU = { uTime: { value: 0 }, uColor: { value: new THREE.Color('#ff1f5a') }, uGain: { value: 0.85 }, uSharp: { value: 1.2 } };
-    const beamMat = new THREE.ShaderMaterial({
-      uniforms: this.beamU, vertexShader: BEAM_VS, fragmentShader: BEAM_FS,
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    });
-    this.beams = new THREE.InstancedMesh(beamGeo, beamMat, MAX_OBSTACLES);
-    this.beams.count = 0;
-    this.beams.frustumCulled = false;
-    this.beams.renderOrder = 3;
-    const haloGeo = new THREE.CylinderGeometry(0.3, 0.3, 1, 16, 1, true);
-    haloGeo.translate(0, 0.5, 0);
-    this.haloU = { uTime: this.beamU.uTime, uColor: { value: new THREE.Color('#ff2a4a') }, uGain: { value: 0.08 }, uSharp: { value: 4 } };
-    this.haloMat = new THREE.ShaderMaterial({
-      uniforms: this.haloU, vertexShader: BEAM_VS, fragmentShader: BEAM_FS,
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-    });
-    this.halos = new THREE.InstancedMesh(haloGeo, this.haloMat, MAX_OBSTACLES);
-    this.halos.count = 0;
-    this.halos.frustumCulled = false;
-    this.group.add(this.beams, this.halos);
     this.anim = new Map(); // id -> { rise }
     this.tmpM = new THREE.Matrix4();
     this.tmpQ = new THREE.Quaternion();
@@ -156,41 +115,13 @@ export class BoardObjects {
     this.bandMat.color.copy(p.strip).multiplyScalar(2.2);
   }
 
-  // sky: { floorY, ceilY } world heights of the flight box, or null on the ground
+  // sky: { floorY, ceilY } of the flight box when flying, else null
   sync(game, toWorld, dt, time, headingYaw, sky = null) {
     // obstacles
     let np = 0;
     let nw = 0;
-    let nb = 0;
     const seen = new Set();
-    this.beamU.uTime.value = time;
     for (const o of game.obstacles) {
-      if (sky) {
-        // laser columns: flicker on during the warning, then lock solid
-        seen.add(o.id);
-        const w = toWorld(o.x, o.z);
-        let a = this.anim.get(o.id);
-        if (!a) this.anim.set(o.id, (a = { rise: 0, warn: 0 }));
-        let thick = 1;
-        if (o.solid) a.rise = Math.min(1, a.rise + dt * 4);
-        else {
-          a.warn += dt;
-          const left = Math.max(0, (o.solidAt - game.time) / 1000);
-          thick = Math.sin(a.warn * (left < 0.8 ? 40 : 18)) > 0 ? 0.35 : 0.12;
-        }
-        const span = sky.ceilY - sky.floorY;
-        const grow = o.solid ? 1 - Math.pow(1 - a.rise, 3) : 1;
-        this.tmpP.set(w.x, sky.floorY, w.z);
-        this.tmpQ.identity();
-        this.tmpS.set(o.solid ? 1 + (1 - grow) * 2 : thick, span, o.solid ? 1 + (1 - grow) * 2 : thick);
-        this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
-        this.beams.setMatrixAt(nb, this.tmpM);
-        this.tmpS.set(o.solid ? 1 : 0.4, span, o.solid ? 1 : 0.4);
-        this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
-        this.halos.setMatrixAt(nb, this.tmpM);
-        nb++;
-        continue;
-      }
       seen.add(o.id);
       const w = toWorld(o.x, o.z);
       let a = this.anim.get(o.id);
@@ -225,11 +156,6 @@ export class BoardObjects {
     this.pillars.count = np;
     this.bands.count = np;
     this.warns.count = nw;
-    this.beams.count = nb;
-    this.halos.count = nb;
-    this.beams.instanceMatrix.needsUpdate = true;
-    this.halos.instanceMatrix.needsUpdate = true;
-    this.haloU.uGain.value = 0.07 + 0.025 * Math.sin(time * 9);
     this.pillars.instanceMatrix.needsUpdate = true;
     this.bands.instanceMatrix.needsUpdate = true;
     this.warns.instanceMatrix.needsUpdate = true;
@@ -278,8 +204,6 @@ export class BoardObjects {
     this.pillars.count = 0;
     this.bands.count = 0;
     this.warns.count = 0;
-    this.beams.count = 0;
-    this.halos.count = 0;
     for (const g of this.pads) {
       g.visible = false;
       g.userData.id = null;

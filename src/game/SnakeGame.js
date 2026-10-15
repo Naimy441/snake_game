@@ -41,11 +41,17 @@ export const ZONE_STARTS = [0, 3, 6, 9, 12];
 export const ZONE_NAMES = ['Emerald Coast', 'Golden Canyon', 'Neon Night', 'Cyber Overdrive', 'Sunset Heavens'];
 
 // Sunset Heavens: the snake straps on a jetpack and the board becomes a box
-// of air SKY_H cells tall, fenced in by lasers. It lifts off at layer SKY_MID,
-// level with where the board was.
+// of air, fenced in by lasers: SKY_PAD cells wider than the board on every
+// side (SKY_SIZE across) and SKY_H layers tall. Layer SKY_LIFT is level with
+// where the board was; at lift-off the snake rockets SKY_CLIMB layers
+// straight up on its own (to SKY_CENTER) before the player takes over.
 export const SKY_ZONE = 4;
-export const SKY_H = 9;
-export const SKY_MID = 4;
+export const SKY_PAD = 2;
+export const SKY_SIZE = 21 + SKY_PAD * 2;
+export const SKY_H = 13;
+export const SKY_LIFT = 3;
+export const SKY_CLIMB = 3;
+export const SKY_CENTER = SKY_LIFT + SKY_CLIMB;
 
 // Orb chains: numbered orbs that pay out when eaten in order.
 export const CHAIN_LINK_POINTS = 20;
@@ -64,9 +70,9 @@ export const PAD_RESPAWN_MS = 5000;
 
 // Obstacles rise at these speed levels (level index -> how many).
 // No pillars in the first zone; they start partway into the second.
-// In the sky they become laser columns that span the full height.
-export const OBSTACLE_PLAN = { 4: 2, 5: 1, 7: 2, 8: 1, 10: 2, 11: 1, 12: 2, 13: 1, 14: 1, 15: 1 };
-export const MAX_OBSTACLES = 14;
+// The sky has none: pillars are left behind on the ground at lift-off.
+export const OBSTACLE_PLAN = { 4: 2, 5: 1, 7: 2, 8: 1, 10: 2, 11: 1 };
+export const MAX_OBSTACLES = 12;
 export const OBSTACLE_WARN_MS = 2200;
 
 // Cells and directions carry y (altitude); anything without one is on the ground.
@@ -87,6 +93,7 @@ export function zoneForLevel(level) {
 
 export class SnakeGame {
   constructor({ size = 21, rng = Math.random, best = 0 } = {}) {
+    this.boardSize = size;
     this.size = size;
     this.rng = rng;
     this.best = best;
@@ -95,12 +102,14 @@ export class SnakeGame {
   }
 
   reset() {
+    this.size = this.boardSize; // the sky box is bigger; a new run is back on the board
     const c = Math.floor(this.size / 2);
     const startZ = this.size - 5;
     this.dir = { ...DIRS.up };
     // last horizontal heading: what "left" and "right" turn from while climbing or diving
     this.facing = { ...DIRS.up };
     this.flying = false;
+    this.launch = 0; // lift-off climb steps left (input is ignored meanwhile)
     this.height = 1;
     this.yMid = 0;
     this.cells = [];
@@ -193,7 +202,7 @@ export class SnakeGame {
   }
 
   queueDirection(d) {
-    if (!this.alive || !d) return false;
+    if (!this.alive || !d || this.launch > 0) return false;
     if (Y(d) && !this.flying) return false;
     const last = this.lastQueuedDir();
     if (sameDir(d, last) || opposite(d, last)) return false;
@@ -449,6 +458,7 @@ export class SnakeGame {
 
   addObstacles(n) {
     const added = [];
+    if (this.flying) return added;
     const room = MAX_OBSTACLES - this.obstacles.length;
     n = Math.min(n, room);
     const h = { x: this.head.x, z: this.head.z };
@@ -494,7 +504,7 @@ export class SnakeGame {
     const zonePrev = zoneForLevel(prevLevel);
     ev.levelUp = { level: lvl, zone: this.zone, zoneUp: this.zone > zonePrev };
     if (this.zone >= SKY_ZONE && !this.flying) {
-      this.enterSky();
+      this.enterSky({ launch: true });
       ev.levelUp.liftoff = true;
     }
     let obstacles = [];
@@ -511,34 +521,55 @@ export class SnakeGame {
 
   // Begin a fresh run at a later level (level select): that level's speed,
   // and the pillars and boost pads every earlier level would have added.
-  // The snake starts short; pillars are already standing.
+  // The snake starts short; pillars are already standing. A run that starts
+  // in the sky starts already flying, in the middle of the box.
   startAtLevel(level) {
     const L = Math.max(0, Math.min(MAX_LEVEL, Math.floor(level)));
     if (L === 0) return;
     this.foodEaten = LEVEL_AT[L];
-    if (this.zone >= SKY_ZONE) this.enterSky();
+    if (this.zone >= SKY_ZONE) {
+      this.enterSky();
+      return void this.fillPads();
+    }
     for (let l = 1; l <= L; l++) if (OBSTACLE_PLAN[l]) this.addObstacles(OBSTACLE_PLAN[l]);
     for (const o of this.obstacles) o.solid = true;
+    this.fillPads();
+  }
+
+  fillPads() {
     while (this.pads.length < this.padTarget()) if (!this.spawnPad()) break;
   }
 
-  // Lift off: the board becomes a box of air. The snake and everything on the
-  // board rise to the middle layer, so nothing moves on screen; the golden
-  // mouse is left behind on the ground.
-  enterSky() {
+  // Lift off: the board becomes a bigger box of air. Coordinates shift by
+  // SKY_PAD so the old board sits in the middle; the snake keeps its shape at
+  // the layer level with the board (so nothing moves on screen) and, when
+  // launching, then climbs SKY_CLIMB layers by itself. Pickups move up to
+  // the middle where it will be flying, pillars and boost pads are left
+  // behind (rings take the pads' place), and so is the golden mouse.
+  enterSky({ launch = false } = {}) {
     if (this.flying) return;
     this.flying = true;
+    this.size = SKY_SIZE;
     this.height = SKY_H;
-    this.yMid = SKY_MID;
-    const lift = (c) => c && (c.y = SKY_MID);
-    this.cells = this.cells.map((c) => ({ ...c, y: SKY_MID }));
-    if (this.removedTail) this.removedTail = { ...this.removedTail, y: SKY_MID };
+    this.yMid = SKY_LIFT;
+    const y0 = launch ? SKY_LIFT : SKY_CENTER;
+    const move = (c, y) => ({ ...c, x: c.x + SKY_PAD, z: c.z + SKY_PAD, y });
+    this.cells = this.cells.map((c) => move(c, y0));
+    if (this.removedTail) this.removedTail = move(this.removedTail, y0);
+    // pickups are moved in place: callers may hold the same objects
+    const lift = (c) => c && Object.assign(c, { x: c.x + SKY_PAD, z: c.z + SKY_PAD, y: SKY_CENTER });
     lift(this.food);
     lift(this.bonus);
     if (this.chain) this.chain.links.forEach(lift);
-    this.pads.forEach(lift);
+    this.obstacles = [];
+    this.pads = [];
+    this.padRespawns = [];
     this.prey = null;
     this.undoOk = false;
+    if (launch) {
+      this.queue = [{ ...DIRS.rise }];
+      this.launch = SKY_CLIMB;
+    }
   }
 
   // Cells straight ahead along the heading the snake will take next, up to the
@@ -613,7 +644,7 @@ export class SnakeGame {
   // head is still behind. If the last step was a plain straight move, undo it
   // and take it again in the new direction.
   canRegrace() {
-    return this.alive && !!this.undoOk && this.queue.length === 0;
+    return this.alive && !!this.undoOk && this.queue.length === 0 && this.launch === 0;
   }
 
   regrace(d) {
@@ -659,6 +690,8 @@ export class SnakeGame {
       if (!Y(this.dir)) this.facing = this.dir;
       ev.turned = true;
     }
+    // lift-off: climb straight up, then level out the way we were going
+    if (this.launch > 0 && Y(this.dir) > 0 && --this.launch === 0) this.queue = [{ ...this.facing }];
 
     // timed things
     if (this.bonus && this.time > this.bonus.expires) {
@@ -685,8 +718,8 @@ export class SnakeGame {
     }
 
     const h = this.head;
-    const nx = h.x + this.dir.x;
-    const nz = h.z + this.dir.z;
+    let nx = h.x + this.dir.x;
+    let nz = h.z + this.dir.z;
     let ny = Y(h) + Y(this.dir);
 
     // prey moves on its own clock, never into the cell the head is entering
@@ -722,7 +755,7 @@ export class SnakeGame {
       return ev;
     }
     if (this.obstacleAt(nx, nz)) {
-      const cause = this.flying ? 'beam' : 'obstacle';
+      const cause = 'obstacle';
       this.die(cause);
       ev.died = true;
       ev.cause = cause;
@@ -754,7 +787,13 @@ export class SnakeGame {
       ev.ate = { ...eaten, points, combo: this.combo, rushing: this.scoreMult > 1, levelUp: this.level > prevLevel };
       if (this.level > prevLevel) {
         this.onLevelUp(ev, prevLevel);
-        if (ev.levelUp.liftoff) ny = ev.ate.y = SKY_MID; // the whole board just rose with us
+        if (ev.levelUp.liftoff) {
+          // the whole board just turned into the sky box around us
+          nx += SKY_PAD;
+          nz += SKY_PAD;
+          ny = SKY_LIFT;
+          Object.assign(ev.ate, { x: eaten.x, z: eaten.z, y: SKY_LIFT });
+        }
       }
     }
 
