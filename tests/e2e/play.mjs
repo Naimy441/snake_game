@@ -295,7 +295,7 @@ await pilot(false);
 // --- Sunset Heavens: lift off from Cyber Overdrive and fly in 3D
 await page.evaluate(() => window.__coil.toMenu());
 await waitState('menu');
-await page.evaluate(() => { const a = window.__coil; a.stats.maxLevel = 11; a.settings.startLevel = 11; a.renderLevelSelect(); });
+await page.evaluate(() => { const a = window.__coil; a.stats.maxLevel = 11; a.settings.startLevel = 11; a.settings.reduceMotion = false; a.applyMotion(); a.renderLevelSelect(); });
 ls = await page.evaluate(() => document.getElementById('lvl-sel-name').textContent);
 check(ls === 'Level 12', `level select reaches the end of Cyber Overdrive (${ls})`);
 await page.keyboard.press('Enter');
@@ -312,6 +312,12 @@ await page.evaluate(() => {
 await page.waitForFunction(() => window.__coil.game.flying, null, { timeout: 20000 }).catch(() => {});
 s = await page.evaluate(() => { const g = window.__coil.game; return { flying: g.flying, zone: g.zone, y: g.head.y, alive: g.alive }; });
 check(s.flying && s.zone === 4, `eating into level 13 lifts off into Sunset Heavens (${JSON.stringify(s)})`);
+s = await page.evaluate(() => { const a = window.__coil; const g = a.game; return { cine: !!a.rig.cine, launch: g.launch, obs: g.obstacles.length, size: g.size, h: g.height }; });
+check(s.obs === 0 && s.size === 25 && s.h === 13, `the sky box is bigger and has no obstacles (${JSON.stringify(s)})`);
+check(s.cine && s.launch > 0, 'lift-off: the camera circles while the snake rockets up on its own');
+await page.waitForFunction(() => window.__coil.game.launch === 0 && !window.__coil.rig.cine, null, { timeout: 30000 }).catch(() => {});
+s = await page.evaluate(() => ({ launch: window.__coil.game.launch, cine: !!window.__coil.rig.cine, alive: window.__coil.game.alive, maxY: Math.max(...window.__coil.game.cells.map((c) => c.y)) }));
+check(s.launch === 0 && !s.cine && s.alive && s.maxY >= 6, `then control and the normal camera come back (${JSON.stringify(s)})`);
 await page.waitForFunction(() => window.__coil.world.skyAmount > 0.999 || !window.__coil.game.alive, null, { timeout: 30000 }).catch(() => {});
 s = await page.evaluate(() => { const a = window.__coil; return { sky: a.world.skyAmount, island: a.world.island.group.visible, jet: !!a.snake.jetpack && a.snake.jetpack.visible, arena: a.world.skyArena.group.visible, alive: a.game.alive, unlocked: a.unlockedLevel() }; });
 check(s.sky > 0.999 && !s.island && s.arena, `the island sinks away and the laser box appears (${JSON.stringify(s)})`);

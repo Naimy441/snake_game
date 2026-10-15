@@ -8,7 +8,7 @@ import { Ambient } from './Ambient.js';
 import { makeGrassDetail, makeCloudTexture, makeWindowTexture, makeNoiseTexture } from './textures.js';
 import { Heavens } from './Heavens.js';
 import { SkyArena } from './SkyArena.js';
-import { ZONE_STARTS, MAX_LEVEL } from '../game/SnakeGame.js';
+import { ZONE_STARTS, MAX_LEVEL, SKY_SIZE } from '../game/SnakeGame.js';
 
 const smooth = (t) => t * t * (3 - 2 * t);
 const clamp01 = (t) => Math.min(1, Math.max(0, t));
@@ -46,7 +46,7 @@ export class World {
     // Sunset Heavens: cloud sea + sunset sun, and the laser flight box
     this.heavens = new Heavens(makeNoiseTexture());
     this.scene.add(this.heavens.group);
-    this.skyArena = new SkyArena(size);
+    this.skyArena = new SkyArena(SKY_SIZE);
     this.scene.add(this.skyArena.group);
 
     this.buildLights();
@@ -58,8 +58,9 @@ export class World {
 
   // Board cell to world position. y is the cell's layer in the sky (relative
   // to yMid, the layer level with the board); on the ground it's 0.
-  toWorld(x, z, y, yMid = 0) {
-    const o = (this.size - 1) / 2;
+  // size: the grid's width (the sky box is wider than the board, centred on it).
+  toWorld(x, z, y, yMid = 0, size = this.size) {
+    const o = (size - 1) / 2;
     return { x: x - o, y: y == null ? 0 : y - yMid, z: z - o };
   }
 
@@ -296,7 +297,7 @@ export class World {
   // Run fn with every zone (and the wave) visible, then restore.
   withAllZones(fn) {
     const vis = this.scenery.zones.map((z) => z.group.visible);
-    const extra = [this.heavens.group, this.skyArena.group, this.skyArena.line];
+    const extra = [this.heavens.group, this.skyArena.group, this.skyArena.line, this.skyArena.upLine];
     const extraVis = extra.map((o) => o.visible);
     for (const z of this.scenery.zones) z.group.visible = true;
     extra.forEach((o) => (o.visible = true));

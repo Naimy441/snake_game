@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const smoothstep = (a, b, x) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
 
 function wrapAngle(a) {
   while (a > Math.PI) a -= Math.PI * 2;
@@ -40,6 +44,7 @@ export class CameraRig {
   }
 
   setMode(mode, { instant = false, reduceMotion = false } = {}) {
+    if (mode !== this.mode && (mode === 'orbit' || mode === 'showcase')) this.cine = null;
     if (mode === this.mode && !instant) return;
     this.from.pos.copy(this.camera.position);
     this.from.quat.copy(this.camera.quaternion);
@@ -49,6 +54,43 @@ export class CameraRig {
     this.blendDur = reduceMotion ? 0.3 : 0.75;
     if (mode === 'fp') this.fpYaw = null;
     if (mode === 'tp') this.tpYaw = null;
+  }
+
+  // Lift-off cinematic: pull out to a high, narrow-angle (near isometric)
+  // view, swing a full turn around the snake as it rockets up, then glide
+  // back into whatever camera the player uses. Layered over the normal pose.
+  startCinematic(duration = 3.6) {
+    this.cine = { t: 0, dur: duration, yaw0: null, center: null };
+  }
+
+  applyCinematic(dt, snake) {
+    const c = this.cine;
+    c.t += dt;
+    const k = c.t / c.dur;
+    if (k >= 1) {
+      this.cine = null;
+      return;
+    }
+    const hp = snake.headPos;
+    if (!c.center) {
+      c.center = hp.clone();
+      // start from behind the snake, the way the player is facing
+      c.yaw0 = Math.atan2(snake.headDir.x, snake.headDir.z) + Math.PI;
+      if (Math.abs(snake.headDir.y) > 0.9) c.yaw0 = Math.atan2(-this.camera.position.x + hp.x, -this.camera.position.z + hp.z) + Math.PI;
+    }
+    c.center.lerp(hp, Math.min(1, dt * 4));
+    const w = Math.min(smoothstep(0, 0.2, k), 1 - smoothstep(0.6, 1, k));
+    const a = c.yaw0 + Math.PI * 2 * ease(Math.min(1, k / 0.85));
+    const elev = THREE.MathUtils.degToRad(34);
+    const R = 15;
+    const pos = this.tmpV.set(Math.sin(a) * Math.cos(elev) * R, Math.sin(elev) * R, Math.cos(a) * Math.cos(elev) * R).add(c.center);
+    this.tmpObj.position.copy(pos);
+    this.tmpObj.up.set(0, 1, 0);
+    this.tmpObj.lookAt(c.center.x, c.center.y + 1.2, c.center.z);
+    const cam = this.camera;
+    cam.position.lerp(pos, w);
+    cam.quaternion.slerp(this.tmpObj.quaternion, w);
+    cam.fov += (34 - cam.fov) * w;
   }
 
   // Heading the player sees in the chase / first-person views.
@@ -172,6 +214,15 @@ export class CameraRig {
     const ap = Math.abs(p);
     const back = dist * (1 - 0.3 * ap);
     out.pos.set(hp.x - fwd.x * back, hp.y + height * (1 - 1.15 * p), hp.z - fwd.z * back);
+    // stay inside the flight box: near the ceiling or floor, slide back instead
+    if (this.flying && this.box) {
+      const top = this.box.ceilY - 0.7;
+      const bot = this.box.floorY + 0.5;
+      const ex = out.pos.y > top ? out.pos.y - top : out.pos.y < bot ? bot - out.pos.y : 0;
+      out.pos.y = Math.min(top, Math.max(bot, out.pos.y));
+      out.pos.x -= fwd.x * ex * 0.4;
+      out.pos.z -= fwd.z * ex * 0.4;
+    }
     const rollTarget = reduceMotion ? 0 : THREE.MathUtils.clamp(-this.tpYawVel * 0.02, -0.07, 0.07);
     this.tpRoll += (rollTarget - this.tpRoll) * Math.min(1, dt * 6);
     this.tmpObj.position.copy(out.pos);
@@ -215,8 +266,10 @@ export class CameraRig {
   }
 
   // aim: horizontal heading to face; pitch: +1 climbing, -1 diving, 0 level.
-  update(dt, snake, { speedFx = 0, reduceMotion = false, aim = null, flying = false, pitch = 0 } = {}) {
+  // box: { floorY, ceilY } of the sky's flight box (chase cameras stay inside it)
+  update(dt, snake, { speedFx = 0, reduceMotion = false, aim = null, flying = false, pitch = 0, box = null } = {}) {
     this.aim = aim;
+    this.box = box;
     if (flying !== this.flying) {
       // lift-off (or back to the ground): glide between the two framings
       this.flying = flying;
@@ -256,6 +309,7 @@ export class CameraRig {
 
     this.kick *= Math.exp(-dt * 6);
     cam.fov = this.from.fov + (target.fov - this.from.fov) * b + (reduceMotion ? 0 : this.kick);
+    if (this.cine) this.applyCinematic(dt, snake);
 
     // Small, quickly damped shake (never in first person).
     if (this.shake > 0.001 && !reduceMotion && (this.mode === 'overhead' || this.mode === 'tp')) {

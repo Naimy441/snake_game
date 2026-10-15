@@ -108,9 +108,17 @@ camera, Start pauses, bumpers turn left/right.
 
 Reach level 13 (the end of Cyber Overdrive) and the snake lifts off. A
 jetpack ignites on its back, the island sinks away into a sea of clouds under
-a huge striped sunset sun, and the board becomes a box of air 21 x 21 cells
-wide and 9 layers tall, fenced in by lasers. The snake keeps its shape and
-starts in the middle layer, level with where the board was.
+a huge striped sunset sun, and the board becomes a box of air fenced in by
+lasers: 25 x 25 cells wide (two more than the board on every side) and 13
+layers tall.
+
+- **Lift-off:** the snake flips nose-up and rockets three layers straight up
+  by itself, into the middle of the box, while the camera pulls out to a high,
+  near-isometric view and swings a full circle around it. Then it levels out
+  the way it was heading, control comes back and the camera glides into your
+  usual view. Gameplay runs in slow motion meanwhile. (Reduce motion skips the
+  camera spin.) A run started from the level select begins already flying,
+  in the middle of the box.
 
 - **Flight controls (every camera):** ← → turn left and right, ↑ climbs and
   ↓ dives. While climbing or diving, the opposite key levels out again in the
@@ -119,16 +127,23 @@ starts in the middle layer, level with where the board was.
   the D-pad does the same.
 - **Cameras:** in the sky the overhead view becomes a high chase camera
   behind the snake (a fixed overhead view can't show height). The chase and
-  first-person cameras tilt up a climb and down a dive.
-- **Seeing depth:** an altitude gauge on the left shows your layer (cyan) and
-  the apple's (red). The laser walls glow in a band at your altitude and the
-  apple's, light up as you get close, and the floor marks the spot right
-  under your head with a plumb line down to it. Apples and prisms drop a beam
-  to the floor, and the compass says whether the apple is above (▲) or below
-  (▼).
-- **Hazards:** flying out of the box hits the laser fence. Pillars become
-  laser columns that run through every layer of their cell, and a few more
-  switch on at the sky's level-ups (they flicker before going solid).
+  first-person cameras tilt up a climb and down a dive. The chase cameras stay
+  inside the box: near the ceiling or floor they slide back instead of poking
+  through it.
+- **Seeing the boundaries:** the floor (orange) and ceiling (violet) grids are
+  always visible around you, with a ring marking the spot right under and
+  right over your head and lines running down to the floor and up to the
+  ceiling. Any face of the box turns hot pink-red as you close in on it, and
+  marks your position on it. The side walls glow in a band at your altitude
+  and the apple's. The altitude gauge on the left (violet ceiling at the top,
+  orange floor at the bottom) shows your layer (cyan) and the apple's (red),
+  and its end flashes red when you're one layer from the ceiling or floor.
+  A red vignette pulses when you're about to fly into a wall. Apples and
+  prisms drop a beam to the floor, and the compass says whether the apple is
+  above (▲) or below (▼).
+- **Hazards:** flying out of the box hits the laser fence; that's the only
+  hazard besides your own body. The ground's pillars are left behind at
+  lift-off and no new obstacles appear in the sky.
 - **Pickups:** apples, prisms and orb chains float at any altitude (chains
   can run up and down). Boost pads become spinning gold boost rings to fly
   through. The golden mouse can't fly, so it stays on the ground.
@@ -291,7 +306,7 @@ src/
   skins.js               skin patterns, accessories and their unlock rules
   render/SnakePath.js    smooth path through grid cells with rounded corners
   render/FoodView.js     crystal apples, prisms, orb chains and the golden mouse
-  render/BoardObjects.js pillars with warnings, boost pads, and their sky versions (laser columns, boost rings)
+  render/BoardObjects.js pillars with warnings, boost pads and the sky's boost rings
   render/Effects.js      particles, shockwaves, path guide
   render/CameraRig.js    orbit / garage / overhead / chase / first-person cameras and blending
   render/textures.js     procedural textures

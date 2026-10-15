@@ -368,6 +368,12 @@ button { font-family: var(--display); }
 .alt-head { background: #5ff6ff; box-shadow: 0 0 10px #5ff6ff; }
 .alt-food { background: #ff3355; box-shadow: 0 0 10px #ff3355; width: 18px !important; margin-left: -9px !important; }
 .alt-text { font-weight: 900; font-style: italic; font-size: 18px; text-shadow: var(--outline); }
+/* ceiling (violet) at the top, floor (orange) at the bottom, like the box */
+.alt-track { border-top-color: rgba(180, 138, 255, 0.95); border-bottom-color: rgba(255, 180, 106, 0.95); }
+.alt.near-top .alt-track { border-top: 4px solid #ff3a6a; box-shadow: 0 -6px 16px rgba(255, 58, 106, 0.9); animation: altWarn 0.4s ease-in-out infinite alternate; }
+.alt.near-bottom .alt-track { border-bottom: 4px solid #ff3a6a; box-shadow: 0 6px 16px rgba(255, 58, 106, 0.9); animation: altWarn 0.4s ease-in-out infinite alternate; }
+@keyframes altWarn { from { filter: brightness(1); } to { filter: brightness(1.6); } }
+.reduce-motion .alt .alt-track { animation: none; }
 @media (max-height: 520px) { .alt-track { height: 120px; } }
 .touch-device .view-aids #minimap { bottom: calc(160px + var(--safe-bottom)); }
 

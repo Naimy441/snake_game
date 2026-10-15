@@ -127,7 +127,7 @@ test('best score tracks the highest score', () => {
 
 // ---------------------------------------------------------------- new mechanics
 import {
-  LEVEL_AT, zoneForLevel, MAX_LEVEL, ZONE_STARTS, SKY_ZONE, SKY_H, SKY_MID, OBSTACLE_WARN_MS, BOOST_TICKS, CHAIN_BONUS_PER_LINK, PREY_LIFETIME_MS, MAX_OBSTACLES,
+  LEVEL_AT, zoneForLevel, MAX_LEVEL, ZONE_STARTS, SKY_ZONE, SKY_H, SKY_LIFT, SKY_CENTER, SKY_PAD, SKY_SIZE, SKY_CLIMB, OBSTACLE_WARN_MS, BOOST_TICKS, CHAIN_BONUS_PER_LINK, PREY_LIFETIME_MS, MAX_OBSTACLES,
 } from '../src/game/SnakeGame.js';
 
 const runFor = (g, ms) => {
@@ -651,17 +651,42 @@ test('reaching Sunset Heavens lifts the snake off into a box of air', () => {
   const g = new SnakeGame({ rng: seq([0.7]) });
   g.foodEaten = LEVEL_AT[ZONE_STARTS[SKY_ZONE]] - 1;
   g.prey = { x: 1, z: 1, px: 1, pz: 1, id: 9, expires: 1e9, acc: 0, moves: 0, dir: DIRS.up };
-  g.food = { x: g.head.x, z: g.head.z - 1, type: 'orb', id: 1 };
+  g.addObstacles(4);
+  const h0 = { ...g.head };
+  g.food = { x: h0.x, z: h0.z - 1, type: 'orb', id: 1 };
   const ev = g.step();
   assert.equal(ev.levelUp.zone, SKY_ZONE);
   assert.ok(ev.levelUp.liftoff);
   assert.ok(g.flying);
   assert.equal(g.height, SKY_H);
-  assert.ok(g.cells.every((c) => c.y === SKY_MID), 'the snake keeps its shape, at the middle layer');
+  assert.equal(g.size, 21 + 2 * SKY_PAD, 'the box is bigger than the board on every side');
+  // the board sits in the middle of the box, so the snake hasn't moved
+  assert.deepEqual(g.head, { x: h0.x + SKY_PAD, z: h0.z - 1 + SKY_PAD, y: SKY_LIFT });
+  assert.ok(g.cells.every((c) => c.y === SKY_LIFT), 'the snake keeps its shape, level with the board');
+  assert.deepEqual({ x: ev.ate.x, z: ev.ate.z, y: ev.ate.y }, g.head, 'the eat effect lands on the head');
+  assert.equal(g.obstacles.length, 0, 'no pillars or laser columns in the sky');
   assert.equal(g.prey, null, 'the mouse stays on the ground');
   assert.ok(g.food && g.food.y >= 0 && g.food.y < SKY_H);
   // flying starts slower than the end of Cyber Overdrive
   assert.ok(g.baseInterval() > 100);
+  // the jetpack fires: it climbs straight up on its own, ignoring input...
+  assert.equal(g.turn(1), false);
+  g.food = null;
+  for (let i = 0; i < SKY_CLIMB; i++) {
+    g.step();
+    assert.deepEqual(g.dir, DIRS.rise);
+  }
+  assert.equal(g.head.y, SKY_CENTER);
+  // ...then levels out the way it was going and hands back control
+  g.step();
+  assert.deepEqual(g.dir, DIRS.up);
+  assert.equal(g.head.y, SKY_CENTER);
+  assert.ok(g.turn(1));
+  assert.ok(g.alive);
+  // a new run is back on the normal board
+  g.reset();
+  assert.equal(g.size, 21);
+  assert.equal(g.flying, false);
 });
 
 test('flight controls: climb, level out, dive, and turn relative to the facing', () => {
@@ -746,18 +771,19 @@ test('sky spawns fill the whole box and stay off the snake', () => {
   assert.equal(g.spawnPrey(), null);
 });
 
-test('laser columns block every layer of their cell', () => {
-  const g = skyGame();
-  g.obstacles = [];
-  g.food = null;
-  const h = g.head;
-  g.obstacles.push({ x: h.x, z: h.z - 2, solid: true, solidAt: 0, id: 900 });
-  g.pitch(true);
-  g.step(); // climb one layer, still in the column's line
-  g.pitch(false); // level out north
-  g.step();
+test('the sky has no obstacles, even at its level-ups', () => {
+  const g = skyGame(Math.random);
+  assert.equal(g.size, SKY_SIZE);
+  assert.equal(g.head.y, SKY_CENTER, 'a run that starts in the sky starts in the middle');
+  assert.equal(g.launch, 0);
+  assert.equal(g.obstacles.length, 0);
+  assert.deepEqual(g.addObstacles(3), []);
+  g.foodEaten = LEVEL_AT[ZONE_STARTS[SKY_ZONE] + 1] - 1;
+  g.food = { x: g.head.x, z: g.head.z - 1, y: g.head.y, type: 'orb', id: 5 };
   const ev = g.step();
-  assert.equal(ev.cause, 'beam');
+  assert.ok(ev.levelUp);
+  assert.equal(ev.obstaclesWarned, undefined);
+  assert.equal(g.obstacles.length, 0);
 });
 
 test('a late climb redoes the last straight step upwards', () => {
@@ -775,10 +801,8 @@ test('the ghost flies: it follows the player into the sky and races through 3D',
   g.startAtLevel(ZONE_STARTS[SKY_ZONE] - 1);
   const gh = new GhostBot(g);
   gh.reset(true);
-  g.enterSky();
-  g.addObstacles(3);
-  g.obstacles.forEach((o) => (o.solid = true));
-  g.food = g.spawn('orb'); // never inside a laser column
+  g.enterSky({ launch: true });
+  g.food = g.spawn('orb');
   const eaten = runGhost(g, gh, 30);
   assert.equal(eaten, 30);
   assert.ok(gh.flying);

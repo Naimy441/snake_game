@@ -56,7 +56,7 @@ class App {
     this.world = new World({ size: BOARD, renderer: r });
     this.scene = this.world.scene;
     // y: the cell's altitude layer in the sky (undefined on the ground)
-    this.toWorld = (x, z, y) => this.world.toWorld(x, z, y, this.game.yMid);
+    this.toWorld = (x, z, y) => this.world.toWorld(x, z, y, this.game.yMid, this.game.size);
 
     this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 1500);
     this.rig = new CameraRig(this.camera, BOARD);
@@ -148,7 +148,7 @@ class App {
     if (this.ghostView) show.push(this.ghostView.group);
     const prev = show.map((o) => o.visible);
     show.forEach((o) => (o.visible = true));
-    const instanced = [this.board.pillars, this.board.bands, this.board.warns, this.board.beams, this.board.halos, this.food.chain.dots];
+    const instanced = [this.board.pillars, this.board.bands, this.board.warns, this.food.chain.dots];
     const counts = instanced.map((m) => m.count);
     const ident = new THREE.Matrix4();
     for (const m of instanced) {
@@ -570,6 +570,7 @@ class App {
     this.audio.startMusic({ menu: false });
     this.showScreen(null);
     $('hud').classList.remove('hidden');
+    this.rig.cine = null;
     this.rig.setMode(this.cameraMode, { reduceMotion: this.settings.reduceMotion });
     this.updateCameraUI();
     this.state = 'countdown';
@@ -821,9 +822,12 @@ class App {
       this.audio.zoneUp();
       this.audio.liftoff();
       this.titleCard(lu.zone);
-      this.slowMo(3.2, 0.24);
+      // the snake flips up and rockets a few layers by itself while the
+      // camera pulls out and circles it, then control comes back
+      this.slowMo(3.4, 0.3);
       this.protectUntil = this.simTime + 6;
-      this.later(0.5, () => {
+      if (!this.settings.reduceMotion) this.rig.startCinematic(3.8);
+      this.later(1.6, () => {
         this.toast('Jetpack on! ↑ climb · ↓ dive · ← → turn');
         this.flashHint();
       });
@@ -902,7 +906,6 @@ class App {
       body: 'You ran into your own body.',
       obstacle: 'You smashed into a pillar.',
       laser: 'You flew into the laser fence.',
-      beam: 'You flew into a laser column.',
       win: 'You filled the entire board!',
     }[cause];
     const rank = this.rank(g.score);
@@ -1207,6 +1210,9 @@ class App {
       this.setClass($('alt-food'), 'hidden', !g.food);
       if (g.food) this.setStyle('alt-food', 'top', pct(g.food.y));
       this.setText('alt-text', String(g.head.y + 1));
+      // the gauge's end lights up when the ceiling or the floor is close
+      this.setClass($('alt'), 'near-top', g.head.y >= SKY_H - 2);
+      this.setClass($('alt'), 'near-bottom', g.head.y <= 1);
     }
     if (this.state !== 'playing' && this.state !== 'countdown') this.setClass($('fp-hint'), 'hidden', true);
     else this.lastHud['fp-hint:hidden'] = undefined;
@@ -1249,16 +1255,17 @@ class App {
     c.clearRect(0, 0, W, W);
     const f = this.viewForward();
     const a = Math.atan2(f.x, -f.z);
-    const cell = W / (BOARD * 1.45);
-    const o = (BOARD - 1) / 2;
+    const N = g.size; // the sky box is wider than the board
+    const cell = W / (N * 1.45);
+    const o = (N - 1) / 2;
     c.save();
     c.translate(W / 2, W / 2);
     c.rotate(-a);
     c.fillStyle = 'rgba(120, 210, 120, 0.22)';
     c.strokeStyle = 'rgba(56, 246, 255, 0.9)';
     c.lineWidth = 2;
-    c.fillRect((-BOARD / 2) * cell, (-BOARD / 2) * cell, BOARD * cell, BOARD * cell);
-    c.strokeRect((-BOARD / 2) * cell, (-BOARD / 2) * cell, BOARD * cell, BOARD * cell);
+    c.fillRect((-N / 2) * cell, (-N / 2) * cell, N * cell, N * cell);
+    c.strokeRect((-N / 2) * cell, (-N / 2) * cell, N * cell, N * cell);
     const dot = (x, z, color, r = 0.5) => {
       c.fillStyle = color;
       c.beginPath();
@@ -1419,7 +1426,7 @@ class App {
     const aim = g.flying ? (next.y ? g.facing : next) : next;
     this.rig.update(dt, this.snake, {
       speedFx: this.speedFx, reduceMotion: rm, aim: steering || g.flying ? aim : null,
-      flying: g.flying && this.state !== 'menu', pitch: steering ? next.y || 0 : 0,
+      flying: g.flying && this.state !== 'menu', pitch: steering ? next.y || 0 : 0, box: sky,
     });
     // The first-person camera sits inside the head; hide it once we're there.
     this.snake.head.visible = !(this.rig.mode === 'fp' && this.rig.blend > 0.85);
@@ -1445,6 +1452,7 @@ class App {
       const look = g.lookAhead(3);
       if (look.blocked && look.free === 0) danger = 0.42 + 0.2 * Math.sin(this.simTime * 18);
       else if (look.blocked && look.free === 1) danger = 0.16;
+      else if (look.blocked && look.free === 2 && g.flying) danger = 0.07;
     }
     const speed = rm ? 0 : Math.max(0, this.speedFx - 0.25) * (view ? 1.3 : 0.45) + this.rushGlow * (view ? 0.5 : 0.15);
     const trans = this.world.transitioning ? 0.5 : 0;

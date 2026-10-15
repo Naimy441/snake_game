@@ -11,7 +11,7 @@
 // itself in; with no safe target it follows its tail to buy time.
 
 import {
-  DIRS, NEIGHBOURS, NEIGHBOURS_3D, SKY_MID, FOOD_TYPES, COMBO_WINDOW_MS, MAX_COMBO, RUSH_DRAIN_PER_SEC, CHAIN_LINK_POINTS, CHAIN_LINK_RUSH,
+  DIRS, NEIGHBOURS, NEIGHBOURS_3D, SKY_PAD, SKY_LIFT, SKY_CENTER, FOOD_TYPES, COMBO_WINDOW_MS, MAX_COMBO, RUSH_DRAIN_PER_SEC, CHAIN_LINK_POINTS, CHAIN_LINK_RUSH,
   CHAIN_BONUS_PER_LINK, LEVEL_AT, LEVEL_SPEEDS, MIN_INTERVAL, MIN_FAST_INTERVAL, MAX_LEVEL,
 } from './SnakeGame.js';
 
@@ -92,11 +92,13 @@ export class GhostBot {
     return this.game.flying ? NEIGHBOURS_3D : NEIGHBOURS;
   }
 
-  // Follow the player into the sky: everything rises to the middle layer.
+  // Follow the player into the sky: same shift into the bigger box, at the
+  // layer level with the board.
   liftOff() {
     this.flying = true;
-    this.cells = this.cells.map((c) => ({ ...c, y: SKY_MID }));
-    if (this.removedTail) this.removedTail = { ...this.removedTail, y: SKY_MID };
+    const move = (c) => ({ ...c, x: c.x + SKY_PAD, z: c.z + SKY_PAD, y: SKY_LIFT });
+    this.cells = this.cells.map(move);
+    if (this.removedTail) this.removedTail = move(this.removedTail);
   }
 
   get level() {
@@ -291,7 +293,7 @@ export class GhostBot {
   respawn() {
     const g = this.game;
     const s = g.size;
-    const y = g.flying ? SKY_MID : 0;
+    const y = g.flying ? SKY_CENTER : 0;
     const blocked = this.staticBlocked(false);
     for (let z = s - 2; z >= 1; z--) {
       for (let x = 2; x < s - 2; x++) {
