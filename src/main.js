@@ -1158,7 +1158,7 @@ class App {
     this.setClass(rushEl, 'active', g.rushing);
     this.setClass(rushEl, 'full', g.rush >= 99.9);
     this.setClass($('hud-boost'), 'hidden', !g.boosting);
-    const comboLeft = 1 - (g.time - g.lastEatTime) / COMBO_WINDOW_MS;
+    const comboLeft = 1 - (g.clock - g.lastEatTime) / COMBO_WINDOW_MS;
     const showCombo = g.combo > 1 && comboLeft > 0 && this.state !== 'over';
     this.setClass($('hud-combo'), 'hidden', !showCombo);
     if (showCombo) {
@@ -1360,6 +1360,7 @@ class App {
     }
 
     if (this.state === 'playing') {
+      g.clockScale = this.timeScale;
       this.t += (gdt * 1000) / g.currentInterval();
       let guard = 0;
       while (this.t >= 1 && this.state === 'playing' && guard++ < 4) {
