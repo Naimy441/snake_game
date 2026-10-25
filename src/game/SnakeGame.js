@@ -177,10 +177,10 @@ export class SnakeGame {
     return Math.max(MIN_INTERVAL, LEVEL_SPEEDS[this.level]);
   }
 
-  currentInterval() {
+  currentInterval(rushing = this.rushing) {
     let f = 1;
-    if (this.rushing) f = 0.6;
-    if (this.boostTicks > 0) f = this.rushing ? 0.5 : 0.55;
+    if (rushing) f = 0.6;
+    if (this.boostTicks > 0) f = rushing ? 0.5 : 0.55;
     return Math.max(MIN_FAST_INTERVAL, this.baseInterval() * f);
   }
 
