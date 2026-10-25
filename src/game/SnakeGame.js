@@ -125,6 +125,11 @@ export class SnakeGame {
     this.maxCombo = 1;
     this.lastEatTime = -1e9;
     this.time = 0;
+    // Real-time clock (ms). Differs from `time` only while the presentation
+    // runs gameplay slower than real time (Rush bullet time sets clockScale);
+    // the Rush and combo meters run on it so they drain at their usual pace.
+    this.clock = 0;
+    this.clockScale = 1;
     this.ticks = 0;
     this.rush = 0;
     this.rushing = false;
@@ -612,9 +617,9 @@ export class SnakeGame {
   }
 
   registerEat() {
-    this.combo = this.time - this.lastEatTime <= COMBO_WINDOW_MS ? Math.min(MAX_COMBO, this.combo + 1) : 1;
+    this.combo = this.clock - this.lastEatTime <= COMBO_WINDOW_MS ? Math.min(MAX_COMBO, this.combo + 1) : 1;
     this.maxCombo = Math.max(this.maxCombo, this.combo);
-    this.lastEatTime = this.time;
+    this.lastEatTime = this.clock;
   }
 
   get scoreMult() {
@@ -628,7 +633,7 @@ export class SnakeGame {
     // Snapshot for the late-turn grace window (see regrace).
     this.undo = {
       cells: this.cells.slice(), removedTail: this.removedTail, pendingGrowth: this.pendingGrowth,
-      dir: this.dir, facing: this.facing, queue: this.queue.slice(), time: this.time, ticks: this.ticks,
+      dir: this.dir, facing: this.facing, queue: this.queue.slice(), time: this.time, clock: this.clock, ticks: this.ticks,
       rush: this.rush, rushing: this.rushing, boostTicks: this.boostTicks,
       prey: this.prey ? { ...this.prey } : null, preyTimer: this.preyTimer,
     };
@@ -657,6 +662,7 @@ export class SnakeGame {
     this.dir = u.dir;
     this.facing = u.facing;
     this.time = u.time;
+    this.clock = u.clock;
     this.ticks = u.ticks;
     this.rush = u.rush;
     this.rushing = u.rushing;
@@ -681,8 +687,10 @@ export class SnakeGame {
     this.rushing = this.wantRush && this.rush > 0;
     const interval = this.currentInterval();
     this.time += interval;
+    const real = interval / this.clockScale;
+    this.clock += real;
     this.ticks++;
-    if (this.rushing) this.rush = Math.max(0, this.rush - (RUSH_DRAIN_PER_SEC * interval) / 1000);
+    if (this.rushing) this.rush = Math.max(0, this.rush - (RUSH_DRAIN_PER_SEC * real) / 1000);
     if (this.boostTicks > 0) this.boostTicks--;
 
     if (this.queue.length) {
@@ -818,7 +826,7 @@ export class SnakeGame {
         const points = CHAIN_LINK_POINTS * ch.next * this.scoreMult;
         this.score += points;
         this.rush = Math.min(100, this.rush + CHAIN_LINK_RUSH);
-        this.lastEatTime = this.time; // keeps a combo alive
+        this.lastEatTime = this.clock; // keeps a combo alive
         ev.chainLink = { x: nx, z: nz, y: ny, index: link, of: ch.links.length, points };
         if (ch.next >= ch.links.length) {
           const bonus = CHAIN_BONUS_PER_LINK * ch.links.length * this.scoreMult;

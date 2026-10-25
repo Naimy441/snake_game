@@ -810,3 +810,20 @@ test('the ghost flies: it follows the player into the sky and races through 3D',
   assert.ok(gh.cells.every((c) => g.inBounds(c.x, c.z, c.y) && !g.obstacleAt(c.x, c.z)));
   assert.ok(new Set(gh.cells.map((c) => c.y)).size > 1, 'used more than one altitude');
 });
+
+test('bullet time: the Rush meter drains in real time, not slowed game time', () => {
+  const drainOne = (scale) => {
+    const g = new SnakeGame({ rng: seq([0.5]) });
+    g.rush = 100;
+    g.wantRush = true;
+    g.clockScale = scale;
+    g.step();
+    return { drained: 100 - g.rush, real: g.clock, game: g.time };
+  };
+  const normal = drainOne(1);
+  const slowed = drainOne(0.5);
+  assert.equal(normal.real, normal.game);
+  assert.equal(slowed.real, slowed.game * 2);
+  // half-speed game time: one move takes twice as long, so it drains twice as much
+  assert.ok(Math.abs(slowed.drained - normal.drained * 2) < 1e-9);
+});
