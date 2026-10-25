@@ -26,6 +26,8 @@ const clamp01 = (v) => Math.min(1, Math.max(0, v));
 // Together with the drawn head's lead this ends just past the turning cell's
 // centre, so a redo never visibly snaps the head by more than ~1/4 cell.
 const GRACE = 0.25;
+// Real-time pace while rushing, relative to not rushing (see frame()).
+const RUSH_FEEL = 0.95;
 
 class App {
   constructor() {
@@ -1313,8 +1315,17 @@ class App {
     const dt = Math.min(0.1, rawDt);
     const slowing = this.state === 'playing' && now / 1000 < (this.slowUntil || 0);
     if (!slowing) this.slowScale = 1;
-    const tsTarget = slowing ? this.slowScale : 1;
-    this.timeScale = (this.timeScale ?? 1) + (tsTarget - (this.timeScale ?? 1)) * Math.min(1, dt * (slowing ? 7 : 3));
+    // Rush bullet time: the snake really is faster in game time, but the world
+    // slows so that in real time it moves at RUSH_FEEL of its unrushed pace.
+    const rushScale = this.state === 'playing' && this.game.rushing
+      ? (RUSH_FEEL * this.game.currentInterval()) / this.game.currentInterval(false) : 1;
+    const tsTarget = Math.min(slowing ? this.slowScale : 1, rushScale);
+    // level-up slow motion eases back gently; Rush snaps in and out so the
+    // pace you react to barely changes
+    if (slowing) this.easeBack = 3;
+    else if (rushScale < 1) this.easeBack = 10;
+    const ease = slowing ? 7 : rushScale < 1 ? 10 : this.easeBack || 3;
+    this.timeScale = (this.timeScale ?? 1) + (tsTarget - (this.timeScale ?? 1)) * Math.min(1, dt * ease);
     // gameplay time: snake, game clock, ghost, pickups and particles
     const gdt = dt * this.timeScale;
     this.last = now;
