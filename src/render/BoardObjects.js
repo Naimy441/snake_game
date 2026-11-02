@@ -122,7 +122,6 @@ export class BoardObjects {
     let nw = 0;
     const seen = new Set();
     for (const o of game.obstacles) {
-      if (o.kind && o.kind !== 'pillar') continue; // map walls and gates: MapView
       seen.add(o.id);
       const w = toWorld(o.x, o.z);
       let a = this.anim.get(o.id);
