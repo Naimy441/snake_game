@@ -218,6 +218,52 @@ export class AudioEngine {
     [0, 4, 7, 12, 16, 19, 24, 28].forEach((n, i) => this.voice(midi(72 + n), { wave: 0.25, at: 0.5 + i * 0.06, dur: 0.24, gain: 0.07 }));
   }
 
+  // Zone maps: a deep rumble as walls start rising (pitched per zone), a
+  // softer one as they sink, a shimmer when a map's portals and gates appear.
+  wallsRise(zone = 0) {
+    const base = [55, 49, 62, 70][zone] || 55;
+    this.voice(base, { wave: 'sine', dur: 0.55, gain: 0.22, slide: 1.6 });
+    this.noiseHit({ dur: 0.5, gain: 0.1, freq: 220, type: 'lowpass', sweep: 2 });
+    if (zone >= 2) this.voice(midi(84), { wave: 0.125, at: 0.12, dur: 0.12, gain: 0.04 });
+  }
+
+  wallsSink() {
+    this.voice(90, { wave: 'sine', dur: 0.7, gain: 0.16, slide: 0.45 });
+    this.noiseHit({ dur: 0.6, gain: 0.08, freq: 500, type: 'lowpass', sweep: 0.3 });
+  }
+
+  mapBlueprint() {
+    [0, 7, 12, 19].forEach((n, i) => this.voice(midi(76 + n), { wave: 'sine', at: i * 0.05, dur: 0.35, gain: 0.05, release: 0.3 }));
+  }
+
+  // Into a portal: a falling whoosh; out of the other side: a rising one.
+  portalIn(pan = 0) {
+    this.noiseHit({ dur: 0.22, gain: 0.16, freq: 2600, sweep: 0.25, q: 2 });
+    this.voice(midi(88), { wave: 'sine', dur: 0.2, gain: 0.07, slide: 0.5, pan });
+  }
+
+  portalOut(pan = 0) {
+    this.noiseHit({ dur: 0.25, gain: 0.13, freq: 500, sweep: 5, q: 2 });
+    this.voice(midi(76), { wave: 'sine', dur: 0.24, gain: 0.08, slide: 2, pan });
+    this.voice(midi(95), { wave: 0.125, at: 0.06, dur: 0.1, gain: 0.04, pan });
+  }
+
+  portalOpen() {
+    this.voice(midi(60), { wave: 'sine', dur: 0.8, gain: 0.07, slide: 4, vibrato: 0.02 });
+    this.noiseHit({ dur: 0.7, gain: 0.05, freq: 3000, type: 'bandpass', sweep: 0.3, q: 3 });
+  }
+
+  // Laser gate switching on; quieter the further away it is.
+  gateOn(near = 1, pan = 0) {
+    const g = 0.03 + 0.07 * near;
+    this.voice(midi(50), { wave: 'sawtooth', dur: 0.18, gain: g, slide: 2.2, pan });
+    this.noiseHit({ dur: 0.12, gain: g * 0.9, freq: 4200, type: 'highpass' });
+  }
+
+  gateWarn(near = 1) {
+    this.voice(midi(86), { wave: 0.125, dur: 0.05, gain: 0.025 + 0.03 * near });
+  }
+
   obstacleWarn() {
     this.voice(midi(57), { wave: 0.5, dur: 0.09, gain: 0.07 });
     this.voice(midi(57), { wave: 0.5, at: 0.14, dur: 0.09, gain: 0.07 });

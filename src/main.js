@@ -7,6 +7,7 @@ import { World } from './render/World.js';
 import { SnakeView } from './render/SnakeView.js';
 import { FoodView } from './render/FoodView.js';
 import { BoardObjects } from './render/BoardObjects.js';
+import { MapView } from './render/MapView.js';
 import { Effects } from './render/Effects.js';
 import { CameraRig } from './render/CameraRig.js';
 import { PostFX } from './render/Post.js';
@@ -71,6 +72,9 @@ class App {
     this.scene.add(this.food.group);
     this.board = new BoardObjects({ glowTex: this.glowTex, ringTex: makeRingTexture(), chevronTex: makeChevronTexture(), checker: this.world.island.checker });
     this.scene.add(this.board.group);
+    // each zone's map: themed walls, portals and laser gates
+    this.map = new MapView();
+    this.scene.add(this.map.group);
 
     this.audio = new AudioEngine();
     this.audio.setVolumes({ sfx: this.settings.sfx, muted: this.settings.muted });
@@ -165,12 +169,14 @@ class App {
         o.frustumCulled = false;
       }
     });
+    this.map.warmup(true);
     this.world.withAllZones(() => {
       this.renderer.setRenderTarget(this.post.sceneRT);
       this.renderer.compile(this.scene, this.camera);
       this.renderer.setRenderTarget(null);
       this.post.render(this.scene, this.camera);
     });
+    this.map.warmup(false);
     for (const o of culled) o.frustumCulled = true;
     instanced.forEach((m, i) => (m.count = counts[i]));
     show.forEach((o, i) => (o.visible = prev[i]));
@@ -728,13 +734,54 @@ class App {
       this.toast('Pillars rising! Watch the red warning rings');
     }
     if (ev.obstaclesRaised) {
-      this.audio.obstacleRise();
-      for (const o of ev.obstaclesRaised) {
+      // pillars thump up; map walls rumble (their dust comes from the MapView)
+      const pillars = ev.obstaclesRaised.filter((o) => !o.kind || o.kind === 'pillar');
+      if (pillars.length) this.audio.obstacleRise();
+      for (const o of pillars) {
         const w = at(o);
         this.effects.emit(w.x, w.y + 0.1, w.z, { count: 26, color: '#c8b8a0', speed: 2.4, up: 1.6, size: 0.24, life: 0.6 });
         this.effects.shockwave(w.x, w.z, '#ff8a5c', { y: w.y, max: 1.6, dur: 0.35 });
       }
-      if (!rm) this.rig.shake += 0.08;
+      const walls = ev.obstaclesRaised.length - pillars.length;
+      if (walls && this.simTime - (this.lastRumble || -9) > 0.35) {
+        this.lastRumble = this.simTime;
+        this.audio.wallsRise(ev.obstaclesRaised[ev.obstaclesRaised.length - 1].zone);
+        if (!rm) this.rig.shake += Math.min(0.06, 0.012 * walls);
+      }
+      if (pillars.length && !rm) this.rig.shake += 0.08;
+    }
+    if (ev.layoutCleared) this.audio.wallsSink();
+    if (ev.layout) this.onLayout(ev.layout, !!ev.obstaclesWarned);
+    if (ev.portal) {
+      const p = ev.portal;
+      this.map.pulsePortal(p.id);
+      this.audio.portalIn(THREE.MathUtils.clamp(this.toWorld(p.x, p.z).x / 12, -0.8, 0.8));
+    }
+    if (ev.warped) {
+      // the head comes out of the far portal half a step later
+      const to = ev.warped.to;
+      this.later(delay * 0.6, () => {
+        const w = at(to);
+        const key = (this.game.portals.find((q) => (q.a.x === to.x && q.a.z === to.z) || (q.b.x === to.x && q.b.z === to.z)) || {}).key || 'A';
+        const col = '#' + this.map.portalColors[key].getHexString();
+        this.audio.portalOut(THREE.MathUtils.clamp(w.x / 12, -0.8, 0.8));
+        this.effects.emit(w.x, w.y + 0.25, w.z, { count: 30, color: col, speed: 2.6, up: 2.6, size: 0.2, life: 0.55 });
+        this.effects.shockwave(w.x, w.z, col, { y: w.y, max: 2, dur: 0.4 });
+        if (!rm) {
+          // in the chase and first-person views the camera jumps: cover it with a flash
+          this.flash(this.cameraMode === 'overhead' ? 0.08 : 0.32, col);
+          this.rig.kick += 5;
+        }
+      });
+    }
+    if (ev.gatesOn) {
+      for (const id of ev.gatesOn) {
+        const gt = this.game.gates.find((q) => q.id === id);
+        if (!gt) continue;
+        const mid = gt.cells[Math.floor(gt.cells.length / 2)];
+        const d = Math.abs(mid.x - g.head.x) + Math.abs(mid.z - g.head.z);
+        this.audio.gateOn(Math.max(0, 1 - d / 14), THREE.MathUtils.clamp(this.toWorld(mid.x, mid.z).x / 12, -0.8, 0.8));
+      }
     }
     if (ev.padsSpawned) {
       for (const p of ev.padsSpawned) {
@@ -755,6 +802,20 @@ class App {
 
   syncFood() {
     this.food.sync(this.game, this.toWorld);
+  }
+
+  // A zone's map grows: say what is coming. (Walls show as holograms, then
+  // rise in a wave out from the centre.)
+  onLayout(lay, pillars) {
+    const text = [
+      [null, 'Hedges are growing in the garden', 'The garden fills in'],
+      ['Canyon ridges are rising: find the gaps', 'The canyon gaps are narrowing', 'A mesa and spires rise'],
+      ['City blocks rise and portals open: dive in to cross town', 'The city grows', 'A second pair of portals opens'],
+      ['Laser gates online: cross while they are off', 'Edge portals open', 'Firewalls rise beside the core'],
+    ][lay.zone]?.[lay.stage];
+    if (text) this.toast(pillars ? `${text}, and a pillar` : text);
+    if (lay.portals.length || lay.gates.length) this.later(0.2, () => this.audio.mapBlueprint());
+    if (lay.portals.length) this.later(1.4, () => this.audio.portalOpen());
   }
 
   onEat(ate, levelUp) {
@@ -897,6 +958,8 @@ class App {
       wall: 'You crashed into the wall.',
       body: 'You ran into your own body.',
       obstacle: 'You smashed into a pillar.',
+      block: ['You plunged into a hedge.', 'You slammed into the canyon rock.', 'You crashed into a building.', 'You hit a data block.'][g.zone] || 'You hit a wall.',
+      gate: 'You hit a laser gate.',
       laser: 'You flew into the laser fence.',
       win: 'You filled the entire board!',
     }[cause];
@@ -1267,7 +1330,23 @@ class App {
       c.fillStyle = color;
       c.fillRect((x - o - 0.45) * cell, (z - o - 0.45) * cell, cell * 0.9, cell * 0.9);
     };
-    for (const ob of g.obstacles) sq(ob.x, ob.z, ob.solid ? '#d8d0c0' : 'rgba(255, 60, 90, 0.7)');
+    const wallCol = ['#6fd05a', '#e09a62', '#9a8aff', '#38c8ff'];
+    for (const ob of g.obstacles) {
+      if (ob.kind === 'wall') sq(ob.x, ob.z, ob.solid ? wallCol[Math.min(3, ob.zone)] : 'rgba(255, 255, 255, 0.22)');
+      else if (ob.kind === 'gate') {
+        c.fillStyle = ob.solid ? '#ff3a5c' : 'rgba(255, 58, 92, 0.35)';
+        c.fillRect((ob.x - o - 0.45) * cell, (ob.z - o - 0.18) * cell, cell * 0.9, cell * 0.36);
+      } else sq(ob.x, ob.z, ob.solid ? '#d8d0c0' : 'rgba(255, 60, 90, 0.7)');
+    }
+    for (const p of g.portals) {
+      c.strokeStyle = '#' + this.map.portalColors[p.key].getHexString();
+      c.lineWidth = 2;
+      for (const e of [p.a, p.b]) {
+        c.beginPath();
+        c.arc((e.x - o) * cell, (e.z - o) * cell, cell * 0.55, 0, Math.PI * 2);
+        c.stroke();
+      }
+    }
     for (const p of g.pads) dot(p.x, p.z, '#ff8a2a', 0.6);
     if (g.chain) for (let i = g.chain.next; i < g.chain.links.length; i++) dot(g.chain.links[i].x, g.chain.links[i].z, '#38f6ff', i === g.chain.next ? 0.75 : 0.5);
     if (g.food) dot(g.food.x, g.food.z, '#ff4d6d', 0.75);
@@ -1283,6 +1362,24 @@ class App {
     c.lineTo(W / 2 - 5, 14);
     c.lineTo(W / 2 + 5, 14);
     c.fill();
+  }
+
+  // Dust (or sparks) where map walls burst up out of the floor.
+  mapDust() {
+    const cols = ['#9be07a', '#e8b07a', '#ff7ae8', '#5ff6ff'];
+    for (const r of this.map.raised) {
+      this.effects.emit(r.x, 0.12, r.z, { count: 5, color: cols[Math.min(3, r.zone)], speed: 1.6, up: 1.4, size: 0.2, life: 0.5, spread: 0.6 });
+    }
+    // a soft tick as a gate starts warning, if the snake is close
+    const g = this.game;
+    for (const gt of g.gates) {
+      if (gt.state === 'warn' && this.lastGateWarn?.[gt.id] !== gt.warnSince) {
+        (this.lastGateWarn || (this.lastGateWarn = {}))[gt.id] = gt.warnSince;
+        const mid = gt.cells[Math.floor(gt.cells.length / 2)];
+        const d = Math.abs(mid.x - g.head.x) + Math.abs(mid.z - g.head.z);
+        if (d < 8 && this.state === 'playing') this.audio.gateWarn(1 - d / 8);
+      }
+    }
   }
 
   // Jetpack flames shed sparks behind the snake while it flies.
@@ -1408,6 +1505,8 @@ class App {
     const headingYaw = Math.atan2(f.x, f.z);
     this.board.applyPalette(this.world.p);
     this.board.sync(g, this.toWorld, gdt, this.simTime, headingYaw, sky);
+    this.map.sync(g, this.toWorld, gdt, this.simTime, this.world.p, rm);
+    this.mapDust();
     const playing = this.state === 'playing' || this.state === 'countdown' || this.state === 'paused';
     this.effects.updateGuide(g, this.toWorld, playing && this.settings.guide && view);
     this.effects.update(gdt);
