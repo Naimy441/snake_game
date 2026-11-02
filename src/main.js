@@ -1,14 +1,12 @@
 import * as THREE from 'three';
 
 import { GhostBot } from './game/GhostBot.js';
-import { SnakeGame, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, SKY_H, zoneForLevel, MAGNET_MS, CHILL_MS } from './game/SnakeGame.js';
-import { layoutUpTo } from './game/maps.js';
+import { SnakeGame, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, SKY_H, zoneForLevel } from './game/SnakeGame.js';
 import { SKINS, ACCESSORIES, skinById, accessoryById, isUnlocked, unlockProgress } from './skins.js';
 import { World } from './render/World.js';
 import { SnakeView } from './render/SnakeView.js';
-import { FoodView, POWER_COLORS } from './render/FoodView.js';
+import { FoodView } from './render/FoodView.js';
 import { BoardObjects } from './render/BoardObjects.js';
-import { MapView } from './render/MapView.js';
 import { Effects } from './render/Effects.js';
 import { CameraRig } from './render/CameraRig.js';
 import { PostFX } from './render/Post.js';
@@ -16,13 +14,10 @@ import { CORNER } from './render/SnakePath.js';
 import { HEAD_LEAD } from './render/SnakeView.js';
 import { makeGlowTexture, makeScaleNormalMap, makeRingTexture, makeChevronTexture } from './render/textures.js';
 import { AudioEngine } from './audio/Audio.js';
-import { atmosAll } from './render/atmos.js';
 import { Input } from './Input.js';
 import { loadSettings, saveSettings, loadBest, saveBest, loadStats, saveStats, QUALITY } from './settings.js';
 
 const $ = (id) => document.getElementById(id);
-const POWER_NAMES = { shield: 'Shield', magnet: 'Magnet', chill: 'Chill' };
-const POWER_ICONS = { shield: '🛡️', magnet: '🧲', chill: '❄️' };
 const BOARD = 21;
 const CAMERA_NAMES = { overhead: 'Overhead', tp: 'Chase', fp: 'First-person' };
 const CAMERA_ORDER = ['overhead', 'tp', 'fp'];
@@ -52,7 +47,7 @@ class App {
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.toneMappingExposure = 1.0;
     r.shadowMap.enabled = true;
-    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    r.shadowMap.type = THREE.PCFShadowMap;
     r.info.autoReset = false;
 
     this.isTouch = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
@@ -76,9 +71,6 @@ class App {
     this.scene.add(this.food.group);
     this.board = new BoardObjects({ glowTex: this.glowTex, ringTex: makeRingTexture(), chevronTex: makeChevronTexture(), checker: this.world.island.checker });
     this.scene.add(this.board.group);
-    // each zone's map: themed walls, portals and laser gates
-    this.map = new MapView();
-    this.scene.add(this.map.group);
 
     this.audio = new AudioEngine();
     this.audio.setVolumes({ sfx: this.settings.sfx, muted: this.settings.muted });
@@ -139,8 +131,6 @@ class App {
     this.rig.setMode('orbit', { instant: true });
     this.updateCameraUI();
     this.syncFood();
-    // cloud shadows and the lightning flash reach every lit material
-    atmosAll(this.scene);
     this.precompile();
     this.last = performance.now();
     this.renderer.setAnimationLoop((now) => this.frame(now));
@@ -156,7 +146,6 @@ class App {
   precompile() {
     const show = [this.food.orb.group, this.food.prism.group, this.food.prey.group, ...this.food.chain.links, ...this.board.pads, this.snake.aura, this.snake.headAura, ...this.effects.rings];
     show.push(...this.board.pads.map((p) => p.userData.air));
-    show.push(this.food.power.group, ...Object.values(this.food.power.icons), this.snake.shieldMesh, this.snake.magnetRing);
     if (this.snake.jetpack) show.push(this.snake.jetpack);
     if (this.ghostView) show.push(this.ghostView.group);
     const prev = show.map((o) => o.visible);
@@ -176,14 +165,12 @@ class App {
         o.frustumCulled = false;
       }
     });
-    this.map.warmup(true);
     this.world.withAllZones(() => {
       this.renderer.setRenderTarget(this.post.sceneRT);
       this.renderer.compile(this.scene, this.camera);
       this.renderer.setRenderTarget(null);
       this.post.render(this.scene, this.camera);
     });
-    this.map.warmup(false);
     for (const o of culled) o.frustumCulled = true;
     instanced.forEach((m, i) => (m.count = counts[i]));
     show.forEach((o, i) => (o.visible = prev[i]));
@@ -194,9 +181,9 @@ class App {
     const q = QUALITY[this.activeQuality];
     this.q = q;
     this.world.setShadowQuality(q.shadows);
-    this.world.setParticleBudget(q.ambient, q.rain);
+    this.world.setParticleBudget(q.ambient);
     this.effects.setParticleBudget(q.particles);
-    this.post.configure({ samples: q.samples, bloomLevels: q.bloomLevels, taps: q.taps, rays: q.rays });
+    this.post.configure({ samples: q.samples, bloomLevels: q.bloomLevels, taps: q.taps });
     if (!this.snake || this.snake.radial !== q.radial) {
       const old = this.snake;
       this.snake = new SnakeView({ maxCells: BOARD * BOARD, radial: q.radial, scaleMap: this.scaleMap, skin: this.equippedSkin(), accessory: this.equippedAccessory() });
@@ -208,7 +195,6 @@ class App {
         old.dispose();
       }
       this.scene.add(this.snake.group);
-      atmosAll(this.snake.group);
     }
     this.dyn.scale = 1;
     this.dyn.grace = 2;
@@ -291,7 +277,6 @@ class App {
       for (const ev of this.ghost.update(dt * 1000)) {
         if (ev.respawned) this.ghostFade = 0;
         if (ev.ate) {
-          if (ev.ate !== 'chain') v.swallow(0.3);
           const gh = this.ghost.head;
           const w = this.toWorld(gh.x, gh.z, gh.y);
           this.effects.emit(w.x, w.y + 0.45, w.z, { count: ev.chainComplete ? 30 : 12, color: '#a8f0ff', speed: 1.8, up: 1.6, size: 0.16, life: 0.5 });
@@ -396,9 +381,6 @@ class App {
     st.mice += g.stats.prey;
     st.chains += g.stats.chains;
     st.pads += g.stats.pads;
-    st.saves = (st.saves || 0) + g.stats.saves;
-    st.warps = (st.warps || 0) + g.stats.warps;
-    st.powers = (st.powers || 0) + g.stats.powers;
     st.maxZone = Math.max(st.maxZone, g.zone);
     st.maxLevel = Math.max(st.maxLevel || 0, g.level);
     saveStats(st);
@@ -577,8 +559,6 @@ class App {
     this.deathFlash = 0;
     this.food.hideAll();
     this.board.clear();
-    this.snake.resetFx();
-    this.ghostView.resetFx();
     this.syncFood();
     const startLevel = this.startLevel();
     this.game.startAtLevel(startLevel);
@@ -628,8 +608,6 @@ class App {
     this.deathFlash = 0;
     this.food.hideAll();
     this.board.clear();
-    this.snake.resetFx();
-    this.ghostView.resetFx();
     this.syncFood();
     if (this.world.zone !== 0 || this.world.transitioning) this.world.setZone(0, { duration: 1.4 });
     $('hud').classList.add('hidden');
@@ -721,7 +699,6 @@ class App {
       this.later(delay, () => {
         const w = at(c);
         this.popup(new THREE.Vector3(w.x, w.y, w.z), `+${c.points}${c.combo > 1 ? ` x${c.combo}` : ''}`, 'prey');
-        this.snake.swallow(0.55);
         this.effects.emit(w.x, w.y + 0.4, w.z, { count: 60, color: '#ffd36a', speed: 4, up: 3, size: 0.28 });
         this.effects.shockwave(w.x, w.z, '#ffd36a', { y: w.y, max: 4, dur: 0.55 });
         this.audio.preyCaught();
@@ -751,91 +728,13 @@ class App {
       this.toast('Pillars rising! Watch the red warning rings');
     }
     if (ev.obstaclesRaised) {
-      // pillars thump up; map walls rumble (their dust comes from the MapView)
-      const pillars = ev.obstaclesRaised.filter((o) => !o.kind || o.kind === 'pillar');
-      if (pillars.length) this.audio.obstacleRise();
-      for (const o of pillars) {
+      this.audio.obstacleRise();
+      for (const o of ev.obstaclesRaised) {
         const w = at(o);
         this.effects.emit(w.x, w.y + 0.1, w.z, { count: 26, color: '#c8b8a0', speed: 2.4, up: 1.6, size: 0.24, life: 0.6 });
         this.effects.shockwave(w.x, w.z, '#ff8a5c', { y: w.y, max: 1.6, dur: 0.35 });
       }
-      const walls = ev.obstaclesRaised.length - pillars.length;
-      if (walls && this.simTime - (this.lastRumble || -9) > 0.35) {
-        this.lastRumble = this.simTime;
-        this.audio.wallsRise(ev.obstaclesRaised[ev.obstaclesRaised.length - 1].zone);
-        if (!rm) this.rig.shake += Math.min(0.06, 0.012 * walls);
-      }
-      if (pillars.length && !rm) this.rig.shake += 0.08;
-    }
-    if (ev.powerSpawned) {
-      const p = ev.powerSpawned;
-      const w = at(p);
-      this.toast(`A ${POWER_NAMES[p.kind]} power-up appeared!`);
-      this.audio.powerSpawn();
-      this.effects.emit(w.x, w.y + 0.5, w.z, { count: 22, color: POWER_COLORS[p.kind], speed: 1.6, up: 2, size: 0.18, life: 0.6 });
-    }
-    if (ev.power) this.onPower(ev.power, delay);
-    if (ev.shieldSaved) {
-      const sv = ev.shieldSaved;
-      this.snake.popShield();
-      this.audio.shieldBreak();
-      this.banner('Saved!');
-      const hp = this.snake.headPos;
-      this.effects.emit(hp.x, hp.y + 0.45, hp.z, { count: 50, color: POWER_COLORS.shield, speed: 4.2, up: 2.6, size: 0.22, life: 0.7 });
-      this.effects.emit(hp.x, hp.y + 0.45, hp.z, { count: 16, color: '#ffffff', speed: 2.5, up: 2, size: 0.14, life: 0.5 });
-      this.effects.shockwave(hp.x, hp.z, POWER_COLORS.shield, { y: hp.y, max: 3, dur: 0.45 });
-      this.toast(`The shield took the hit! (${{ wall: 'wall', body: 'your own body', obstacle: 'pillar', block: 'wall', gate: 'laser gate', laser: 'laser fence' }[sv.cause] || 'crash'})`);
-      if (!rm) {
-        this.flash(0.3, '#9cc8ff');
-        this.rig.kick += 7;
-        this.rig.shake += 0.12;
-      }
-      this.slowMo(0.9, 0.45);
-    }
-    if (ev.powerExpired) {
-      const w = at(ev.powerExpired);
-      this.effects.emit(w.x, w.y + 0.5, w.z, { count: 16, color: POWER_COLORS[ev.powerExpired.kind], speed: 1.2, up: 1, size: 0.16, life: 0.5 });
-    }
-    if (ev.pulled) {
-      for (const key of ev.pulled) {
-        const f = g[key];
-        if (!f) continue;
-        const w = at(f);
-        this.effects.emit(w.x, w.y + 0.45, w.z, { count: 3, color: POWER_COLORS.magnet, speed: 0.6, up: 0.6, size: 0.14, life: 0.35, gravity: 0 });
-      }
-    }
-    if (ev.layoutCleared) this.audio.wallsSink();
-    if (ev.layout) this.onLayout(ev.layout, !!ev.obstaclesWarned);
-    if (ev.portal) {
-      const p = ev.portal;
-      this.map.pulsePortal(p.id);
-      this.audio.portalIn(THREE.MathUtils.clamp(this.toWorld(p.x, p.z).x / 12, -0.8, 0.8));
-    }
-    if (ev.warped) {
-      // the head comes out of the far portal half a step later
-      const to = ev.warped.to;
-      this.later(delay * 0.6, () => {
-        const w = at(to);
-        const key = (this.game.portals.find((q) => (q.a.x === to.x && q.a.z === to.z) || (q.b.x === to.x && q.b.z === to.z)) || {}).key || 'A';
-        const col = '#' + this.map.portalColors[key].getHexString();
-        this.audio.portalOut(THREE.MathUtils.clamp(w.x / 12, -0.8, 0.8));
-        this.effects.emit(w.x, w.y + 0.25, w.z, { count: 30, color: col, speed: 2.6, up: 2.6, size: 0.2, life: 0.55 });
-        this.effects.shockwave(w.x, w.z, col, { y: w.y, max: 2, dur: 0.4 });
-        if (!rm) {
-          // in the chase and first-person views the camera jumps: cover it with a flash
-          this.flash(this.cameraMode === 'overhead' ? 0.08 : 0.32, col);
-          this.rig.kick += 5;
-        }
-      });
-    }
-    if (ev.gatesOn) {
-      for (const id of ev.gatesOn) {
-        const gt = this.game.gates.find((q) => q.id === id);
-        if (!gt) continue;
-        const mid = gt.cells[Math.floor(gt.cells.length / 2)];
-        const d = Math.abs(mid.x - g.head.x) + Math.abs(mid.z - g.head.z);
-        this.audio.gateOn(Math.max(0, 1 - d / 14), THREE.MathUtils.clamp(this.toWorld(mid.x, mid.z).x / 12, -0.8, 0.8));
-      }
+      if (!rm) this.rig.shake += 0.08;
     }
     if (ev.padsSpawned) {
       for (const p of ev.padsSpawned) {
@@ -858,42 +757,6 @@ class App {
     this.food.sync(this.game, this.toWorld);
   }
 
-  // Picked up a power-up: say what it does once the head reaches it.
-  onPower(pw, delay) {
-    const text = {
-      shield: 'Shield up: it takes one crash for you',
-      magnet: 'Magnet: apples come to you',
-      chill: 'Chill: you slow right down for a while',
-    }[pw.kind];
-    this.later(delay, () => {
-      const w = this.toWorld(pw.x, pw.z, pw.y);
-      this.audio.powerUp(pw.kind);
-      this.banner(`${POWER_NAMES[pw.kind]}!`);
-      this.toast(text);
-      this.popup(new THREE.Vector3(w.x, w.y || 0, w.z), `+${pw.points}`, 'power');
-      this.effects.emit(w.x, (w.y || 0) + 0.55, w.z, { count: 46, color: POWER_COLORS[pw.kind], speed: 3.4, up: 2.6, size: 0.24, life: 0.7 });
-      this.effects.shockwave(w.x, w.z, POWER_COLORS[pw.kind], { y: w.y || 0, max: 3.4, dur: 0.5 });
-      if (!this.settings.reduceMotion) {
-        this.flash(0.18, POWER_COLORS[pw.kind]);
-        this.rig.kick += 4;
-      }
-    });
-  }
-
-  // A zone's map grows: say what is coming. (Walls show as holograms, then
-  // rise in a wave out from the centre.)
-  onLayout(lay, pillars) {
-    const text = [
-      [null, 'Hedges are growing in the garden', 'The garden fills in'],
-      ['Canyon ridges are rising: find the gaps', 'The canyon gaps are narrowing', 'A mesa and spires rise'],
-      ['City blocks rise and portals open: dive in to cross town', 'The city grows', 'A second pair of portals opens'],
-      ['Laser gates online: cross while they are off', 'Edge portals open', 'Firewalls rise beside the core'],
-    ][lay.zone]?.[lay.stage];
-    if (text) this.toast(pillars ? `${text}, and a pillar` : text);
-    if (lay.portals.length || lay.gates.length) this.later(0.2, () => this.audio.mapBlueprint());
-    if (lay.portals.length) this.later(1.4, () => this.audio.portalOpen());
-  }
-
   onEat(ate, levelUp) {
     const g = this.game;
     const w = this.toWorld(ate.x, ate.z, ate.y);
@@ -913,7 +776,6 @@ class App {
       this.effects.emit(w.x, w.y + 0.45, w.z, { count: 14, color: '#ffffff', speed: 1.5, up: 3.5, size: 0.14, life: 0.5 });
       this.effects.shockwave(w.x, w.z, prism ? '#c77dff' : '#ff5a7a', { y: w.y, max: prism ? 4.5 : 2.6 });
       this.popup(pos, `+${ate.points}${ate.combo > 1 ? ` x${ate.combo}` : ''}`, prism ? 'prism' : '');
-      this.snake.swallow(prism ? 0.5 : 0.32);
       const v = pos.clone().project(this.camera);
       if (prism) {
         this.audio.prism();
@@ -1013,8 +875,6 @@ class App {
     });
     // Pull back to the overhead view so the player can see what happened.
     if (this.cameraMode !== 'overhead') this.later(0.55, () => this.rig.setMode('overhead', { reduceMotion: this.settings.reduceMotion }));
-    // then the body breaks apart, head to tail (a win keeps the snake whole)
-    if (!won) this.later(0.6, () => this.snake.shatter(g.cells.length));
     this.later(1.25, () => this.showGameOver(ev.cause));
   }
 
@@ -1037,8 +897,6 @@ class App {
       wall: 'You crashed into the wall.',
       body: 'You ran into your own body.',
       obstacle: 'You smashed into a pillar.',
-      block: ['You plunged into a hedge.', 'You slammed into the canyon rock.', 'You crashed into a building.', 'You hit a data block.'][g.zone] || 'You hit a wall.',
-      gate: 'You hit a laser gate.',
       laser: 'You flew into the laser fence.',
       win: 'You filled the entire board!',
     }[cause];
@@ -1307,7 +1165,6 @@ class App {
       this.setText('hud-combo-x', `x${g.combo}`);
       this.setStyle('hud-combo-bar', 'transform', `scaleX(${Math.max(0, comboLeft).toFixed(2)})`);
     }
-    this.updatePowersHud();
     // chain tracker
     const ch = g.chain;
     this.setClass($('hud-chain'), 'hidden', !ch);
@@ -1350,39 +1207,6 @@ class App {
     }
     if (this.state !== 'playing' && this.state !== 'countdown') this.setClass($('fp-hint'), 'hidden', true);
     else this.lastHud['fp-hint:hidden'] = undefined;
-  }
-
-  // Active power-ups above the Rush bar, with time left. A short chime when
-  // a timed one runs out.
-  updatePowersHud() {
-    const g = this.game;
-    const live = this.state !== 'menu' && this.state !== 'over' && g.alive;
-    const on = [];
-    if (live && g.shield) on.push({ k: 'shield', left: null });
-    if (live && g.magnetized) on.push({ k: 'magnet', left: (g.magnetUntil - g.time) / 1000, of: MAGNET_MS / 1000 });
-    if (live && g.chilled) on.push({ k: 'chill', left: (g.chillUntil - g.time) / 1000, of: CHILL_MS / 1000 });
-    const key = on.map((p) => p.k).join(',');
-    if (this.lastHud.powers !== key) {
-      if (this.lastHud.powers && live) {
-        const gone = this.lastHud.powers.split(',').filter((k) => k && k !== 'shield' && !key.includes(k));
-        if (gone.length) this.audio.powerEnd();
-      }
-      this.lastHud.powers = key;
-      $('hud-powers').innerHTML = on
-        .map((p) => `<div class="pw ${p.k}" id="pw-${p.k}" title="${POWER_NAMES[p.k]}"><span class="ic">${POWER_ICONS[p.k]}</span><span class="nm">${POWER_NAMES[p.k]}</span>${p.left != null ? ` <span class="left" id="pw-${p.k}-t"></span><i id="pw-${p.k}-bar"></i>` : ''}</div>`)
-        .join('');
-      for (const k of ['magnet', 'chill']) {
-        delete this.lastHud[`pw-${k}-t`];
-        delete this.lastHud[`pw-${k}-bar.transform`];
-        delete this.lastHud[`pw-${k}:ending`];
-      }
-    }
-    for (const p of on) {
-      if (p.left == null) continue;
-      this.setText(`pw-${p.k}-t`, `${Math.max(0, Math.ceil(p.left))}s`);
-      this.setStyle(`pw-${p.k}-bar`, 'transform', `scaleX(${clamp01(p.left / p.of).toFixed(2)})`);
-      this.setClass($(`pw-${p.k}`), 'ending', p.left < 2);
-    }
   }
 
   viewForward() {
@@ -1443,36 +1267,12 @@ class App {
       c.fillStyle = color;
       c.fillRect((x - o - 0.45) * cell, (z - o - 0.45) * cell, cell * 0.9, cell * 0.9);
     };
-    const wallCol = ['#6fd05a', '#e09a62', '#9a8aff', '#38c8ff'];
-    for (const ob of g.obstacles) {
-      if (ob.kind === 'wall') sq(ob.x, ob.z, ob.solid ? wallCol[Math.min(3, ob.zone)] : 'rgba(255, 255, 255, 0.22)');
-      else if (ob.kind === 'gate') {
-        c.fillStyle = ob.solid ? '#ff3a5c' : 'rgba(255, 58, 92, 0.35)';
-        c.fillRect((ob.x - o - 0.45) * cell, (ob.z - o - 0.18) * cell, cell * 0.9, cell * 0.36);
-      } else sq(ob.x, ob.z, ob.solid ? '#d8d0c0' : 'rgba(255, 60, 90, 0.7)');
-    }
-    for (const p of g.portals) {
-      c.strokeStyle = '#' + this.map.portalColors[p.key].getHexString();
-      c.lineWidth = 2;
-      for (const e of [p.a, p.b]) {
-        c.beginPath();
-        c.arc((e.x - o) * cell, (e.z - o) * cell, cell * 0.55, 0, Math.PI * 2);
-        c.stroke();
-      }
-    }
+    for (const ob of g.obstacles) sq(ob.x, ob.z, ob.solid ? '#d8d0c0' : 'rgba(255, 60, 90, 0.7)');
     for (const p of g.pads) dot(p.x, p.z, '#ff8a2a', 0.6);
     if (g.chain) for (let i = g.chain.next; i < g.chain.links.length; i++) dot(g.chain.links[i].x, g.chain.links[i].z, '#38f6ff', i === g.chain.next ? 0.75 : 0.5);
     if (g.food) dot(g.food.x, g.food.z, '#ff4d6d', 0.75);
     if (g.bonus) dot(g.bonus.x, g.bonus.z, '#d9a3ff', 0.8);
     if (g.prey) dot(g.prey.x, g.prey.z, '#fff2b0', 0.7);
-    if (g.power) {
-      c.save();
-      c.translate((g.power.x - o) * cell, (g.power.z - o) * cell);
-      c.rotate(Math.PI / 4);
-      c.fillStyle = POWER_COLORS[g.power.kind];
-      c.fillRect(-cell * 0.42, -cell * 0.42, cell * 0.84, cell * 0.84);
-      c.restore();
-    }
     if (this.settings.ghost) for (const c of this.ghost.cells) dot(c.x, c.z, 'rgba(168, 240, 255, 0.55)', 0.32);
     for (let i = g.cells.length - 1; i >= 1; i--) dot(g.cells[i].x, g.cells[i].z, '#17c3b2', 0.48);
     dot(g.head.x, g.head.z, '#ffffff', 0.62);
@@ -1483,92 +1283,6 @@ class App {
     c.lineTo(W / 2 - 5, 14);
     c.lineTo(W / 2 + 5, 14);
     c.fill();
-  }
-
-  // Skin-coloured fragments spray from the front of the death shatter wave.
-  shatterFx(dt) {
-    const s = this.snake;
-    if (!s.frontOn) return;
-    const h = s.skin.head;
-    const cols = [h.side, h.top, s.trailColor || h.side];
-    const n = Math.max(2, Math.round(dt * 160));
-    for (let i = 0; i < n; i++) {
-      const f = s.front;
-      this.effects.emit(f.x, f.y, f.z, { count: 1, color: cols[i % 3], speed: 2.6, up: 2.4, size: 0.2 + Math.random() * 0.12, life: 0.7, gravity: 7, spread: 0.45 });
-    }
-  }
-
-  // Thunder after each lightning strike; the rain's hiss follows the weather.
-  weatherSounds() {
-    const w = this.world;
-    for (let i = w.thunder.length - 1; i >= 0; i--) {
-      if (w.thunder[i].at > w.time) continue;
-      this.audio.thunder(w.thunder[i].power);
-      w.thunder.splice(i, 1);
-    }
-    this.audio.setRain(w.p.rain * w.p.wet * (this.state === 'paused' ? 0.4 : 1));
-  }
-
-  // Attract mode: on the main menu the world slowly cycles through the four
-  // ground zones, each with its full map rising on the board, so the menu
-  // shows off what's ahead. Returns a stand-in for the game state for the
-  // MapView, or null when the real game should be drawn.
-  attractMap(dt) {
-    if (this.state !== 'menu') {
-      this.attract = null;
-      return null;
-    }
-    const w = this.world;
-    const a = this.attract || (this.attract = { t: 0, zone: -1, map: null });
-    const idle = !this.garageOpen && !this.openPanel && !this.settings.reduceMotion;
-    if (idle && !w.transitioning) {
-      a.t += dt;
-      if (a.t > 11) {
-        a.t = 0;
-        w.setZone((w.zone + 1) % 4, { duration: 3.2 });
-      }
-    }
-    const zone = w.transitioning ? w.trans.to : w.zone;
-    if (a.zone !== zone && zone < 4) {
-      a.zone = zone;
-      a.born = w.time;
-      const lay = layoutUpTo(zone, 2, 0, BOARD);
-      const id = (i) => -1 - zone * 1000 - i;
-      a.map = {
-        time: 0,
-        obstacles: lay.walls.map((c, i) => ({ x: c.x, z: c.z, kind: 'wall', zone, id: id(i), solid: false })),
-        gates: lay.gates.map((q, i) => ({ id: id(500 + i), cells: q.cells, axis: q.axis, state: 'off', phase: q.phase })),
-        portals: lay.portals.map((p, i) => ({ id: id(700 + i), key: p.key, a: p.a, b: p.b, activeAt: 1.4 })),
-      };
-    }
-    if (!a.map) return null;
-    // walls rise as the zone's wave sweeps past; gates take turns
-    const age = w.time - a.born;
-    a.map.time = age;
-    for (const o of a.map.obstacles) o.solid = age > 1.4;
-    for (const q of a.map.gates) {
-      const ph = (age / 6 + q.phase) % 1;
-      q.state = age < 2 ? 'off' : ph < 0.42 ? 'on' : ph > 0.85 ? 'warn' : 'off';
-    }
-    return a.map;
-  }
-
-  // Dust (or sparks) where map walls burst up out of the floor.
-  mapDust() {
-    const cols = ['#9be07a', '#e8b07a', '#ff7ae8', '#5ff6ff'];
-    for (const r of this.map.raised) {
-      this.effects.emit(r.x, 0.12, r.z, { count: 5, color: cols[Math.min(3, r.zone)], speed: 1.6, up: 1.4, size: 0.2, life: 0.5, spread: 0.6 });
-    }
-    // a soft tick as a gate starts warning, if the snake is close
-    const g = this.game;
-    for (const gt of g.gates) {
-      if (gt.state === 'warn' && this.lastGateWarn?.[gt.id] !== gt.warnSince) {
-        (this.lastGateWarn || (this.lastGateWarn = {}))[gt.id] = gt.warnSince;
-        const mid = gt.cells[Math.floor(gt.cells.length / 2)];
-        const d = Math.abs(mid.x - g.head.x) + Math.abs(mid.z - g.head.z);
-        if (d < 8 && this.state === 'playing') this.audio.gateWarn(1 - d / 8);
-      }
-    }
   }
 
   // Jetpack flames shed sparks behind the snake while it flies.
@@ -1674,13 +1388,6 @@ class App {
       dt,
     });
     this.jetExhaust(g);
-    this.shatterFx(dt);
-    if (g.chilled && this.state === 'playing' && Math.random() < 0.7) {
-      const hp = this.snake.headPos;
-      this.effects.emit(hp.x + (Math.random() - 0.5) * 5, hp.y + 1.6 + Math.random(), hp.z + (Math.random() - 0.5) * 5, {
-        count: 1, color: '#eafcff', speed: 0.15, up: -0.3, size: 0.11, life: 1.4, gravity: 0.25, spread: 0.2,
-      });
-    }
     this.snake.setRim(this.world.p.rimColor, 0.35 + this.world.p.rimIntensity * 0.25);
     this.updateGhost(gdt);
     if (fast && this.state === 'playing' && Math.random() < 0.8) {
@@ -1701,15 +1408,12 @@ class App {
     const headingYaw = Math.atan2(f.x, f.z);
     this.board.applyPalette(this.world.p);
     this.board.sync(g, this.toWorld, gdt, this.simTime, headingYaw, sky);
-    this.map.sync(this.attractMap(dt) || g, this.toWorld, gdt, this.simTime, this.world.p, rm);
-    this.mapDust();
     const playing = this.state === 'playing' || this.state === 'countdown' || this.state === 'paused';
     this.effects.updateGuide(g, this.toWorld, playing && this.settings.guide && view);
     this.effects.update(gdt);
     const rs = this.post.renderSize;
     const pxScale = rs.y / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
-    this.world.update(dt, { level: this.state === 'menu' ? 0 : g.level, reduceMotion: rm, pxScale, camera: this.camera });
-    this.weatherSounds();
+    this.world.update(dt, { level: this.state === 'menu' ? 0 : g.level, reduceMotion: rm, pxScale });
     this.world.updateWalls(g, dt, this.state === 'playing');
     const food = g.food ? this.toWorld(g.food.x, g.food.z, g.food.y) : null;
     arena.update(dt, this.simTime, this.world.skyAmount, this.snake.headPos, food, g.flying && this.state !== 'menu');
@@ -1748,14 +1452,12 @@ class App {
     const speed = rm ? 0 : Math.max(0, this.speedFx - 0.25) * (view ? 1.3 : 0.45) + this.rushGlow * (view ? 0.5 : 0.15);
     const trans = this.world.transitioning ? 0.5 : 0;
     const slow = 1 - (this.timeScale ?? 1);
-    // Chill: a cool, frosty grade while it lasts
-    this.chillFx = (this.chillFx || 0) + (((g.chilled && this.state !== 'menu' && g.alive) ? 1 : 0) - (this.chillFx || 0)) * Math.min(1, dt * 3);
     P.uBloom.value = pp.bloom + this.rushGlow * 0.18 + this.flashAmt * 0.5;
-    P.uSat.value = pp.sat * (1 - slow * 0.3) * (1 - this.chillFx * 0.28);
+    P.uSat.value = pp.sat * (1 - slow * 0.3);
     P.uContrast.value = pp.contrast;
-    P.uTint.value.copy(pp.tint).lerp(this.chillTint || (this.chillTint = new THREE.Color('#c8ecff')), this.chillFx * 0.35);
+    P.uTint.value.copy(pp.tint);
     P.uLift.value.copy(pp.lift);
-    P.uVignette.value = pp.vignette + this.rushGlow * 0.1 + slow * 0.35 + this.chillFx * 0.12;
+    P.uVignette.value = pp.vignette + this.rushGlow * 0.1 + slow * 0.35;
     P.uSpeed.value = speed;
     P.uLines.value = rm ? 0 : Math.max(0, this.speedFx - 0.2) * (view ? 1.2 : 0.5) + this.rushGlow * 0.6;
     P.uChroma.value = rm ? 0 : this.rushGlow * 0.7 + trans + slow * 0.6;
@@ -1764,25 +1466,8 @@ class App {
     P.uFlashColor.value.copy(this.flashColor);
     P.uTime.value = this.simTime;
     P.uCenter.value.set(0.5, view ? 0.56 : 0.5);
-    this.aimSunRays(pp);
     this.renderer.toneMappingExposure = pp.exposure;
     this.post.render(this.scene, this.camera, { threshold: pp.threshold });
-  }
-
-  // Where the sun is on screen, for the light shafts. They fade out as the
-  // sun goes behind the camera or far off the edge of the screen.
-  aimSunRays(pp) {
-    const sun = this.post.sun;
-    const dir = this.world.sunDir;
-    const fwd = this.camera.getWorldDirection(this.tmpFwd || (this.tmpFwd = new THREE.Vector3()));
-    const facing = fwd.dot(dir);
-    const v = (this.tmpSunV || (this.tmpSunV = new THREE.Vector3())).copy(this.camera.position).addScaledVector(dir, 400).project(this.camera);
-    const off = Math.max(Math.abs(v.x), Math.abs(v.y));
-    const k = THREE.MathUtils.smoothstep(facing, 0.02, 0.4) * (1 - THREE.MathUtils.smoothstep(off, 1.15, 2.4));
-    sun.uv.set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5);
-    sun.color.copy(this.world.p.sunColor);
-    sun.amount = pp.rays * k;
-    sun.spread = 6.5 + 4 * (1 - this.world.p.sunSize / 3);
   }
 
   // Frame-time driven resolution scaling, then quality stepping (Auto only).
