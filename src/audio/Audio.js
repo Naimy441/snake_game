@@ -264,6 +264,45 @@ export class AudioEngine {
     this.voice(midi(86), { wave: 0.125, dur: 0.05, gain: 0.025 + 0.03 * near });
   }
 
+  // Thunder: a sharp crack, then a long rolling rumble.
+  thunder(power = 1) {
+    this.noiseHit({ dur: 0.3, gain: 0.16 * power, freq: 2200, type: 'highpass', sweep: 0.35 });
+    this.noiseHit({ at: 0.04, dur: 2.8, gain: 0.32 * power, freq: 170, type: 'lowpass', sweep: 0.45, q: 0.7 });
+    this.noiseHit({ at: 0.45, dur: 2.2, gain: 0.2 * power, freq: 95, type: 'lowpass', sweep: 0.7, q: 0.6 });
+  }
+
+  // Looping weather bed: rain hiss with a soft low patter. amount 0..1.
+  setRain(amount) {
+    if (!this.ctx) return;
+    const c = this.ctx;
+    if (!this.rainBed) {
+      const src = c.createBufferSource();
+      src.buffer = this.noise;
+      src.loop = true;
+      const hp = c.createBiquadFilter();
+      hp.type = 'bandpass';
+      hp.frequency.value = 3200;
+      hp.Q.value = 0.4;
+      const lp = c.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 420;
+      const gHi = c.createGain();
+      const gLo = c.createGain();
+      gHi.gain.value = 0;
+      gLo.gain.value = 0;
+      src.connect(hp).connect(gHi).connect(this.sfx);
+      src.connect(lp).connect(gLo).connect(this.sfx);
+      src.start();
+      this.rainBed = { gHi, gLo, level: 0 };
+    }
+    const r = this.rainBed;
+    if (Math.abs(amount - r.level) < 0.01) return;
+    r.level = amount;
+    const t = c.currentTime;
+    r.gHi.gain.setTargetAtTime(amount * 0.085, t, 0.4);
+    r.gLo.gain.setTargetAtTime(amount * 0.07, t, 0.4);
+  }
+
   obstacleWarn() {
     this.voice(midi(57), { wave: 0.5, dur: 0.09, gain: 0.07 });
     this.voice(midi(57), { wave: 0.5, at: 0.14, dur: 0.09, gain: 0.07 });
