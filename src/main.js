@@ -1369,7 +1369,7 @@ class App {
       }
       this.lastHud.powers = key;
       $('hud-powers').innerHTML = on
-        .map((p) => `<div class="pw ${p.k}" id="pw-${p.k}"><span class="ic">${POWER_ICONS[p.k]}</span>${POWER_NAMES[p.k]}${p.left != null ? ` <span class="left" id="pw-${p.k}-t"></span><i id="pw-${p.k}-bar"></i>` : ''}</div>`)
+        .map((p) => `<div class="pw ${p.k}" id="pw-${p.k}" title="${POWER_NAMES[p.k]}"><span class="ic">${POWER_ICONS[p.k]}</span><span class="nm">${POWER_NAMES[p.k]}</span>${p.left != null ? ` <span class="left" id="pw-${p.k}-t"></span><i id="pw-${p.k}-bar"></i>` : ''}</div>`)
         .join('');
       for (const k of ['magnet', 'chill']) {
         delete this.lastHud[`pw-${k}-t`];

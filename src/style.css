@@ -361,6 +361,11 @@ button { font-family: var(--display); }
 @keyframes pwIn { from { transform: scale(1.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 .reduce-motion .pw { animation: none; }
 .touch-device .powers { bottom: calc(158px + var(--safe-bottom)); left: 10px; }
+@media (max-width: 720px) {
+  .powers { gap: 5px; }
+  .pw { padding: 4px 8px 5px 6px; font-size: 12px; }
+  .pw .nm { display: none; }
+}
 
 /* ---------- touch ---------- */
 #touch {
