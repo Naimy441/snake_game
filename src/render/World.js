@@ -9,6 +9,8 @@ import { makeGrassDetail, makeCloudTexture, makeWindowTexture, makeNoiseTexture 
 import { Heavens } from './Heavens.js';
 import { SkyArena } from './SkyArena.js';
 import { ZONE_STARTS, MAX_LEVEL, SKY_SIZE } from '../game/SnakeGame.js';
+import { Rain, Bolt } from './Rain.js';
+import { ATMOS } from './atmos.js';
 
 const smooth = (t) => t * t * (3 - 2 * t);
 const clamp01 = (t) => Math.min(1, Math.max(0, t));
@@ -44,10 +46,20 @@ export class World {
     this.ambient = new Ambient(520);
     this.scene.add(this.ambient.group);
     // Sunset Heavens: cloud sea + sunset sun, and the laser flight box
-    this.heavens = new Heavens(makeNoiseTexture());
+    this.noiseTex = makeNoiseTexture();
+    ATMOS.uCloudTex.value = this.noiseTex;
+    this.heavens = new Heavens(this.noiseTex);
     this.scene.add(this.heavens.group);
     this.skyArena = new SkyArena(SKY_SIZE);
     this.scene.add(this.skyArena.group);
+    // weather: rain (and data rain), lightning over the sea
+    this.rain = new Rain(1400);
+    this.scene.add(this.rain.mesh);
+    this.bolt = new Bolt();
+    this.scene.add(this.bolt.mesh);
+    this.flash = 0; // lightning flash, 0..1
+    this.nextStrike = 4;
+    this.thunder = []; // pending thunder: { at, power } for the app to play
 
     this.buildLights();
     this.buildWave();
@@ -151,8 +163,9 @@ export class World {
     }
   }
 
-  setParticleBudget(n) {
+  setParticleBudget(n, rain = 1400) {
     this.ambient.setBudget(n);
+    this.rain.setBudget(rain);
   }
 
   // Jump or sweep to a zone.
@@ -206,7 +219,11 @@ export class World {
     this.rim.position.set(-sun.x * 60, 25, -sun.z * 60);
     this.hemi.color.copy(p.hemiSky);
     this.hemi.groundColor.copy(p.hemiGround);
-    this.hemi.intensity = p.hemiIntensity;
+    this.hemi.intensity = p.hemiIntensity + this.flash * 2.2;
+    this.sky.uniforms.uFlash.value = this.flash;
+    ATMOS.uCloudAmt.value = p.cloudShadow;
+    ATMOS.uFlashLight.value = this.flash * 0.9;
+    this.rain.apply(p);
     this.scene.fog.color.copy(p.fogColor);
     this.scene.fog.near = p.fogNear;
     this.scene.fog.far = p.fogFar;
@@ -243,11 +260,27 @@ export class World {
       lift: p.lift,
       exposure: p.exposure,
       vignette: p.vignette,
+      rays: p.rays,
     };
   }
 
-  update(dt, { level = 0, reduceMotion = false, pxScale = 400 } = {}) {
+  update(dt, { level = 0, reduceMotion = false, pxScale = 400, camera = null } = {}) {
     this.time += dt;
+    // cloud shadows drift with the wind
+    ATMOS.uCloudOff.value.x += dt * 0.0042;
+    ATMOS.uCloudOff.value.y += dt * 0.0026;
+    // thunderstorm: a strike every few seconds, thunder a moment later
+    this.flash = Math.max(0, this.flash - dt * 3.2);
+    if (this.p.lightning > 0.5) {
+      this.nextStrike -= dt;
+      if (this.nextStrike <= 0) {
+        this.nextStrike = 5 + Math.random() * 9;
+        this.bolt.strike();
+        this.flash = reduceMotion ? 0.35 : 1;
+        this.thunder.push({ at: this.time + 0.25 + Math.random() * 0.9, power: 0.6 + Math.random() * 0.4 });
+      }
+    } else this.nextStrike = Math.max(this.nextStrike, 2.5);
+    this.bolt.update(dt);
     const zoneStart = ZONE_STARTS[this.trans ? this.trans.to : this.zone];
     const zoneEnd = ZONE_STARTS[(this.trans ? this.trans.to : this.zone) + 1] ?? MAX_LEVEL + 1;
     const lfTarget = clamp01((level - zoneStart) / Math.max(1, zoneEnd - zoneStart - 1));
@@ -288,6 +321,7 @@ export class World {
     this.scenery.update(dt, this.time, reduceMotion);
     this.ambient.update(dt, this.time, pxScale);
     this.heavens.update(this.time);
+    if (camera) this.rain.update(this.time, camera);
   }
 
   updateWalls(game, dt, active) {
@@ -297,7 +331,7 @@ export class World {
   // Run fn with every zone (and the wave) visible, then restore.
   withAllZones(fn) {
     const vis = this.scenery.zones.map((z) => z.group.visible);
-    const extra = [this.heavens.group, this.skyArena.group, this.skyArena.line, this.skyArena.upLine];
+    const extra = [this.heavens.group, this.skyArena.group, this.skyArena.line, this.skyArena.upLine, this.rain.mesh, this.bolt.mesh];
     const extraVis = extra.map((o) => o.visible);
     for (const z of this.scenery.zones) z.group.visible = true;
     extra.forEach((o) => (o.visible = true));

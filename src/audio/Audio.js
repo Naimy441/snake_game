@@ -218,6 +218,121 @@ export class AudioEngine {
     [0, 4, 7, 12, 16, 19, 24, 28].forEach((n, i) => this.voice(midi(72 + n), { wave: 0.25, at: 0.5 + i * 0.06, dur: 0.24, gain: 0.07 }));
   }
 
+  // Zone maps: a deep rumble as walls start rising (pitched per zone), a
+  // softer one as they sink, a shimmer when a map's portals and gates appear.
+  wallsRise(zone = 0) {
+    const base = [55, 49, 62, 70][zone] || 55;
+    this.voice(base, { wave: 'sine', dur: 0.55, gain: 0.22, slide: 1.6 });
+    this.noiseHit({ dur: 0.5, gain: 0.1, freq: 220, type: 'lowpass', sweep: 2 });
+    if (zone >= 2) this.voice(midi(84), { wave: 0.125, at: 0.12, dur: 0.12, gain: 0.04 });
+  }
+
+  wallsSink() {
+    this.voice(90, { wave: 'sine', dur: 0.7, gain: 0.16, slide: 0.45 });
+    this.noiseHit({ dur: 0.6, gain: 0.08, freq: 500, type: 'lowpass', sweep: 0.3 });
+  }
+
+  mapBlueprint() {
+    [0, 7, 12, 19].forEach((n, i) => this.voice(midi(76 + n), { wave: 'sine', at: i * 0.05, dur: 0.35, gain: 0.05, release: 0.3 }));
+  }
+
+  // Into a portal: a falling whoosh; out of the other side: a rising one.
+  portalIn(pan = 0) {
+    this.noiseHit({ dur: 0.22, gain: 0.16, freq: 2600, sweep: 0.25, q: 2 });
+    this.voice(midi(88), { wave: 'sine', dur: 0.2, gain: 0.07, slide: 0.5, pan });
+  }
+
+  portalOut(pan = 0) {
+    this.noiseHit({ dur: 0.25, gain: 0.13, freq: 500, sweep: 5, q: 2 });
+    this.voice(midi(76), { wave: 'sine', dur: 0.24, gain: 0.08, slide: 2, pan });
+    this.voice(midi(95), { wave: 0.125, at: 0.06, dur: 0.1, gain: 0.04, pan });
+  }
+
+  portalOpen() {
+    this.voice(midi(60), { wave: 'sine', dur: 0.8, gain: 0.07, slide: 4, vibrato: 0.02 });
+    this.noiseHit({ dur: 0.7, gain: 0.05, freq: 3000, type: 'bandpass', sweep: 0.3, q: 3 });
+  }
+
+  // Laser gate switching on; quieter the further away it is.
+  gateOn(near = 1, pan = 0) {
+    const g = 0.03 + 0.07 * near;
+    this.voice(midi(50), { wave: 'sawtooth', dur: 0.18, gain: g, slide: 2.2, pan });
+    this.noiseHit({ dur: 0.12, gain: g * 0.9, freq: 4200, type: 'highpass' });
+  }
+
+  gateWarn(near = 1) {
+    this.voice(midi(86), { wave: 0.125, dur: 0.05, gain: 0.025 + 0.03 * near });
+  }
+
+  // Power-ups: a twinkle when one appears, a signature when picked up.
+  powerSpawn() {
+    [0, 7, 12, 19].forEach((n, i) => this.voice(midi(84 + n), { wave: 'sine', at: i * 0.045, dur: 0.18, gain: 0.05 }));
+  }
+
+  powerUp(kind) {
+    if (kind === 'shield') {
+      this.noiseHit({ dur: 0.35, gain: 0.12, freq: 900, sweep: 6, q: 1.5 });
+      [0, 4, 7, 12, 16].forEach((n, i) => this.voice(midi(67 + n), { wave: 0.25, at: 0.05 + i * 0.04, dur: 0.3, gain: 0.08, release: 0.25 }));
+    } else if (kind === 'magnet') {
+      this.voice(110, { wave: 'sawtooth', dur: 0.5, gain: 0.07, slide: 2.5, vibrato: 0.08 });
+      [0, 5, 10].forEach((n, i) => this.voice(midi(76 + n), { wave: 0.5, at: 0.08 + i * 0.06, dur: 0.16, gain: 0.07 }));
+    } else {
+      [24, 19, 16, 12, 7].forEach((n, i) => this.voice(midi(76 + n), { wave: 'sine', at: i * 0.05, dur: 0.4, gain: 0.06, release: 0.35 }));
+      this.noiseHit({ dur: 0.8, gain: 0.06, freq: 7000, type: 'highpass' });
+    }
+  }
+
+  // The shield takes a crash: glass shatters, a bell rings out.
+  shieldBreak() {
+    this.noiseHit({ dur: 0.5, gain: 0.26, freq: 5200, type: 'highpass', sweep: 0.6 });
+    this.noiseHit({ dur: 0.25, gain: 0.2, freq: 400, type: 'lowpass' });
+    [0, 7, 16, 24].forEach((n, i) => this.voice(midi(79 + n), { wave: 'sine', at: 0.02 + i * 0.03, dur: 0.7, gain: 0.07, release: 0.6 }));
+  }
+
+  powerEnd() {
+    this.voice(midi(79), { wave: 'sine', dur: 0.14, gain: 0.05 });
+    this.voice(midi(72), { wave: 'sine', at: 0.12, dur: 0.22, gain: 0.05 });
+  }
+
+  // Thunder: a sharp crack, then a long rolling rumble.
+  thunder(power = 1) {
+    this.noiseHit({ dur: 0.3, gain: 0.16 * power, freq: 2200, type: 'highpass', sweep: 0.35 });
+    this.noiseHit({ at: 0.04, dur: 2.8, gain: 0.32 * power, freq: 170, type: 'lowpass', sweep: 0.45, q: 0.7 });
+    this.noiseHit({ at: 0.45, dur: 2.2, gain: 0.2 * power, freq: 95, type: 'lowpass', sweep: 0.7, q: 0.6 });
+  }
+
+  // Looping weather bed: rain hiss with a soft low patter. amount 0..1.
+  setRain(amount) {
+    if (!this.ctx) return;
+    const c = this.ctx;
+    if (!this.rainBed) {
+      const src = c.createBufferSource();
+      src.buffer = this.noise;
+      src.loop = true;
+      const hp = c.createBiquadFilter();
+      hp.type = 'bandpass';
+      hp.frequency.value = 3200;
+      hp.Q.value = 0.4;
+      const lp = c.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 420;
+      const gHi = c.createGain();
+      const gLo = c.createGain();
+      gHi.gain.value = 0;
+      gLo.gain.value = 0;
+      src.connect(hp).connect(gHi).connect(this.sfx);
+      src.connect(lp).connect(gLo).connect(this.sfx);
+      src.start();
+      this.rainBed = { gHi, gLo, level: 0 };
+    }
+    const r = this.rainBed;
+    if (Math.abs(amount - r.level) < 0.01) return;
+    r.level = amount;
+    const t = c.currentTime;
+    r.gHi.gain.setTargetAtTime(amount * 0.085, t, 0.4);
+    r.gLo.gain.setTargetAtTime(amount * 0.07, t, 0.4);
+  }
+
   obstacleWarn() {
     this.voice(midi(57), { wave: 0.5, dur: 0.09, gain: 0.07 });
     this.voice(midi(57), { wave: 0.5, at: 0.14, dur: 0.09, gain: 0.07 });

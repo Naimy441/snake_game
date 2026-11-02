@@ -2,8 +2,13 @@
 
 Classic Snake reimagined as a fast, cinematic 3D browser game. Race a scaly
 serpent around a floating checkered island, grab spinning crystal apples,
-chase down a golden mouse, string together orb chains and hit boost pads, while the world
-transforms around you through five zones. In the last zone the snake straps on a jetpack and flies
+chase down a golden mouse, string together orb chains, hit boost pads and
+grab power-ups, while the world transforms around you through five zones.
+Every ground zone has its own map that builds up as you level: a hedge
+garden, sandstone canyon ridges, a neon city with subway portals, and a
+data core fenced with laser gates. Weather and light change with the zones:
+cloud shadows drifting over the meadow, light shafts through the canyon,
+rain, puddles and lightning over the neon city. In the last zone the snake straps on a jetpack and flies
 through a laser-fenced box of sky at sunset, in full 3D. Play from overhead, from a chase camera behind the head,
 or in first person, and switch at any moment: every view plays the same game.
 
@@ -73,9 +78,68 @@ camera, Start pauses, bumpers turn left/right.
   14 seconds.
 - **Boost pad:** from zone 2 on. Driving over one gives a free burst of speed
   and double points, then it reappears somewhere else.
-- **Pillars:** from Golden Canyon on, some level-ups raise pillars on the board. A pulsing red ring
-  marks each spot for a couple of seconds first. Pillars never rise under the
-  snake and never wall off part of the board.
+- **Pillars:** in each later zone's second level, a pillar rises somewhere
+  random on top of the zone's map. A pulsing red ring marks the spot for a
+  couple of seconds first. Pillars never rise under the snake or right in
+  front of it, and never wall off part of the board.
+
+### Power-ups
+
+From the fourth apple on, eating an apple sometimes brings out a power-up
+(one at a time). It floats in a glowing bubble, blinks when it's about to
+go, and fades after 11 seconds. Each is worth 25 points.
+
+- **Shield:** takes one crash for you: a wall, your own body, a pillar, a
+  laser gate or the laser fence. Instead of dying, the snake swerves to the
+  safe side with the most room (and the longest clear run ahead); the hex
+  bubble around its head bursts. If there is nowhere to swerve, the shield
+  can't help.
+- **Magnet:** for 10 seconds the apple (and a prism) within 7 cells slides
+  one cell towards your head every move, around the snake and the walls.
+- **Chill:** for 8 seconds you move much slower (the move time is 1.45x),
+  with a frosty colour grade and falling snow. A breather at top speed.
+
+Active power-ups show above the Rush bar with the time they have left.
+
+### Zone maps
+
+Each ground zone has a handcrafted map that grows over its three levels.
+A run picks one of the square's eight symmetries (rotations and mirror
+images) for each zone, so the same map turns up in different orientations.
+
+- **Hedge Garden** (Emerald Coast): the first level stays wide open, then
+  four hedge blocks grow in, then corner hedges and a hedge cross in the
+  middle.
+- **Canyon Ridges** (Golden Canyon): two sandstone ridges split the board
+  into three bands, joined through gaps that narrow at the next level; a
+  mesa and spires follow.
+- **Neon City** (Neon Night): four city blocks of neon towers that grow
+  wider, with a pair of subway portals between opposite corners and a
+  second pair later.
+- **Data Core** (Cyber Overdrive): a core block, four emitter towers and two
+  laser gates that switch on in turn, then edge portals and firewalls
+  beside the core.
+
+How they behave:
+
+- **New walls** show as glowing holograms first, then rise out of the floor
+  in a wave from the centre (about 2 to 3.5 seconds after they appear). A
+  wall never rises onto the snake or onto the next three cells in front of
+  its head: it waits until you're clear. When a new zone arrives, the old
+  map (and its pillar) sinks back into the floor.
+- **Portals** come in colour-matched pairs. Steer into one and the snake
+  dives into it, then comes out of its partner on the next move, still
+  heading the same way (turns you press meanwhile wait until you're out).
+  Coming out onto your own body is deadly. New portals take a moment to
+  open. Nothing spawns on a portal and the golden mouse avoids them.
+- **Laser gates** are lines of laser between two walls. They cycle: off,
+  a flickering warning, then on for 2.6 seconds. A gate never switches on
+  while the snake is on it or about to cross it; it keeps warning until
+  you're clear. Crossing an active gate is deadly.
+- Anything that sat on a cell a new map claims (an apple, a prism, a chain,
+  a boost pad) moves elsewhere. Every map is checked to stay connected,
+  with no dead ends, in every orientation and at every stage (with all its
+  gates on).
 
 ### Scoring, levels and zones
 
@@ -89,7 +153,7 @@ camera, Start pauses, bumpers turn left/right.
   the next zone.
 - **Zones:** every 3 speed levels the world transforms. A glowing wave sweeps
   out from the arena, the old scenery shrinks away, new scenery grows in, and
-  the sky, light, water and board all change: Emerald Coast, Golden
+  the sky, light, weather, water, board and map all change: Emerald Coast, Golden
   Canyon, Neon Night, Cyber Overdrive, then Sunset Heavens. The visuals get
   more intense with each level inside a zone too.
 - **Slow motion on level-ups:** while the level-up banner or a new zone's
@@ -100,8 +164,10 @@ camera, Start pauses, bumpers turn left/right.
 - **Level select:** the start menu has a "Start at" picker. Once you have
   reached a level in any run, you can start a new run straight from it (or
   from any lower level) with the ‹ › buttons or Left/Right on the menu. The run
-  starts with that level's speed, zone, apples-to-next-level and pillars.
-- At game over you get a rank from D to S.
+  starts with that level's speed, zone, apples-to-next-level and the zone's
+  map so far, in an orientation that keeps the starting lane clear.
+- At game over you get a rank from D to S, and the snake shatters into
+  fragments of its skin, from the head down to the tail.
 
 ### Sunset Heavens: flying in 3D
 
@@ -171,14 +237,29 @@ little so it can glide smoothly. A few things keep that from feeling laggy:
 - **Countdown:** keys pressed during READY/GO keep only your latest turn, so
   mashing can't stack up moves for the start.
 
+### Weather and light
+
+- **Emerald Coast** and **Golden Canyon:** cloud shadows drift across the
+  board, the island, the scenery, the walls and the snake.
+- **Light shafts:** wherever the sun is in view, its light streams through
+  the gaps in the scenery (strongest with Golden Canyon's low sun).
+- **Neon Night:** it pours. Rain streaks around the camera, the board is wet
+  with glossy puddles and rings rippling out of them, and every few seconds
+  lightning flashes across the sky and lights up the scene, followed by
+  rolling thunder. You hear the rain too.
+- **Cyber Overdrive:** slow, long streaks of cyan "data rain".
+- The board's tiles are bevelled, so the light rolls off their edges.
+
 ### Ghost guide
 
 Turn on the **ghost guide** (G, the button on the main menu, or Settings)
 to race a perfect bot. A translucent ghost snake plays the same board
 alongside you: it takes the shortest safe route to each pickup, grabbing
-chain orbs in order and prisms before they vanish, then the apple. It steers
-around pillars (even ones still in their warning phase), never traps itself
-on its own tail, ignores the golden mouse and fires its Rush only when the
+chain orbs in order and prisms before they vanish, then the apple. It dives
+through portals when that's the shortest way, stays off laser gates and
+steers around walls and pillars (even ones still in their warning phase),
+never traps itself
+on its own tail, ignores the golden mouse and power-ups, and fires its Rush only when the
 meter carries it all the way to the next pickup, so it scores double. Once
 it has collected everything on the board it waits in place until you eat
 the apple, so it is never more than one apple ahead. It is a ghost: it never
@@ -191,25 +272,31 @@ Turning it on mid-run starts it from your snake's current position.
 Open the **Garage** from the main menu (or after a run) to customise your
 snake. The camera swings in close for a live preview.
 
-- **17 skins:** Viper, Coral, Python, Emerald Boa, Tiger, Candy Cane, Glacier,
+- **19 skins:** Viper, Coral, Python, Emerald Boa, Tiger, Candy Cane, Glacier,
   plus unlockables: Neon Runner and Circuit (glowing light lines), Magma
   (molten cracks that pulse), Golden King, Chrome (mirror metal), Galaxy
   (twinkling stars), Prism (an animated rainbow), Dragon, Phoenix (sunset
-  feathers, from reaching Sunset Heavens) and Phantom.
+  feathers, from reaching Sunset Heavens), Aegis (hexagonal armour plates,
+  from surviving 3 crashes with a shield), Wormhole (a swirl of deep space,
+  from diving through 15 portals) and Phantom.
 - **9 accessories:** shades, top hat, party hat, horns, bow, flower, plus an
   unlockable crown and halo.
 - Locked items show what unlocks them, with your progress (for example
   "Catch 3 golden mice (1 / 3)"). Unlocks come from your best score and
-  lifetime totals: runs played, apples eaten, mice caught, chains completed
-  and the furthest zone reached. New unlocks are announced on the results
+  lifetime totals: runs played, apples eaten, mice caught, chains completed,
+  crashes survived with a shield, portals dived through and the furthest
+  zone reached. New unlocks are announced on the results
   screen. You can preview a locked item, but it only equips once unlocked.
 
 ### Sound
 
 There is no music, only sound effects, all synthesised with Web Audio at
 runtime (no audio files): chimes that climb with the combo, chain and prism
-arpeggios, the boost whoosh, level-up and zone fanfares, and a
-jetpack-ignition roar at lift-off.
+arpeggios, the boost whoosh, level-up and zone fanfares, a
+jetpack-ignition roar at lift-off, the rumble of map walls rising and
+sinking, whooshes into and out of portals, laser gates zapping on (louder
+the closer they are), power-up signatures and the shield shattering, and
+in Neon Night the hiss of rain with thunder after each lightning strike.
 
 ### Chase and first-person aids
 
@@ -241,8 +328,19 @@ The renderer is built to stay smooth on laptops with high-DPI screens:
   creeps back up when there is headroom. Auto quality also steps down a tier
   if even the lowest scale is too slow.
 - **Post-processing:** one fused pass (bloom, tone mapping, colour grade,
-  vignette, speed blur and speed lines) with a cheap dual-filter bloom
-  instead of a multi-pass bloom chain.
+  vignette, speed blur, speed lines and a little film grain) with a cheap
+  dual-filter bloom instead of a multi-pass bloom chain. The light shafts
+  are one more pass at a quarter of the resolution, which reads the scene's
+  depth to tell sky from scenery (24 samples on High, 14 on Medium, off on
+  Low).
+- **Weather on the GPU:** rain streaks are a single instanced draw animated
+  entirely in the vertex shader (1,400 drops on High, 900 on Medium, 450 on
+  Low); puddle ripples are computed in the board's shader; cloud shadows
+  are one texture lookup in each lit material.
+- **Maps:** every zone's walls are one instanced mesh (detail like tower
+  windows and circuit traces is computed in the shader), laser gates are
+  one instanced draw, and portals are a fixed pool, so a map rising
+  mid-game never adds draw calls per wall or compiles a shader.
 - **No stalls on zone changes:** the light count never changes (food glows
   are fake floor glows, not lights), and at startup, behind the loading
   screen, every shader is compiled and one full frame is drawn with every
@@ -266,7 +364,7 @@ scale and draw calls.
 ## Development
 
 ```bash
-npm test           # game-rule unit tests (node:test)
+npm test           # game-rule unit tests (node:test): rules, maps, portals, gates, power-ups, the ghost
 npm run build
 npm run test:e2e   # plays the built game in headless Chromium, saves screenshots to test-results/
 npm run bench      # rough frame-time benchmark of the built game (emulated Retina, High quality)
@@ -282,9 +380,13 @@ numbers aren't real frame rates; it's for before/after comparisons.
 
 ```
 src/
-  game/SnakeGame.js      pure game state and rules: obstacles, chains, prey, pads, zones
-  game/GhostBot.js       the ghost guide: a perfect-play bot (safe pathfinding, Rush timing)
-  render/World.js        orchestrates sky, sea, island, zone scenery, lighting and zone transitions
+  game/SnakeGame.js      pure game state and rules: maps, portals, gates, power-ups, chains, prey, pads, zones
+  game/maps.js           the zone maps (ASCII layouts, stages, symmetries)
+  game/GhostBot.js       the ghost guide: a perfect-play bot (safe pathfinding through portals, Rush timing)
+  render/World.js        orchestrates sky, sea, island, zone scenery, weather, lighting and zone transitions
+  render/MapView.js      the zone maps: themed walls, hologram warnings, portals and laser gates
+  render/Rain.js         GPU rain streaks and the lightning bolt
+  render/atmos.js        shared cloud-shadow and lightning hook for every lit material
   render/zones.js        the five zones' palettes and post-processing looks
   render/Heavens.js      Sunset Heavens backdrop: the sea of clouds and the striped sunset sun
   render/SkyArena.js     the laser flight box: edges, force-field walls, floor grid, depth cues
@@ -293,14 +395,15 @@ src/
   render/Sky.js          sky dome (sun, stars, cyber grid) and instanced clouds
   render/Water.js        ocean shader and waterfalls
   render/Ambient.js      GPU-animated ambient particles and birds
-  render/Post.js         fused post-processing pipeline with dynamic render scale
+  render/Post.js         fused post-processing pipeline with light shafts and dynamic render scale
   render/materials.js    reveal, checker and board shaders on standard materials
   render/geo.js          noise and geometry helpers, prop merging
-  render/SnakeView.js    the animated snake (dynamic 3D tube mesh, modelled head, skins, boost aura, jetpack)
+  render/SnakeView.js    the animated snake (dynamic 3D tube mesh, modelled head, skins, boost aura,
+                         jetpack, shield bubble, swallow bulges, death shatter)
   render/accessories.js  hats, horns, shades and other head accessories
   skins.js               skin patterns, accessories and their unlock rules
-  render/SnakePath.js    smooth path through grid cells with rounded corners
-  render/FoodView.js     crystal apples, prisms, orb chains and the golden mouse
+  render/SnakePath.js    smooth path through grid cells with rounded corners (and dives through portals)
+  render/FoodView.js     crystal apples, prisms, orb chains, the golden mouse and power-ups
   render/BoardObjects.js pillars with warnings, boost pads and the sky's boost rings
   render/Effects.js      particles, shockwaves, path guide
   render/CameraRig.js    orbit / garage / overhead / chase / first-person cameras and blending

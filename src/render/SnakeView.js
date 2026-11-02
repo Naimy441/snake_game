@@ -43,6 +43,24 @@ void main(){
   gl_FragColor = vec4(uColor * (0.85 + 1.4 * f), a);
 }`;
 
+// Shield bubble: a hexagon-tiled fresnel shell with a wave running over it.
+const SHIELD_VS = `varying vec3 vN; varying vec3 vV; varying vec2 vUv;
+void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`;
+const SHIELD_FS = `uniform vec3 uColor; uniform float uAmt; uniform float uTime; varying vec3 vN; varying vec3 vV; varying vec2 vUv;
+float hexD(vec2 p){ p = abs(p); return max(dot(p, vec2(0.5, 0.8660254)), p.x); }
+void main(){
+  vec2 uv = vUv * vec2(14.0, 7.0);
+  vec2 r = vec2(1.0, 1.7320508); vec2 hh = r * 0.5;
+  vec2 a = mod(uv, r) - hh; vec2 b = mod(uv - hh, r) - hh;
+  vec2 gv = dot(a, a) < dot(b, b) ? a : b;
+  vec2 id = uv - gv;
+  float edge = smoothstep(0.38, 0.47, hexD(gv));
+  float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.2);
+  float wave = 0.5 + 0.5 * sin(uTime * 4.0 - id.y * 0.9 + id.x * 0.3);
+  float alpha = (f * 0.6 + edge * (0.12 + 0.4 * wave) * (0.35 + f)) * uAmt;
+  gl_FragColor = vec4(uColor * alpha * 1.7, alpha);
+}`;
+
 // Standard material plus: a fresnel rim light, per-vertex glow (aGlow, in the
 // surface colour) and skin animations (rainbow hue cycling, pulsing or
 // flowing glow) driven by the distance along the body (uv.x).
@@ -86,7 +104,7 @@ export class SnakeView {
     this.path = new SnakePath(maxCells + 4);
     this.radial = radial;
     this.maxRings = Math.ceil((maxCells + 2) / STEP) + 4;
-    this.sample = new Float32Array(6);
+    this.sample = new Float32Array(7);
     this.headPos = new THREE.Vector3();
     this.headDir = new THREE.Vector3(0, 0, -1);
     this.headUp = new THREE.Vector3(0, 1, 0);
@@ -98,6 +116,14 @@ export class SnakeView {
     this.tmpM = new THREE.Matrix4();
     this.travel = 0;
     this.wiggle = 1;
+    this.bulges = []; // swallowed food travelling down the body: { d, size }
+    this.dissolve = -1; // death: distance the shatter wave has run (-1: off)
+    this.dissolveSpeed = 14;
+    this.front = new THREE.Vector3(); // where the shatter wave is now
+    this.frontOn = false;
+    this.chomp = 0;
+    this.blink = 0;
+    this.nextBlink = 2 + Math.random() * 3;
 
     const R = radial;
     const vCount = this.maxRings * (R + 1);
@@ -181,6 +207,7 @@ export class SnakeView {
     this.group.add(this.aura);
 
     this.buildHead(scaleMap);
+    this.buildPowerFx();
     this.buildJetpack();
     this.applySkin(skin);
     this.setAccessory(accessory);
@@ -279,6 +306,65 @@ export class SnakeView {
     this.aura.visible = false;
     this.group.remove(this.jetpack);
     this.jetpack = null;
+  }
+
+  // Power-up effects around the head: the shield bubble and magnet rings.
+  buildPowerFx() {
+    this.shieldU = { uColor: { value: new THREE.Color('#5aa6ff') }, uAmt: { value: 0 }, uTime: { value: 0 } };
+    this.shieldMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.66, 36, 22),
+      new THREE.ShaderMaterial({ uniforms: this.shieldU, vertexShader: SHIELD_VS, fragmentShader: SHIELD_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })
+    );
+    this.shieldMesh.scale.set(1, 0.8, 1.18);
+    this.shieldMesh.position.set(0, -0.02, 0.02);
+    this.shieldMesh.visible = false;
+    this.shieldMesh.renderOrder = 6;
+    this.head.add(this.shieldMesh);
+    this.shieldAmt = 0;
+    this.shieldPop = -1;
+    this.magnetRing = new THREE.Group();
+    const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff4fd8').multiplyScalar(1.8), transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false });
+    for (let i = 0; i < 2; i++) {
+      const r = new THREE.Mesh(new THREE.TorusGeometry(0.62 + i * 0.12, 0.018, 6, 56), ringMat);
+      r.rotation.x = Math.PI / 2;
+      this.magnetRing.add(r);
+    }
+    this.magnetRing.visible = false;
+    this.magnetMat = ringMat;
+    this.head.add(this.magnetRing);
+    this.magnetAmt = 0;
+  }
+
+  // The shield took a hit: it bursts outwards and fades.
+  popShield() {
+    this.shieldPop = 0;
+  }
+
+  updatePowerFx(game, time, dt) {
+    const want = game.shield > 0 && this.dissolve < 0 ? 1 : 0;
+    this.shieldAmt += (want - this.shieldAmt) * Math.min(1, dt * 6);
+    let amt = this.shieldAmt * (0.8 + 0.2 * Math.sin(time * 5));
+    let sc = 1;
+    if (this.shieldPop >= 0) {
+      this.shieldPop += dt * 2.4;
+      sc = 1 + this.shieldPop * 1.4;
+      amt = Math.max(0, 1 - this.shieldPop) * 1.6;
+      if (this.shieldPop >= 1) this.shieldPop = -1;
+    }
+    this.shieldMesh.visible = amt > 0.01;
+    this.shieldMesh.scale.set(sc, 0.8 * sc, 1.18 * sc);
+    this.shieldU.uAmt.value = amt;
+    this.shieldU.uTime.value = time;
+    // magnet: two rings spin around the head, flickering as it runs out
+    const left = (game.magnetUntil - game.time) / 1000;
+    const on = game.magnetized && this.dissolve < 0 ? (left < 1.6 ? (Math.floor(time * 8) % 2 ? 0.3 : 1) : 1) : 0;
+    this.magnetAmt += (on - this.magnetAmt) * Math.min(1, dt * 8);
+    this.magnetRing.visible = this.magnetAmt > 0.01;
+    this.magnetMat.opacity = 0.8 * this.magnetAmt;
+    this.magnetRing.children[0].rotation.z = time * 3;
+    this.magnetRing.children[1].rotation.z = -time * 2.2;
+    this.magnetRing.position.y = Math.sin(time * 4) * 0.05;
+    this.magnetRing.scale.setScalar(0.92 + 0.08 * Math.sin(time * 9));
   }
 
   // The jetpack for Sunset Heavens: twin tanks on a harness around the body,
@@ -390,6 +476,31 @@ export class SnakeView {
     this.jetBack.set(0, 0, -1).applyQuaternion(jp.quaternion);
   }
 
+  // A lump runs down the body after eating (bigger for prisms and mice).
+  swallow(size = 0.32) {
+    this.bulges.push({ d: 0.35, size });
+    this.chomp = 1;
+  }
+
+  // Death: the body breaks apart in a wave from the head to the tail.
+  shatter(length) {
+    this.dissolve = 0;
+    this.dissolveSpeed = Math.max(12, length / 0.75);
+  }
+
+  resetFx() {
+    this.bulges.length = 0;
+    this.dissolve = -1;
+    this.frontOn = false;
+    this.chomp = 0;
+    this.head.scale.setScalar(1);
+    if (this.shieldMesh) {
+      this.shieldPop = -1;
+      this.shieldAmt = 0;
+      this.magnetAmt = 0;
+    }
+  }
+
   setAccessory(id) {
     if (this.accessory) {
       this.head.remove(this.accessory);
@@ -458,12 +569,20 @@ export class SnakeView {
     const pupilMat = new THREE.MeshBasicMaterial({ color: '#05060a' });
     const eyeGeo = new THREE.SphereGeometry(0.085, 20, 14);
     const pupilGeo = new THREE.BoxGeometry(0.02, 0.11, 0.05);
+    const glintMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffffff').multiplyScalar(1.6) });
+    const glintGeo = new THREE.SphereGeometry(0.022, 8, 6);
+    this.eyes = [];
     for (const s of [-1, 1]) {
       const eye = new THREE.Mesh(eyeGeo, eyeMat);
       eye.position.set(s * 0.22, 0.11, 0.12);
       const pupil = new THREE.Mesh(pupilGeo, pupilMat);
       pupil.position.set(s * 0.065, 0, 0.03);
       eye.add(pupil);
+      // a catch-light makes the eyes look wet and alive
+      const glint = new THREE.Mesh(glintGeo, glintMat);
+      glint.position.set(s * 0.045, 0.045, 0.06);
+      eye.add(glint);
+      this.eyes.push(eye);
       head.add(eye);
       const nostril = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), pupilMat);
       nostril.position.set(s * 0.06, 0.07, 0.43);
@@ -537,6 +656,8 @@ export class SnakeView {
 
     const jetD = 0.75;
     let jetDone = !this.jetpack;
+    let dissolveDone = this.dissolve < 0;
+    if (this.dissolve >= 0) this.frontOn = false;
     for (let i = 0; i <= rings; i++) {
       const d = i === rings ? total : i * STEP;
       path.sample(sHead + d, s);
@@ -551,6 +672,23 @@ export class SnakeView {
       if (d < 0.5) r = 0.27 + 0.07 * (d / 0.5);
       const u = (total - d) / tailTaper;
       if (u < 1) r *= 0.1 + 0.9 * Math.sqrt(Math.max(0, u));
+      // squeezing through a portal
+      if (s[6] > 0) r *= 1 - 0.4 * s[6];
+      // swallowed food
+      for (let b = 0; b < this.bulges.length; b++) {
+        const q = (d - this.bulges[b].d) / 0.32;
+        if (q > -3 && q < 3) r *= 1 + this.bulges[b].size * Math.exp(-q * q);
+      }
+      // death: rings behind the shatter front are gone
+      if (this.dissolve >= 0) {
+        const k = Math.min(1, Math.max(0, (this.dissolve - d) / 0.5));
+        r *= 1 - k;
+        if (!dissolveDone && d >= this.dissolve) {
+          dissolveDone = true;
+          this.front.set(s[0] + up.x * 0.25, s[1] + up.y * 0.25 + 0.05, s[2] + up.z * 0.25);
+          this.frontOn = this.dissolve < total + 0.3;
+        }
+      }
       // gentle world-fixed slither wave, faded in behind the head
       const amp = this.wiggle * 0.07 * Math.min(1, d / 1.4) * Math.min(1, (total - d) / 1.5 + 0.3);
       const off = amp * Math.sin((this.travel - d) * 2.6);
@@ -600,7 +738,37 @@ export class SnakeView {
     side.crossVectors(hu, hd).normalize();
     this.tmpM.makeBasis(side, hu, hd);
     this.head.quaternion.setFromRotationMatrix(this.tmpM);
-    if (this.jetpack) this.updateJetpack(game, time, dt, rushGlow);
+    if (this.jetpack) {
+      this.updateJetpack(game, time, dt, rushGlow);
+      if (this.dissolve > 0.75) this.jetpack.visible = false;
+    }
+
+    // swallowed lumps travel to the tail and fade out there
+    for (let b = this.bulges.length - 1; b >= 0; b--) {
+      const bl = this.bulges[b];
+      bl.d += dt * 6.5;
+      if (bl.d > total - 0.6) bl.size *= Math.exp(-dt * 8);
+      if (bl.d > total + 1 || bl.size < 0.01) this.bulges.splice(b, 1);
+    }
+    // chomp: a quick squash and stretch of the head
+    this.chomp = Math.max(0, this.chomp - dt * 5);
+    const ch = Math.sin(this.chomp * Math.PI) * 0.16;
+    // death: the head pops first, then the wave runs down the body
+    let hs = 1;
+    if (this.dissolve >= 0) {
+      this.dissolve += dt * this.dissolveSpeed;
+      hs = Math.max(0.001, 1 - this.dissolve * 2.5);
+    }
+    this.head.scale.set((1 + ch) * hs, (1 - ch * 0.8) * hs, (1 + ch * 0.4) * hs);
+    // blink now and then
+    this.nextBlink -= dt;
+    if (this.nextBlink <= 0) {
+      this.blink = 1;
+      this.nextBlink = 2.2 + Math.random() * 4;
+    }
+    this.blink = Math.max(0, this.blink - dt * 7);
+    const lid = 1 - Math.sin(this.blink * Math.PI) * 0.9;
+    for (const e of this.eyes) e.scale.set(1, lid, 1);
 
     // tongue flicks every couple of seconds
     const ph = (time % 2.3) / 0.32;
@@ -620,6 +788,7 @@ export class SnakeView {
       return;
     }
     if (this.accessory && this.accessory.userData.bob) this.accessory.userData.bob.position.y = 0.48 + Math.sin(time * 2.4) * 0.025;
+    this.updatePowerFx(game, time, dt);
     this.auraUniforms.uAmount.value = rushGlow;
     this.auraUniforms.uTime.value = time;
     this.aura.visible = rushGlow > 0.02;

@@ -20,6 +20,7 @@ export const ZONES = [
     particle: '#fff6c0', particleSize: 0.09, particleRise: -0.15, particleTwinkle: 0.2,
     bloom: 0.32, threshold: 1.05, sat: 1.3, contrast: 1.14, tint: '#ffffff', lift: '#000000', exposure: 0.92, vignette: 0.3,
     envIntensity: 0.8, heaven: 0,
+    cloudShadow: 0.48, wet: 0, rain: 0, rainColor: '#cfe8ff', rainSpeed: 26, rainLen: 0.9, lightning: 0, rays: 0.24,
   },
   {
     name: 'Golden Canyon',
@@ -38,6 +39,7 @@ export const ZONES = [
     particle: '#ffd38a', particleSize: 0.08, particleRise: 0.12, particleTwinkle: 0.4,
     bloom: 0.45, threshold: 1.0, sat: 1.22, contrast: 1.12, tint: '#fff1e0', lift: '#140600', exposure: 1.0, vignette: 0.34,
     envIntensity: 1.0, heaven: 0,
+    cloudShadow: 0.32, wet: 0, rain: 0, rainColor: '#cfe8ff', rainSpeed: 26, rainLen: 0.9, lightning: 0, rays: 0.4,
   },
   {
     name: 'Neon Night',
@@ -56,6 +58,7 @@ export const ZONES = [
     particle: '#b6ff6a', particleSize: 0.1, particleRise: 0.05, particleTwinkle: 1,
     bloom: 0.8, threshold: 0.85, sat: 1.25, contrast: 1.1, tint: '#e8e8ff', lift: '#06001a', exposure: 1.05, vignette: 0.42,
     envIntensity: 0.8, heaven: 0,
+    cloudShadow: 0, wet: 1, rain: 1, rainColor: '#aebcff', rainSpeed: 27, rainLen: 1.0, lightning: 1, rays: 0.12,
   },
   {
     name: 'Cyber Overdrive',
@@ -74,6 +77,7 @@ export const ZONES = [
     particle: '#38f6ff', particleSize: 0.11, particleRise: 0.6, particleTwinkle: 0.6,
     bloom: 1.0, threshold: 0.8, sat: 1.2, contrast: 1.12, tint: '#f0e8ff', lift: '#0a0018', exposure: 1.05, vignette: 0.45,
     envIntensity: 0.7, heaven: 0,
+    cloudShadow: 0, wet: 0.3, rain: 0.55, rainColor: '#38f6ff', rainSpeed: 11, rainLen: 2.6, lightning: 0, rays: 0.2,
   },
   {
     // High above Neon Night at sunset: the island sinks into a sea of clouds,
@@ -95,6 +99,7 @@ export const ZONES = [
     particle: '#ffe2b8', particleSize: 0.1, particleRise: 0.25, particleTwinkle: 0.7,
     bloom: 0.5, threshold: 1.0, sat: 1.28, contrast: 1.16, tint: '#fff2ee', lift: '#08020e', exposure: 0.95, vignette: 0.4,
     envIntensity: 1.0, heaven: 1,
+    cloudShadow: 0, wet: 0, rain: 0, rainColor: '#ffffff', rainSpeed: 20, rainLen: 1, lightning: 0, rays: 0.3,
   },
 ];
 
