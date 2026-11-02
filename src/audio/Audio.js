@@ -264,6 +264,36 @@ export class AudioEngine {
     this.voice(midi(86), { wave: 0.125, dur: 0.05, gain: 0.025 + 0.03 * near });
   }
 
+  // Power-ups: a twinkle when one appears, a signature when picked up.
+  powerSpawn() {
+    [0, 7, 12, 19].forEach((n, i) => this.voice(midi(84 + n), { wave: 'sine', at: i * 0.045, dur: 0.18, gain: 0.05 }));
+  }
+
+  powerUp(kind) {
+    if (kind === 'shield') {
+      this.noiseHit({ dur: 0.35, gain: 0.12, freq: 900, sweep: 6, q: 1.5 });
+      [0, 4, 7, 12, 16].forEach((n, i) => this.voice(midi(67 + n), { wave: 0.25, at: 0.05 + i * 0.04, dur: 0.3, gain: 0.08, release: 0.25 }));
+    } else if (kind === 'magnet') {
+      this.voice(110, { wave: 'sawtooth', dur: 0.5, gain: 0.07, slide: 2.5, vibrato: 0.08 });
+      [0, 5, 10].forEach((n, i) => this.voice(midi(76 + n), { wave: 0.5, at: 0.08 + i * 0.06, dur: 0.16, gain: 0.07 }));
+    } else {
+      [24, 19, 16, 12, 7].forEach((n, i) => this.voice(midi(76 + n), { wave: 'sine', at: i * 0.05, dur: 0.4, gain: 0.06, release: 0.35 }));
+      this.noiseHit({ dur: 0.8, gain: 0.06, freq: 7000, type: 'highpass' });
+    }
+  }
+
+  // The shield takes a crash: glass shatters, a bell rings out.
+  shieldBreak() {
+    this.noiseHit({ dur: 0.5, gain: 0.26, freq: 5200, type: 'highpass', sweep: 0.6 });
+    this.noiseHit({ dur: 0.25, gain: 0.2, freq: 400, type: 'lowpass' });
+    [0, 7, 16, 24].forEach((n, i) => this.voice(midi(79 + n), { wave: 'sine', at: 0.02 + i * 0.03, dur: 0.7, gain: 0.07, release: 0.6 }));
+  }
+
+  powerEnd() {
+    this.voice(midi(79), { wave: 'sine', dur: 0.14, gain: 0.05 });
+    this.voice(midi(72), { wave: 'sine', at: 0.12, dur: 0.22, gain: 0.05 });
+  }
+
   // Thunder: a sharp crack, then a long rolling rumble.
   thunder(power = 1) {
     this.noiseHit({ dur: 0.3, gain: 0.16 * power, freq: 2200, type: 'highpass', sweep: 0.35 });

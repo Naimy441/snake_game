@@ -124,12 +124,30 @@ await waitState('playing');
 
 // --- C cycles overhead -> chase -> first person; the game state carries over
 // (an autopilot keeps the snake off the walls while the slow software renderer takes screenshots)
+// The autopilot decides right before every move (software rendering is slow,
+// so several moves can happen between two frames).
 const pilot = (on) => page.evaluate((on) => {
-  clearInterval(window.__camPilot);
-  if (!on) return;
   const g = window.__coil.game;
-  // in the sky it can also climb or dive out of trouble
-  window.__camPilot = setInterval(() => { const l = g.lookAhead(3); if (l.blocked && l.free < 3 && !g.queue.length) { if (!g.turn(1)) if (!g.turn(-1)) if (!g.pitch(true)) g.pitch(false); } }, 15);
+  if (!g.__step) g.__step = g.step.bind(g);
+  if (!on) {
+    g.step = g.__step;
+    return;
+  }
+  g.step = () => {
+    const l = g.lookAhead(3);
+    if (l.blocked && l.free < 2 && !g.queue.length) {
+      // the side with the longer clear run (in the sky, climbing or diving too)
+      const opts = [g.turnDir(1), g.turnDir(-1), g.pitchDir(true), g.pitchDir(false)].filter(Boolean);
+      let best = null;
+      for (const d of opts) {
+        let n = 0;
+        while (n < 12 && !g.fatalAt(g.head.x + d.x * (n + 1), g.head.z + d.z * (n + 1), (g.head.y || 0) + (d.y || 0) * (n + 1))) n++;
+        if (!best || n > best.n) best = { d, n };
+      }
+      if (best) g.queueDirection(best.d);
+    }
+    return g.__step();
+  };
 }, on);
 await pilot(true);
 const before = await state();
@@ -168,9 +186,8 @@ await shot('04-first-person');
 check(await page.isVisible('#minimap'), 'minimap visible in first-person');
 check(await page.isVisible('#compass'), 'food compass visible in first-person');
 
-// --- back to overhead
+// --- back to overhead (the autopilot keeps flying through the next sections)
 await page.keyboard.press('KeyC');
-await pilot(false);
 await page.waitForFunction(() => window.__coil.rig.blend >= 1, null, { timeout: 10000 }).catch(() => {});
 check((await state()).mode === 'overhead', 'switched back to overhead');
 
@@ -229,18 +246,14 @@ check(s.alive && s.len === 4 && s.score === 0, 'Enter restarts a fresh run');
 await page.keyboard.press('KeyC');
 await page.evaluate(() => {
   const g = window.__coil.game;
-  // keep it alive: steer in a big loop by turning right whenever a wall is near
-  window.__autopilot = setInterval(() => {
-    const look = g.lookAhead(2);
-    if (look.blocked && look.free < 2) g.turn(1);
-  }, 30);
 });
+await pilot(true);
 await page.waitForTimeout(3000);
 await shot('06-first-person-run');
 s = await state();
 check(s.alive, 'survives a few seconds of first-person play with autopilot');
 console.log(`info  fps in headless software rendering: ${s.fps?.toFixed(1)} (quality ${s.quality})`);
-await page.evaluate(() => clearInterval(window.__autopilot));
+await pilot(false);
 
 // --- settings panel + reduce motion
 await page.keyboard.press('Escape');

@@ -70,6 +70,20 @@ export const PAD_POINTS = 25;
 export const PAD_RUSH = 15;
 export const PAD_RESPAWN_MS = 5000;
 
+// Power-ups: one at a time may appear after eating an apple, for a while.
+// Shield: survive one crash (the snake swerves to the safest side instead).
+// Magnet: the apple (and prism) slide towards the head. Chill: the snake
+// moves slower for a few seconds.
+export const POWER_KINDS = ['shield', 'magnet', 'chill'];
+export const POWER_LIFETIME_MS = 11000;
+export const POWER_CHANCE = 0.17;
+export const POWER_MIN_APPLES = 4;
+export const POWER_POINTS = 25;
+export const MAGNET_MS = 10000;
+export const MAGNET_RANGE = 7;
+export const CHILL_MS = 8000;
+export const CHILL_SLOW = 1.45; // move interval multiplier while chilled
+
 // Random pillars rise at these speed levels (level index -> how many), on top
 // of each zone's own map. None in the first zone; one in each later zone's
 // second level. The sky has none: everything is left behind at lift-off.
@@ -171,7 +185,11 @@ export class SnakeGame {
     this.layoutStage = -1;
     this.pads = []; // { x, z, id }
     this.padRespawns = []; // times at which a used pad comes back
-    this.stats = { chains: 0, prey: 0, pads: 0 };
+    this.stats = { chains: 0, prey: 0, pads: 0, powers: 0, saves: 0 };
+    this.power = null; // power-up on the board: { x, z, y, kind, id, expires }
+    this.shield = 0;
+    this.magnetUntil = 0;
+    this.chillUntil = 0;
     this.food = null;
     this.food = this.spawn('orb');
   }
@@ -211,7 +229,15 @@ export class SnakeGame {
     let f = 1;
     if (rushing) f = 0.6;
     if (this.boostTicks > 0) f = rushing ? 0.5 : 0.55;
-    return Math.max(MIN_FAST_INTERVAL, this.baseInterval() * f);
+    return Math.max(MIN_FAST_INTERVAL, this.baseInterval() * f) * (this.chilled ? CHILL_SLOW : 1);
+  }
+
+  get chilled() {
+    return this.time < this.chillUntil;
+  }
+
+  get magnetized() {
+    return this.time < this.magnetUntil;
   }
 
   // Speed as a 0..1 value for presentation effects.
@@ -308,6 +334,7 @@ export class SnakeGame {
     if (this.food) add(this.food);
     if (this.bonus) add(this.bonus);
     if (this.prey) add(this.prey);
+    if (this.power) add(this.power);
     if (this.chain) for (let i = this.chain.next; i < this.chain.links.length; i++) add(this.chain.links[i]);
     for (const o of this.obstacles) for (let y = 0; y < (flat ? 1 : this.height); y++) taken.add(cellKey(o.x, o.z, y));
     for (const p of this.pads) add(p);
@@ -462,6 +489,7 @@ export class SnakeGame {
     if (ahead && ahead.x === x && ahead.z === z) return false;
     if (this.food && this.food.x === x && this.food.z === z) return false;
     if (this.bonus && this.bonus.x === x && this.bonus.z === z) return false;
+    if (this.power && this.power.x === x && this.power.z === z) return false;
     if (this.chainIndexAt(x, z) >= 0) return false;
     return true;
   }
@@ -735,6 +763,11 @@ export class SnakeGame {
       if (b) b.expires = this.bonus.expires;
       this.bonus = b;
     }
+    if (blocked(this.power)) {
+      const pw = this.spawn('power');
+      if (pw) Object.assign(pw, { kind: this.power.kind, expires: this.power.expires });
+      this.power = pw;
+    }
     if (this.chain && this.chain.links.slice(this.chain.next).some(blocked)) {
       ev.chainExpired = { ...this.chain };
       this.chain = null;
@@ -805,6 +838,7 @@ export class SnakeGame {
     const lift = (c) => c && Object.assign(c, { x: c.x + SKY_PAD, z: c.z + SKY_PAD, y: SKY_CENTER });
     lift(this.food);
     lift(this.bonus);
+    lift(this.power);
     if (this.chain) this.chain.links.forEach(lift);
     this.obstacles = [];
     this.portals = [];
@@ -858,6 +892,110 @@ export class SnakeGame {
     }
     out.blocked = null;
     return out;
+  }
+
+  // What would kill the head entering (x, z, y)? null if nothing.
+  fatalAt(x, z, y) {
+    // in the sky the walls are a laser fence
+    if (!this.inBounds(x, z, y)) return this.flying ? 'laser' : 'wall';
+    const hit = this.obstacleAt(x, z);
+    // map walls and laser gates get their own message
+    if (hit) return hit.kind === 'gate' ? 'gate' : hit.kind === 'wall' ? 'block' : 'obstacle';
+    const eats = (this.food && at(this.food, x, z, y)) || (this.bonus && at(this.bonus, x, z, y)) || (this.prey && at(this.prey, x, z, y));
+    if (this.occupied(x, z, !(this.pendingGrowth > 0 || eats), y)) return 'body';
+    return null;
+  }
+
+  // The shield's swerve: the safe sideways move (up or down too, in the sky)
+  // with the most room behind it, or null if there is none.
+  dodge() {
+    const h = this.head;
+    let best = null;
+    for (const d of this.neighbours) {
+      if (sameDir(d, this.dir) || opposite(d, this.dir)) continue;
+      const x = h.x + d.x;
+      const z = h.z + d.z;
+      const y = Y(h) + Y(d);
+      if (this.fatalAt(x, z, y)) continue;
+      // most room to manoeuvre, then the longest clear run straight on
+      let run = 0;
+      while (run < 20 && !this.fatalAt(x + d.x * (run + 1), z + d.z * (run + 1), y + Y(d) * (run + 1))) run++;
+      const room = this.roomFrom(x, z, y, 80) * 100 + run * 2 - (Y(d) ? 1 : 0);
+      if (!best || room > best.room) best = { room, d };
+    }
+    return best ? { x: best.d.x, z: best.d.z, y: Y(best.d) } : null;
+  }
+
+  // Free cells reachable from (x, z, y), counted up to `cap`.
+  roomFrom(x, z, y, cap) {
+    const seen = new Set([cellKey(x, z, y)]);
+    const stack = [{ x, z, y }];
+    let n = 0;
+    while (stack.length && n < cap) {
+      const c = stack.pop();
+      n++;
+      for (const d of this.neighbours) {
+        const nx = c.x + d.x;
+        const nz = c.z + d.z;
+        const ny = c.y + Y(d);
+        const k = cellKey(nx, nz, ny);
+        if (seen.has(k) || !this.inBounds(nx, nz, ny) || this.obstacleAt(nx, nz) || this.occupied(nx, nz, true, ny)) continue;
+        seen.add(k);
+        stack.push({ x: nx, z: nz, y: ny });
+      }
+    }
+    return n;
+  }
+
+  spawnPower() {
+    const kinds = POWER_KINDS.filter((k) => k !== 'shield' || !this.shield);
+    const p = this.spawn('power');
+    if (!p) return null;
+    p.kind = this.pick(kinds);
+    p.expires = this.time + POWER_LIFETIME_MS;
+    this.power = p;
+    return p;
+  }
+
+  applyPower(kind) {
+    if (kind === 'shield') this.shield = 1;
+    else if (kind === 'magnet') this.magnetUntil = this.time + MAGNET_MS;
+    else if (kind === 'chill') this.chillUntil = this.time + CHILL_MS;
+  }
+
+  // Magnet: pickups in range slide one cell towards where the head is going.
+  pullPickups(tx, tz, ty) {
+    const moved = [];
+    for (const key of ['food', 'bonus']) {
+      const f = this[key];
+      if (!f) continue;
+      const dx = tx - f.x;
+      const dz = tz - f.z;
+      const dy = ty - Y(f);
+      if (Math.abs(dx) + Math.abs(dz) + Math.abs(dy) > MAGNET_RANGE || (!dx && !dz && !dy)) continue;
+      // step along the longest axis first, else another that closes in
+      const steps = [
+        { a: Math.abs(dx), d: { x: Math.sign(dx), z: 0, y: 0 } },
+        { a: Math.abs(dz), d: { x: 0, z: Math.sign(dz), y: 0 } },
+        { a: Math.abs(dy), d: { x: 0, z: 0, y: Math.sign(dy) } },
+      ].filter((q) => q.a > 0).sort((p, q) => q.a - p.a);
+      for (const { d } of steps) {
+        const x = f.x + d.x;
+        const z = f.z + d.z;
+        const y = Y(f) + d.y;
+        const target = x === tx && z === tz && y === ty;
+        if (!this.inBounds(x, z, y) || this.obstacleAt(x, z, false) || this.portalCell(x, z) || this.padAt(x, z, y)) continue;
+        if (!target && (this.occupied(x, z, false, y) || this.chainIndexAt(x, z, y) >= 0)) continue;
+        if ((this.food && f !== this.food && at(this.food, x, z, y)) || (this.bonus && f !== this.bonus && at(this.bonus, x, z, y))) continue;
+        if (this.power && at(this.power, x, z, y)) continue;
+        f.x = x;
+        f.z = z;
+        if (this.flying) f.y = y;
+        moved.push(key);
+        break;
+      }
+    }
+    return moved;
   }
 
   die(cause) {
@@ -1016,18 +1154,34 @@ export class SnakeGame {
       }
     }
 
-    // in the sky the walls are a laser fence and pillars are laser columns
-    if (!this.inBounds(nx, nz, ny)) {
-      const cause = this.flying ? 'laser' : 'wall';
-      this.die(cause);
-      ev.died = true;
-      ev.cause = cause;
-      return ev;
+    if (this.power && this.time > this.power.expires) {
+      ev.powerExpired = { ...this.power };
+      this.power = null;
     }
-    const hit = this.obstacleAt(nx, nz);
-    if (hit) {
-      // map walls and laser gates get their own message
-      const cause = hit.kind === 'gate' ? 'gate' : hit.kind === 'wall' ? 'block' : 'obstacle';
+    // magnet: the apple slides towards the cell the head is entering
+    if (this.magnetized && !warp) {
+      const moved = this.pullPickups(nx, nz, ny);
+      if (moved.length) ev.pulled = moved;
+    }
+
+    let cause = this.fatalAt(nx, nz, ny);
+    if (cause && this.shield > 0) {
+      // the shield takes the hit: swerve onto the safest side instead
+      const alt = this.dodge();
+      if (alt) {
+        ev.shieldSaved = { x: h.x, z: h.z, y: Y(h), cause, dir: { ...alt } };
+        this.shield = 0;
+        this.stats.saves++;
+        this.dir = alt;
+        if (!alt.y) this.facing = alt;
+        this.queue = [];
+        nx = h.x + alt.x;
+        nz = h.z + alt.z;
+        ny = Y(h) + alt.y;
+        cause = null;
+      }
+    }
+    if (cause) {
       this.die(cause);
       ev.died = true;
       ev.cause = cause;
@@ -1038,14 +1192,6 @@ export class SnakeGame {
     if (this.food && at(this.food, nx, nz, ny)) eaten = this.food;
     else if (this.bonus && at(this.bonus, nx, nz, ny)) eaten = this.bonus;
     const caught = this.prey && at(this.prey, nx, nz, ny) ? this.prey : null;
-
-    const growing = this.pendingGrowth > 0 || !!eaten || !!caught;
-    if (this.occupied(nx, nz, !growing, ny)) {
-      this.die('body');
-      ev.died = true;
-      ev.cause = 'body';
-      return ev;
-    }
 
     let ateFood = false;
     if (eaten) {
@@ -1111,6 +1257,15 @@ export class SnakeGame {
       }
     }
 
+    if (this.power && at(this.power, nx, nz, ny)) {
+      const pw = this.power;
+      this.power = null;
+      this.applyPower(pw.kind);
+      this.score += POWER_POINTS * this.scoreMult;
+      this.stats.powers++;
+      ev.power = { ...pw, points: POWER_POINTS * this.scoreMult };
+    }
+
     const pad = this.padAt(nx, nz, ny);
     if (pad) {
       this.pads.splice(this.pads.indexOf(pad), 1);
@@ -1152,6 +1307,10 @@ export class SnakeGame {
       } else if (!this.chain && this.foodEaten >= 5 && r < 0.5) {
         const c = this.spawnChain();
         if (c) ev.chainSpawned = { ...c, links: c.links.map((l) => ({ ...l })) };
+      }
+      if (!this.power && this.foodEaten >= POWER_MIN_APPLES && this.rng() < POWER_CHANCE) {
+        const pw = this.spawnPower();
+        if (pw) ev.powerSpawned = { ...pw };
       }
     }
 

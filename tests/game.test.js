@@ -806,12 +806,20 @@ test('the ghost flies: it follows the player into the sky and races through 3D',
   gh.reset(true);
   g.enterSky({ launch: true });
   g.food = g.spawn('orb');
+  // every altitude the ghost's head visits on the way
+  const heights = new Set();
+  const step = gh.step.bind(gh);
+  gh.step = () => {
+    const ev = step();
+    heights.add(gh.head.y);
+    return ev;
+  };
   const eaten = runGhost(g, gh, 30);
   assert.equal(eaten, 30);
   assert.ok(gh.flying);
   assert.equal(gh.respawns, 0, 'never trapped itself');
   assert.ok(gh.cells.every((c) => g.inBounds(c.x, c.z, c.y) && !g.obstacleAt(c.x, c.z)));
-  assert.ok(new Set(gh.cells.map((c) => c.y)).size > 1, 'used more than one altitude');
+  assert.ok(heights.size > 2, 'flew at several altitudes');
 });
 
 test('bullet time: the Rush meter drains in real time, not slowed game time', () => {
