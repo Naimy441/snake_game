@@ -305,6 +305,76 @@ s = await page.evaluate(() => ({ ts: window.__coil.timeScale, state: window.__co
 check(s.ts > 0.95 || s.state !== 'playing', 'and returns to full speed afterwards');
 await pilot(false);
 
+// --- zone maps: a run in Neon Night starts with its city and portals
+await page.evaluate(() => window.__coil.toMenu());
+await waitState('menu');
+await page.evaluate(() => { const a = window.__coil; a.stats.maxLevel = 8; a.settings.startLevel = 8; a.renderLevelSelect(); });
+await page.keyboard.press('Enter');
+await waitState('playing');
+await pilot(true);
+s = await page.evaluate(() => {
+  const g = window.__coil.game;
+  const walls = g.obstacles.filter((o) => o.kind === 'wall');
+  return { zone: g.zone, walls: walls.length, solid: walls.filter((o) => o.solid || g.columnOccupied(o.x, o.z)).length, portals: g.portals.length, drawn: window.__coil.map.meshes[2].count };
+});
+check(s.zone === 2 && s.walls === 64 && s.solid === 64 && s.portals === 2, `a run in Neon Night starts with its whole city map (${JSON.stringify(s)})`);
+await page.waitForTimeout(800);
+s.drawn = await page.evaluate(() => window.__coil.map.meshes[2].count);
+check(s.drawn === 64, `the city's towers are drawn (${s.drawn})`);
+// steer into a portal and come out of its partner
+s = await page.evaluate(() => {
+  const a = window.__coil; const g = a.game; const p = g.portals[0];
+  const e = p.a; const dx = e.x < 10 ? 1 : -1;
+  g.cells = [1, 2, 3, 4].map((i) => ({ x: e.x + dx * i, z: e.z, y: 0 }));
+  g.dir = { x: -dx, z: 0, y: 0 }; g.facing = { ...g.dir }; g.queue = []; g.warpTo = null; g.removedTail = null;
+  g.food = { x: 10, z: 10, y: 0, type: 'orb', id: 31337 }; g.power = null; a.syncFood();
+  return { exit: p.b };
+});
+await page.waitForFunction((exit) => window.__coil.game.cells.some((c) => c.x === exit.x && c.z === exit.z), s.exit, { timeout: 20000 }).catch(() => {});
+s = await page.evaluate((exit) => ({ through: window.__coil.game.cells.some((c) => c.x === exit.x && c.z === exit.z), alive: window.__coil.game.alive }), s.exit);
+check(s.through && s.alive, `diving into a portal brings the snake out of its partner (${JSON.stringify(s)})`);
+await shot('11-neon-city');
+
+// --- Data Core: laser gates switch on in turn
+await page.evaluate(() => { const a = window.__coil; a.stats.maxLevel = 9; a.settings.startLevel = 9; a.startGame(); });
+await waitState('playing');
+await pilot(true);
+s = await page.evaluate(() => ({ zone: window.__coil.game.zone, gates: window.__coil.game.gates.length }));
+check(s.zone === 3 && s.gates === 2, `Cyber Overdrive brings two laser gates (${JSON.stringify(s)})`);
+await page.waitForFunction(() => window.__coil.game.gates.some((g) => g.state === 'on') || !window.__coil.game.alive, null, { timeout: 60000 }).catch(() => {});
+s = await page.evaluate(() => { const g = window.__coil.game; const on = g.gates.find((q) => q.state === 'on'); return { on: !!on, solid: on ? g.obstacles.filter((o) => o.gate === on.id).every((o) => o.solid) : false, alive: g.alive }; });
+check(s.on && s.solid, `a laser gate switches on and blocks its cells (${JSON.stringify(s)})`);
+await shot('12-data-core');
+
+// --- power-ups: pick up a shield, then crash: the shield swerves instead
+await pilot(false);
+s = await page.evaluate(() => {
+  const a = window.__coil; const g = a.game;
+  g.gates.forEach((q) => { q.state = 'off'; q.next = g.time + 1e9; });
+  g.obstacles.forEach((o) => { if (o.kind === 'gate') o.solid = false; });
+  // up the clear lane along the left wall
+  g.cells = [[1, 16], [1, 17], [1, 18], [1, 19]].map(([x, z]) => ({ x, z, y: 0 }));
+  g.dir = { x: 0, z: -1, y: 0 }; g.facing = { ...g.dir }; g.queue = []; g.warpTo = null; g.removedTail = null;
+  g.food = { x: 19, z: 19, y: 0, type: 'orb', id: 4242 };
+  g.power = { x: 1, z: 15, y: 0, type: 'power', kind: 'shield', id: 4343, expires: g.time + 1e6 };
+  a.syncFood();
+  return g.alive;
+});
+await page.waitForFunction(() => (window.__coil.game.shield === 1 && document.getElementById('pw-shield')) || !window.__coil.game.alive, null, { timeout: 20000 }).catch(() => {});
+s = await page.evaluate(() => ({ shield: window.__coil.game.shield, hud: !!document.getElementById('pw-shield') }));
+check(s.shield === 1 && s.hud, `picking up a shield raises it, shown in the HUD (${JSON.stringify(s)})`);
+await shot('13-shield');
+// aim at the top wall, one cell away
+await page.evaluate(() => {
+  const g = window.__coil.game;
+  g.cells = [[1, 0], [1, 1], [1, 2], [1, 3]].map(([x, z]) => ({ x, z, y: 0 }));
+  g.dir = { x: 0, z: -1, y: 0 }; g.facing = { ...g.dir }; g.queue = []; g.removedTail = null;
+});
+await page.waitForFunction(() => window.__coil.game.stats.saves > 0 || !window.__coil.game.alive, null, { timeout: 20000 }).catch(() => {});
+s = await page.evaluate(() => ({ saves: window.__coil.game.stats.saves, alive: window.__coil.game.alive, shield: window.__coil.game.shield }));
+check(s.saves === 1 && s.alive && s.shield === 0, `the shield takes the crash and is used up (${JSON.stringify(s)})`);
+await page.evaluate(() => window.__coil.pause());
+
 // --- Sunset Heavens: lift off from Cyber Overdrive and fly in 3D
 await page.evaluate(() => window.__coil.toMenu());
 await waitState('menu');
@@ -325,9 +395,11 @@ await page.evaluate(() => {
 await page.waitForFunction(() => window.__coil.game.flying, null, { timeout: 20000 }).catch(() => {});
 s = await page.evaluate(() => { const g = window.__coil.game; return { flying: g.flying, zone: g.zone, y: g.head.y, alive: g.alive }; });
 check(s.flying && s.zone === 4, `eating into level 13 lifts off into Sunset Heavens (${JSON.stringify(s)})`);
+// (the cinematic starts as the drawn head reaches the apple, a beat after the logic)
+await page.waitForFunction(() => window.__coil.rig.cine || window.__coil.game.launch === 0, null, { timeout: 10000 }).catch(() => {});
 s = await page.evaluate(() => { const a = window.__coil; const g = a.game; return { cine: !!a.rig.cine, launch: g.launch, obs: g.obstacles.length, size: g.size, h: g.height }; });
 check(s.obs === 0 && s.size === 25 && s.h === 13, `the sky box is bigger and has no obstacles (${JSON.stringify(s)})`);
-check(s.cine && s.launch > 0, 'lift-off: the camera circles while the snake rockets up on its own');
+check(s.cine && s.launch > 0, `lift-off: the camera circles while the snake rockets up on its own (${JSON.stringify(s)})`);
 await page.waitForFunction(() => window.__coil.game.launch === 0 && !window.__coil.rig.cine, null, { timeout: 30000 }).catch(() => {});
 s = await page.evaluate(() => ({ launch: window.__coil.game.launch, cine: !!window.__coil.rig.cine, alive: window.__coil.game.alive, maxY: Math.max(...window.__coil.game.cells.map((c) => c.y)) }));
 check(s.launch === 0 && !s.cine && s.alive && s.maxY >= 6, `then control and the normal camera come back (${JSON.stringify(s)})`);
