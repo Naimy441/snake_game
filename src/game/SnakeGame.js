@@ -185,7 +185,7 @@ export class SnakeGame {
     this.layoutStage = -1;
     this.pads = []; // { x, z, id }
     this.padRespawns = []; // times at which a used pad comes back
-    this.stats = { chains: 0, prey: 0, pads: 0, powers: 0, saves: 0 };
+    this.stats = { chains: 0, prey: 0, pads: 0, powers: 0, saves: 0, warps: 0 };
     this.power = null; // power-up on the board: { x, z, y, kind, id, expires }
     this.shield = 0;
     this.magnetUntil = 0;
@@ -1285,7 +1285,10 @@ export class SnakeGame {
       this.removedTail = this.cells.pop();
     }
     // portals: stepping onto an open one sends the head to its partner next
-    if (warp) ev.warped = { from: { x: h.x, z: h.z }, to: { x: nx, z: nz } };
+    if (warp) {
+      ev.warped = { from: { x: h.x, z: h.z }, to: { x: nx, z: nz } };
+      this.stats.warps++;
+    }
     else if (!this.flying) {
       const exit = this.portalExit(nx, nz);
       if (exit) {

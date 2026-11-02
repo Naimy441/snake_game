@@ -272,17 +272,20 @@ Turning it on mid-run starts it from your snake's current position.
 Open the **Garage** from the main menu (or after a run) to customise your
 snake. The camera swings in close for a live preview.
 
-- **17 skins:** Viper, Coral, Python, Emerald Boa, Tiger, Candy Cane, Glacier,
+- **19 skins:** Viper, Coral, Python, Emerald Boa, Tiger, Candy Cane, Glacier,
   plus unlockables: Neon Runner and Circuit (glowing light lines), Magma
   (molten cracks that pulse), Golden King, Chrome (mirror metal), Galaxy
   (twinkling stars), Prism (an animated rainbow), Dragon, Phoenix (sunset
-  feathers, from reaching Sunset Heavens) and Phantom.
+  feathers, from reaching Sunset Heavens), Aegis (hexagonal armour plates,
+  from surviving 3 crashes with a shield), Wormhole (a swirl of deep space,
+  from diving through 15 portals) and Phantom.
 - **9 accessories:** shades, top hat, party hat, horns, bow, flower, plus an
   unlockable crown and halo.
 - Locked items show what unlocks them, with your progress (for example
   "Catch 3 golden mice (1 / 3)"). Unlocks come from your best score and
-  lifetime totals: runs played, apples eaten, mice caught, chains completed
-  and the furthest zone reached. New unlocks are announced on the results
+  lifetime totals: runs played, apples eaten, mice caught, chains completed,
+  crashes survived with a shield, portals dived through and the furthest
+  zone reached. New unlocks are announced on the results
   screen. You can preview a locked item, but it only equips once unlocked.
 
 ### Sound
