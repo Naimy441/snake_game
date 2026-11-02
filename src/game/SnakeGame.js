@@ -1,8 +1,6 @@
 // Pure game state for Snake Rush. No rendering here: every camera mode reads
 // the same instance, so the rules are identical whichever view is active.
 
-import { LAYOUTS, SYMMETRIES, layoutStages, layoutUpTo } from './maps.js';
-
 // x/z run across the board ("up" is screen-north in the overhead view); y is
 // altitude, which only exists once the snake flies in Sunset Heavens.
 export const DIRS = {
@@ -70,42 +68,12 @@ export const PAD_POINTS = 25;
 export const PAD_RUSH = 15;
 export const PAD_RESPAWN_MS = 5000;
 
-// Power-ups: one at a time may appear after eating an apple, for a while.
-// Shield: survive one crash (the snake swerves to the safest side instead).
-// Magnet: the apple (and prism) slide towards the head. Chill: the snake
-// moves slower for a few seconds.
-export const POWER_KINDS = ['shield', 'magnet', 'chill'];
-export const POWER_LIFETIME_MS = 11000;
-export const POWER_CHANCE = 0.17;
-export const POWER_MIN_APPLES = 4;
-export const POWER_POINTS = 25;
-export const MAGNET_MS = 10000;
-export const MAGNET_RANGE = 7;
-export const CHILL_MS = 8000;
-export const CHILL_SLOW = 1.45; // move interval multiplier while chilled
-
-// Random pillars rise at these speed levels (level index -> how many), on top
-// of each zone's own map. None in the first zone; one in each later zone's
-// second level. The sky has none: everything is left behind at lift-off.
-export const OBSTACLE_PLAN = { 4: 1, 7: 1, 10: 1 };
+// Obstacles rise at these speed levels (level index -> how many).
+// No pillars in the first zone; they start partway into the second.
+// The sky has none: pillars are left behind on the ground at lift-off.
+export const OBSTACLE_PLAN = { 4: 2, 5: 1, 7: 2, 8: 1, 10: 2, 11: 1 };
 export const MAX_OBSTACLES = 12;
 export const OBSTACLE_WARN_MS = 2200;
-
-// Zone maps (see maps.js): walls rise in a wave out from the centre after a
-// warning, never onto the snake or the cells right in front of its head.
-export const WALL_WARN_MS = 2000;
-export const WALL_STAGGER_MS = 70; // extra delay per cell of distance from the centre
-// how many of the head's next cells nothing may rise onto (walls, pillars, gates)
-export const RISE_CLEARANCE = 3;
-// Portals open a moment after they appear; entering one moves the head to its
-// partner on the next step.
-export const PORTAL_OPEN_MS = 1500;
-// Laser gates: off, a warning flicker, then on; never switched on onto the snake.
-export const GATE_ON_MS = 2600;
-export const GATE_OFF_MS = 3600;
-export const GATE_WARN_MS = 1000;
-export const GATE_FIRST_MS = 2500; // after the gate appears
-export const GATE_WAIT_MS = 1500; // give up a cycle if blocked this long
 
 // Cells and directions carry y (altitude); anything without one is on the ground.
 const Y = (c) => c.y || 0;
@@ -175,21 +143,10 @@ export class SnakeGame {
     this.chain = null;
     this.prey = null;
     this.preyTimer = PREY_FIRST_DELAY_MS;
-    // { x, z, solid, solidAt, id, kind: 'pillar' | 'wall' | 'gate', zone, gate }
-    this.obstacles = [];
-    this.portals = []; // { id, key, a, b, zone, activeAt }
-    this.gates = []; // { id, key, axis, cells, zone, state: 'off' | 'warn' | 'on', next }
-    this.warpTo = null; // partner portal the head jumps to on the next step
-    this.layoutSym = {}; // zone -> symmetry of its map this run
-    this.layoutZone = -1;
-    this.layoutStage = -1;
+    this.obstacles = []; // { x, z, solid, solidAt, id }
     this.pads = []; // { x, z, id }
     this.padRespawns = []; // times at which a used pad comes back
-    this.stats = { chains: 0, prey: 0, pads: 0, powers: 0, saves: 0, warps: 0 };
-    this.power = null; // power-up on the board: { x, z, y, kind, id, expires }
-    this.shield = 0;
-    this.magnetUntil = 0;
-    this.chillUntil = 0;
+    this.stats = { chains: 0, prey: 0, pads: 0 };
     this.food = null;
     this.food = this.spawn('orb');
   }
@@ -229,15 +186,7 @@ export class SnakeGame {
     let f = 1;
     if (rushing) f = 0.6;
     if (this.boostTicks > 0) f = rushing ? 0.5 : 0.55;
-    return Math.max(MIN_FAST_INTERVAL, this.baseInterval() * f) * (this.chilled ? CHILL_SLOW : 1);
-  }
-
-  get chilled() {
-    return this.time < this.chillUntil;
-  }
-
-  get magnetized() {
-    return this.time < this.magnetUntil;
+    return Math.max(MIN_FAST_INTERVAL, this.baseInterval() * f);
   }
 
   // Speed as a 0..1 value for presentation effects.
@@ -334,66 +283,10 @@ export class SnakeGame {
     if (this.food) add(this.food);
     if (this.bonus) add(this.bonus);
     if (this.prey) add(this.prey);
-    if (this.power) add(this.power);
     if (this.chain) for (let i = this.chain.next; i < this.chain.links.length; i++) add(this.chain.links[i]);
     for (const o of this.obstacles) for (let y = 0; y < (flat ? 1 : this.height); y++) taken.add(cellKey(o.x, o.z, y));
     for (const p of this.pads) add(p);
-    for (const p of this.portals) {
-      taken.add(cellKey(p.a.x, p.a.z, 0));
-      taken.add(cellKey(p.b.x, p.b.z, 0));
-    }
     return taken;
-  }
-
-  // ---------------------------------------------------------------- portals
-  // The partner of an open portal at (x, z), or null. Only on the ground.
-  portalExit(x, z) {
-    for (const p of this.portals) {
-      if (this.time < p.activeAt) continue;
-      if (p.a.x === x && p.a.z === z) return p.b;
-      if (p.b.x === x && p.b.z === z) return p.a;
-    }
-    return null;
-  }
-
-  // Any portal (open or still opening) on this cell?
-  portalCell(x, z) {
-    for (const p of this.portals) if ((p.a.x === x && p.a.z === z) || (p.b.x === x && p.b.z === z)) return p;
-    return null;
-  }
-
-  // The cells the head will occupy over its next n moves (following queued
-  // turns and portals), ignoring what is in the way. `from` lets advance()
-  // start from the cell it is about to enter.
-  nextCells(n, from = null) {
-    const out = [];
-    let x = this.head.x;
-    let z = this.head.z;
-    let y = Y(this.head);
-    let d = this.dir;
-    let qi = 0;
-    let warp = this.warpTo;
-    if (from) {
-      ({ x, z } = from);
-      y = from.y || 0;
-      out.push({ x, z, y });
-      warp = from.warped ? null : this.flying ? null : this.portalExit(x, z);
-      qi = 0;
-    }
-    while (out.length < n) {
-      if (warp) {
-        ({ x, z } = warp);
-        warp = null;
-      } else {
-        if (qi < this.queue.length) d = this.queue[qi++];
-        x += d.x;
-        z += d.z;
-        y += Y(d);
-        if (!this.flying) warp = this.portalExit(x, z);
-      }
-      out.push({ x, z, y });
-    }
-    return out;
   }
 
   freeCells(flat = false) {
@@ -485,11 +378,10 @@ export class SnakeGame {
   }
 
   preyCanEnter(x, z, ahead) {
-    if (!this.inBounds(x, z) || this.occupied(x, z) || this.obstacleAt(x, z, false) || this.portalCell(x, z)) return false;
+    if (!this.inBounds(x, z) || this.occupied(x, z) || this.obstacleAt(x, z, false)) return false;
     if (ahead && ahead.x === x && ahead.z === z) return false;
     if (this.food && this.food.x === x && this.food.z === z) return false;
     if (this.bonus && this.bonus.x === x && this.bonus.z === z) return false;
-    if (this.power && this.power.x === x && this.power.z === z) return false;
     if (this.chainIndexAt(x, z) >= 0) return false;
     return true;
   }
@@ -536,16 +428,12 @@ export class SnakeGame {
   }
 
   // ---------------------------------------------------------------- level events
-  // Is every free cell still reachable from the head if `extra` cells were
-  // blocked? The rest of the zone's map (walls and gates still to come)
-  // counts as blocked too.
+  // Is every free cell still reachable from the head if `extra` cells were blocked?
   stillConnected(extra) {
     const s = this.size;
     const blocked = new Uint8Array(s * s);
     for (const o of this.obstacles) blocked[o.x * s + o.z] = 1;
     for (const e of extra) blocked[e.x * s + e.z] = 1;
-    const reserved = this.reservedCells(false);
-    if (reserved) for (const k of reserved) blocked[Math.floor(k / 1024) * s + ((k >> 4) & 63)] = 1;
     let total = 0;
     for (let i = 0; i < blocked.length; i++) if (!blocked[i]) total++;
     const h = this.head;
@@ -573,43 +461,26 @@ export class SnakeGame {
     return count === total;
   }
 
-  // Every cell of the current zone's map (all stages), as cellKeys: walls and
-  // gates, plus portals unless `portals` is false. null when there is no map.
-  reservedCells(portals = true) {
-    const z = this.zone;
-    if (this.flying || !LAYOUTS[z] || this.layoutZone !== z) return null;
-    const all = layoutUpTo(z, 2, this.layoutSym[z] || 0, this.size);
-    const set = new Set();
-    for (const w of all.walls) set.add(cellKey(w.x, w.z));
-    for (const g of all.gates) for (const c of g.cells) set.add(cellKey(c.x, c.z));
-    if (portals) for (const p of all.portals) set.add(cellKey(p.a.x, p.a.z)).add(cellKey(p.b.x, p.b.z));
-    return set;
-  }
-
   addObstacles(n) {
     const added = [];
     if (this.flying) return added;
-    const pillars = this.obstacles.filter((o) => !o.kind || o.kind === 'pillar').length;
-    const room = MAX_OBSTACLES - pillars;
+    const room = MAX_OBSTACLES - this.obstacles.length;
     n = Math.min(n, room);
     const h = { x: this.head.x, z: this.head.z };
-    const reserved = this.reservedCells();
-    const near = (c, x, z) => Math.abs(x - c.x) <= 2 && Math.abs(z - c.z) <= 2;
     for (let i = 0; i < n; i++) {
       // judged on the board: in the sky an obstacle is a column through every layer
       const pool = this.freeCells(true).filter((c) => {
         if (c.x < 2 || c.z < 2 || c.x > this.size - 3 || c.z > this.size - 3) return false;
         if (manhattan(c, h) < 5 || this.inFrontOfHead(c, 8, true)) return false;
-        // keep pillars apart (from each other and the map) so they never form tight pockets
-        for (const o of this.obstacles) if (near(c, o.x, o.z)) return false;
-        if (reserved) for (const k of reserved) if (near(c, Math.floor(k / 1024), (k >> 4) & 63)) return false;
+        // keep pillars apart so they never form tight pockets
+        for (const o of this.obstacles) if (Math.abs(o.x - c.x) <= 2 && Math.abs(o.z - c.z) <= 2) return false;
         return true;
       });
       for (let tries = 0; tries < 30 && pool.length; tries++) {
         const k = Math.floor(this.rng() * pool.length);
         const c = pool.splice(k, 1)[0];
         if (!this.stillConnected([c])) continue;
-        const o = { x: c.x, z: c.z, solid: false, solidAt: this.time + OBSTACLE_WARN_MS, id: this.uid++, kind: 'pillar', zone: this.zone };
+        const o = { x: c.x, z: c.z, solid: false, solidAt: this.time + OBSTACLE_WARN_MS, id: this.uid++ };
         this.obstacles.push(o);
         added.push({ ...o });
         break;
@@ -640,7 +511,7 @@ export class SnakeGame {
     if (this.zone >= SKY_ZONE && !this.flying) {
       this.enterSky({ launch: true });
       ev.levelUp.liftoff = true;
-    } else this.buildLayout(ev);
+    }
     let obstacles = [];
     for (let l = prevLevel + 1; l <= lvl; l++) if (OBSTACLE_PLAN[l]) obstacles = obstacles.concat(this.addObstacles(OBSTACLE_PLAN[l]));
     if (obstacles.length) ev.obstaclesWarned = obstacles;
@@ -665,153 +536,9 @@ export class SnakeGame {
       this.enterSky();
       return void this.fillPads();
     }
-    const zone = this.zone;
-    this.layoutSym[zone] = this.startSymmetry(zone, L - ZONE_STARTS[zone]);
-    this.buildLayout({}, { instant: true });
-    // this zone's pillars so far (earlier zones' sank when they ended)
-    for (let l = ZONE_STARTS[zone] + 1; l <= L; l++) if (OBSTACLE_PLAN[l]) this.addObstacles(OBSTACLE_PLAN[l]);
-    for (const o of this.obstacles) if (o.kind !== 'gate' && !this.columnOccupied(o.x, o.z)) o.solid = true;
+    for (let l = 1; l <= L; l++) if (OBSTACLE_PLAN[l]) this.addObstacles(OBSTACLE_PLAN[l]);
+    for (const o of this.obstacles) o.solid = true;
     this.fillPads();
-  }
-
-  // ---------------------------------------------------------------- zone maps
-  // A symmetry for a run that starts inside a zone: one that keeps the
-  // starting lane (the snake and the cells ahead of it) clear of walls.
-  startSymmetry(zone, stage) {
-    const h = this.head;
-    const tail = this.cells[this.cells.length - 1];
-    let best = [];
-    let bestScore = Infinity;
-    for (let sym = 0; sym < SYMMETRIES; sym++) {
-      const lay = layoutUpTo(zone, stage, sym, this.size);
-      let score = 0;
-      for (const w of lay.walls) if (w.x === h.x && w.z >= h.z - 4 && w.z <= tail.z) score += 2;
-      for (const g of lay.gates) for (const c of g.cells) if (c.x === h.x && c.z >= h.z - 4 && c.z <= tail.z) score += 1;
-      if (score < bestScore) {
-        bestScore = score;
-        best = [sym];
-      } else if (score === bestScore) best.push(sym);
-    }
-    return this.pick(best);
-  }
-
-  // Bring the zone's map up to date with the level: a new zone clears the
-  // old zone's walls, gates, portals and pillars (they sink away) and its
-  // map starts; each further level adds that stage. instant: everything is
-  // solid and open right away (a run starting at this level).
-  buildLayout(ev, { instant = false } = {}) {
-    if (this.flying) return;
-    const zone = this.zone;
-    const stage = this.level - ZONE_STARTS[zone];
-    if (this.layoutZone !== zone) {
-      if (this.obstacles.length || this.portals.length) ev.layoutCleared = true;
-      this.obstacles = [];
-      this.portals = [];
-      this.gates = [];
-      this.layoutZone = zone;
-      this.layoutStage = -1;
-    }
-    if (!LAYOUTS[zone] || stage <= this.layoutStage) return;
-    if (this.layoutSym[zone] === undefined) this.layoutSym[zone] = Math.floor(this.rng() * SYMMETRIES);
-    const stages = layoutStages(zone, this.layoutSym[zone], this.size);
-    const added = { zone, stage, walls: [], portals: [], gates: [] };
-    for (let s = this.layoutStage + 1; s <= stage; s++) this.addStage(stages[s], zone, instant, added);
-    this.layoutStage = stage;
-    if (added.walls.length || added.portals.length || added.gates.length) ev.layout = added;
-    this.relocatePickups(ev);
-  }
-
-  addStage(st, zone, instant, added) {
-    const c = (this.size - 1) / 2;
-    for (const w of st.walls) {
-      if (this.obstacleAt(w.x, w.z, false)) continue; // a pillar got there first
-      const d = Math.abs(w.x - c) + Math.abs(w.z - c);
-      const o = { x: w.x, z: w.z, kind: 'wall', zone, id: this.uid++, solid: false, solidAt: this.time + WALL_WARN_MS + d * WALL_STAGGER_MS };
-      if (instant && !this.columnOccupied(w.x, w.z)) {
-        o.solid = true;
-        o.solidAt = this.time;
-      }
-      this.obstacles.push(o);
-      added.walls.push({ ...o });
-    }
-    for (const p of st.portals) {
-      const portal = { id: this.uid++, key: p.key, a: { ...p.a }, b: { ...p.b }, zone, activeAt: instant ? this.time : this.time + PORTAL_OPEN_MS };
-      this.portals.push(portal);
-      added.portals.push({ ...portal });
-    }
-    for (const g of st.gates) {
-      const cycle = GATE_ON_MS + GATE_OFF_MS;
-      const gate = {
-        id: this.uid++, key: g.key, axis: g.axis, zone, cells: g.cells.map((q) => ({ x: q.x, z: q.z })),
-        state: 'off', next: this.time + GATE_FIRST_MS + g.phase * cycle, warnSince: 0,
-      };
-      this.gates.push(gate);
-      for (const q of gate.cells) this.obstacles.push({ x: q.x, z: q.z, kind: 'gate', gate: gate.id, zone, id: this.uid++, solid: false, solidAt: Infinity });
-      added.gates.push({ id: gate.id, cells: gate.cells.slice(), axis: gate.axis });
-    }
-  }
-
-  // Move anything that sits where the map just claimed a cell.
-  relocatePickups(ev) {
-    const blocked = (c) => !!c && !c.y && (!!this.obstacleAt(c.x, c.z, false) || !!this.portalCell(c.x, c.z));
-    if (blocked(this.food)) {
-      this.food = this.spawn('orb');
-      ev.foodMoved = true;
-    }
-    if (blocked(this.bonus)) {
-      const b = this.spawn('prism');
-      if (b) b.expires = this.bonus.expires;
-      this.bonus = b;
-    }
-    if (blocked(this.power)) {
-      const pw = this.spawn('power');
-      if (pw) Object.assign(pw, { kind: this.power.kind, expires: this.power.expires });
-      this.power = pw;
-    }
-    if (this.chain && this.chain.links.slice(this.chain.next).some(blocked)) {
-      ev.chainExpired = { ...this.chain };
-      this.chain = null;
-    }
-    for (let i = this.pads.length - 1; i >= 0; i--) {
-      if (!blocked(this.pads[i])) continue;
-      this.pads.splice(i, 1);
-      this.padRespawns.push(this.time + 600);
-    }
-    if (this.prey && blocked(this.prey)) {
-      ev.preyEscaped = { ...this.prey };
-      this.prey = null;
-      this.preyTimer = 4000;
-    }
-  }
-
-  // Laser gates cycle off -> warn -> on -> off. A gate only switches on when
-  // none of its cells holds the snake or lies right in front of the head;
-  // otherwise it keeps warning, and skips the cycle if that takes too long.
-  updateGates(ahead, ev) {
-    for (const gt of this.gates) {
-      if (this.time < gt.next) continue;
-      if (gt.state === 'off') {
-        gt.state = 'warn';
-        gt.warnSince = this.time;
-        gt.next = this.time + GATE_WARN_MS;
-      } else if (gt.state === 'warn') {
-        const clear = gt.cells.every((c) => !this.columnOccupied(c.x, c.z) && !ahead.some((a) => a.x === c.x && a.z === c.z));
-        if (clear) {
-          gt.state = 'on';
-          gt.next = this.time + GATE_ON_MS;
-          (ev.gatesOn || (ev.gatesOn = [])).push(gt.id);
-        } else if (this.time - gt.warnSince > GATE_WARN_MS + GATE_WAIT_MS) {
-          gt.state = 'off';
-          gt.next = this.time + GATE_OFF_MS - GATE_WARN_MS;
-        }
-      } else {
-        gt.state = 'off';
-        gt.next = this.time + GATE_OFF_MS - GATE_WARN_MS;
-        (ev.gatesOff || (ev.gatesOff = [])).push(gt.id);
-      }
-      const on = gt.state === 'on';
-      for (const o of this.obstacles) if (o.gate === gt.id) o.solid = on;
-    }
   }
 
   fillPads() {
@@ -838,12 +565,8 @@ export class SnakeGame {
     const lift = (c) => c && Object.assign(c, { x: c.x + SKY_PAD, z: c.z + SKY_PAD, y: SKY_CENTER });
     lift(this.food);
     lift(this.bonus);
-    lift(this.power);
     if (this.chain) this.chain.links.forEach(lift);
     this.obstacles = [];
-    this.portals = [];
-    this.gates = [];
-    this.warpTo = null;
     this.pads = [];
     this.padRespawns = [];
     this.prey = null;
@@ -854,26 +577,18 @@ export class SnakeGame {
     }
   }
 
-  // Cells straight ahead along the heading the snake will take next (through
-  // any portal on the way), up to the first obstacle. Used for the path
-  // guide and danger warnings; `cells` lists the free ones.
+  // Cells straight ahead along the heading the snake will take next, up to the
+  // first obstacle. Used for the path guide and danger warnings.
   lookAhead(max = this.size) {
     const d = this.lastQueuedDir();
-    const out = { free: 0, blocked: 'wall', cells: [] };
+    const out = { free: 0, blocked: 'wall' };
     let x = this.head.x;
     let z = this.head.z;
     let y = Y(this.head);
-    let warp = this.warpTo;
     for (let i = 0; i < max; i++) {
-      const warped = !!warp;
-      if (warp) {
-        ({ x, z } = warp);
-        warp = null;
-      } else {
-        x += d.x;
-        z += d.z;
-        y += Y(d);
-      }
+      x += d.x;
+      z += d.z;
+      y += Y(d);
       if (!this.inBounds(x, z, y)) {
         out.blocked = 'wall';
         return out;
@@ -887,115 +602,9 @@ export class SnakeGame {
         return out;
       }
       out.free++;
-      out.cells.push({ x, z, y, warped });
-      if (!warped && !this.flying) warp = this.portalExit(x, z);
     }
     out.blocked = null;
     return out;
-  }
-
-  // What would kill the head entering (x, z, y)? null if nothing.
-  fatalAt(x, z, y) {
-    // in the sky the walls are a laser fence
-    if (!this.inBounds(x, z, y)) return this.flying ? 'laser' : 'wall';
-    const hit = this.obstacleAt(x, z);
-    // map walls and laser gates get their own message
-    if (hit) return hit.kind === 'gate' ? 'gate' : hit.kind === 'wall' ? 'block' : 'obstacle';
-    const eats = (this.food && at(this.food, x, z, y)) || (this.bonus && at(this.bonus, x, z, y)) || (this.prey && at(this.prey, x, z, y));
-    if (this.occupied(x, z, !(this.pendingGrowth > 0 || eats), y)) return 'body';
-    return null;
-  }
-
-  // The shield's swerve: the safe sideways move (up or down too, in the sky)
-  // with the most room behind it, or null if there is none.
-  dodge() {
-    const h = this.head;
-    let best = null;
-    for (const d of this.neighbours) {
-      if (sameDir(d, this.dir) || opposite(d, this.dir)) continue;
-      const x = h.x + d.x;
-      const z = h.z + d.z;
-      const y = Y(h) + Y(d);
-      if (this.fatalAt(x, z, y)) continue;
-      // most room to manoeuvre, then the longest clear run straight on
-      let run = 0;
-      while (run < 20 && !this.fatalAt(x + d.x * (run + 1), z + d.z * (run + 1), y + Y(d) * (run + 1))) run++;
-      const room = this.roomFrom(x, z, y, 80) * 100 + run * 2 - (Y(d) ? 1 : 0);
-      if (!best || room > best.room) best = { room, d };
-    }
-    return best ? { x: best.d.x, z: best.d.z, y: Y(best.d) } : null;
-  }
-
-  // Free cells reachable from (x, z, y), counted up to `cap`.
-  roomFrom(x, z, y, cap) {
-    const seen = new Set([cellKey(x, z, y)]);
-    const stack = [{ x, z, y }];
-    let n = 0;
-    while (stack.length && n < cap) {
-      const c = stack.pop();
-      n++;
-      for (const d of this.neighbours) {
-        const nx = c.x + d.x;
-        const nz = c.z + d.z;
-        const ny = c.y + Y(d);
-        const k = cellKey(nx, nz, ny);
-        if (seen.has(k) || !this.inBounds(nx, nz, ny) || this.obstacleAt(nx, nz) || this.occupied(nx, nz, true, ny)) continue;
-        seen.add(k);
-        stack.push({ x: nx, z: nz, y: ny });
-      }
-    }
-    return n;
-  }
-
-  spawnPower() {
-    const kinds = POWER_KINDS.filter((k) => k !== 'shield' || !this.shield);
-    const p = this.spawn('power');
-    if (!p) return null;
-    p.kind = this.pick(kinds);
-    p.expires = this.time + POWER_LIFETIME_MS;
-    this.power = p;
-    return p;
-  }
-
-  applyPower(kind) {
-    if (kind === 'shield') this.shield = 1;
-    else if (kind === 'magnet') this.magnetUntil = this.time + MAGNET_MS;
-    else if (kind === 'chill') this.chillUntil = this.time + CHILL_MS;
-  }
-
-  // Magnet: pickups in range slide one cell towards where the head is going.
-  pullPickups(tx, tz, ty) {
-    const moved = [];
-    for (const key of ['food', 'bonus']) {
-      const f = this[key];
-      if (!f) continue;
-      const dx = tx - f.x;
-      const dz = tz - f.z;
-      const dy = ty - Y(f);
-      if (Math.abs(dx) + Math.abs(dz) + Math.abs(dy) > MAGNET_RANGE || (!dx && !dz && !dy)) continue;
-      // step along the longest axis first, else another that closes in
-      const steps = [
-        { a: Math.abs(dx), d: { x: Math.sign(dx), z: 0, y: 0 } },
-        { a: Math.abs(dz), d: { x: 0, z: Math.sign(dz), y: 0 } },
-        { a: Math.abs(dy), d: { x: 0, z: 0, y: Math.sign(dy) } },
-      ].filter((q) => q.a > 0).sort((p, q) => q.a - p.a);
-      for (const { d } of steps) {
-        const x = f.x + d.x;
-        const z = f.z + d.z;
-        const y = Y(f) + d.y;
-        const target = x === tx && z === tz && y === ty;
-        if (!this.inBounds(x, z, y) || this.obstacleAt(x, z, false) || this.portalCell(x, z) || this.padAt(x, z, y)) continue;
-        if (!target && (this.occupied(x, z, false, y) || this.chainIndexAt(x, z, y) >= 0)) continue;
-        if ((this.food && f !== this.food && at(this.food, x, z, y)) || (this.bonus && f !== this.bonus && at(this.bonus, x, z, y))) continue;
-        if (this.power && at(this.power, x, z, y)) continue;
-        f.x = x;
-        f.z = z;
-        if (this.flying) f.y = y;
-        moved.push(key);
-        break;
-      }
-    }
-    return moved;
   }
 
   die(cause) {
@@ -1026,7 +635,7 @@ export class SnakeGame {
       cells: this.cells.slice(), removedTail: this.removedTail, pendingGrowth: this.pendingGrowth,
       dir: this.dir, facing: this.facing, queue: this.queue.slice(), time: this.time, clock: this.clock, ticks: this.ticks,
       rush: this.rush, rushing: this.rushing, boostTicks: this.boostTicks,
-      prey: this.prey ? { ...this.prey } : null, preyTimer: this.preyTimer, warpTo: this.warpTo,
+      prey: this.prey ? { ...this.prey } : null, preyTimer: this.preyTimer,
     };
     this.undoOk = false;
     const result = this.advance(ev);
@@ -1060,7 +669,6 @@ export class SnakeGame {
     this.boostTicks = u.boostTicks;
     this.prey = u.prey;
     this.preyTimer = u.preyTimer;
-    this.warpTo = u.warpTo;
     this.queue = [{ x: d.x, z: d.z, y: Y(d) }];
     this.undoOk = false;
     const ev = this.step();
@@ -1085,24 +693,13 @@ export class SnakeGame {
     if (this.rushing) this.rush = Math.max(0, this.rush - (RUSH_DRAIN_PER_SEC * real) / 1000);
     if (this.boostTicks > 0) this.boostTicks--;
 
-    // through a portal: this move is the jump to its partner (turns wait)
-    const warp = this.warpTo;
-    this.warpTo = null;
-    if (!warp && this.queue.length) {
+    if (this.queue.length) {
       this.dir = this.queue.shift();
       if (!Y(this.dir)) this.facing = this.dir;
       ev.turned = true;
     }
     // lift-off: climb straight up, then level out the way we were going
     if (this.launch > 0 && Y(this.dir) > 0 && --this.launch === 0) this.queue = [{ ...this.facing }];
-
-    const h = this.head;
-    let nx = warp ? warp.x : h.x + this.dir.x;
-    let nz = warp ? warp.z : h.z + this.dir.z;
-    let ny = warp ? 0 : Y(h) + Y(this.dir);
-    // nothing rises or switches on in the head's way
-    const ahead = this.nextCells(RISE_CLEARANCE, { x: nx, z: nz, y: ny, warped: !!warp });
-    const inWay = (x, z) => ahead.some((a) => a.x === x && a.z === z);
 
     // timed things
     if (this.bonus && this.time > this.bonus.expires) {
@@ -1114,14 +711,12 @@ export class SnakeGame {
       this.chain = null;
     }
     for (const o of this.obstacles) {
-      // Rise only once the cell is clear and not right in front of the head,
-      // so a wall or pillar never crushes the snake or pops up in its face.
-      if (o.kind === 'gate' || o.solid || this.time < o.solidAt) continue;
-      if (this.columnOccupied(o.x, o.z) || inWay(o.x, o.z) || (this.prey && this.prey.x === o.x && this.prey.z === o.z)) continue;
-      o.solid = true;
-      (ev.obstaclesRaised || (ev.obstaclesRaised = [])).push({ ...o });
+      // Rise only once the cell is clear, so a pillar never crushes the snake.
+      if (!o.solid && this.time >= o.solidAt && !this.columnOccupied(o.x, o.z)) {
+        o.solid = true;
+        (ev.obstaclesRaised || (ev.obstaclesRaised = [])).push({ ...o });
+      }
     }
-    if (this.gates.length) this.updateGates(ahead, ev);
     for (let i = this.padRespawns.length - 1; i >= 0; i--) {
       if (this.time >= this.padRespawns[i]) {
         this.padRespawns.splice(i, 1);
@@ -1129,6 +724,11 @@ export class SnakeGame {
         if (p) (ev.padsSpawned || (ev.padsSpawned = [])).push({ ...p });
       }
     }
+
+    const h = this.head;
+    let nx = h.x + this.dir.x;
+    let nz = h.z + this.dir.z;
+    let ny = Y(h) + Y(this.dir);
 
     // prey moves on its own clock, never into the cell the head is entering
     if (this.prey) {
@@ -1154,34 +754,16 @@ export class SnakeGame {
       }
     }
 
-    if (this.power && this.time > this.power.expires) {
-      ev.powerExpired = { ...this.power };
-      this.power = null;
+    // in the sky the walls are a laser fence and pillars are laser columns
+    if (!this.inBounds(nx, nz, ny)) {
+      const cause = this.flying ? 'laser' : 'wall';
+      this.die(cause);
+      ev.died = true;
+      ev.cause = cause;
+      return ev;
     }
-    // magnet: the apple slides towards the cell the head is entering
-    if (this.magnetized && !warp) {
-      const moved = this.pullPickups(nx, nz, ny);
-      if (moved.length) ev.pulled = moved;
-    }
-
-    let cause = this.fatalAt(nx, nz, ny);
-    if (cause && this.shield > 0) {
-      // the shield takes the hit: swerve onto the safest side instead
-      const alt = this.dodge();
-      if (alt) {
-        ev.shieldSaved = { x: h.x, z: h.z, y: Y(h), cause, dir: { ...alt } };
-        this.shield = 0;
-        this.stats.saves++;
-        this.dir = alt;
-        if (!alt.y) this.facing = alt;
-        this.queue = [];
-        nx = h.x + alt.x;
-        nz = h.z + alt.z;
-        ny = Y(h) + alt.y;
-        cause = null;
-      }
-    }
-    if (cause) {
+    if (this.obstacleAt(nx, nz)) {
+      const cause = 'obstacle';
       this.die(cause);
       ev.died = true;
       ev.cause = cause;
@@ -1193,7 +775,14 @@ export class SnakeGame {
     else if (this.bonus && at(this.bonus, nx, nz, ny)) eaten = this.bonus;
     const caught = this.prey && at(this.prey, nx, nz, ny) ? this.prey : null;
 
-    let ateFood = false;
+    const growing = this.pendingGrowth > 0 || !!eaten || !!caught;
+    if (this.occupied(nx, nz, !growing, ny)) {
+      this.die('body');
+      ev.died = true;
+      ev.cause = 'body';
+      return ev;
+    }
+
     if (eaten) {
       const def = FOOD_TYPES[eaten.type];
       this.registerEat();
@@ -1204,10 +793,6 @@ export class SnakeGame {
       const prevLevel = this.level;
       if (eaten.type === 'orb') this.foodEaten++;
       ev.ate = { ...eaten, points, combo: this.combo, rushing: this.scoreMult > 1, levelUp: this.level > prevLevel };
-      // off the board now, so a map growing at this level-up leaves it alone
-      ateFood = eaten === this.food;
-      if (ateFood) this.food = null;
-      else this.bonus = null;
       if (this.level > prevLevel) {
         this.onLevelUp(ev, prevLevel);
         if (ev.levelUp.liftoff) {
@@ -1215,7 +800,7 @@ export class SnakeGame {
           nx += SKY_PAD;
           nz += SKY_PAD;
           ny = SKY_LIFT;
-          Object.assign(ev.ate, { x: nx, z: nz, y: SKY_LIFT });
+          Object.assign(ev.ate, { x: eaten.x, z: eaten.z, y: SKY_LIFT });
         }
       }
     }
@@ -1257,15 +842,6 @@ export class SnakeGame {
       }
     }
 
-    if (this.power && at(this.power, nx, nz, ny)) {
-      const pw = this.power;
-      this.power = null;
-      this.applyPower(pw.kind);
-      this.score += POWER_POINTS * this.scoreMult;
-      this.stats.powers++;
-      ev.power = { ...pw, points: POWER_POINTS * this.scoreMult };
-    }
-
     const pad = this.padAt(nx, nz, ny);
     if (pad) {
       this.pads.splice(this.pads.indexOf(pad), 1);
@@ -1284,20 +860,8 @@ export class SnakeGame {
     } else {
       this.removedTail = this.cells.pop();
     }
-    // portals: stepping onto an open one sends the head to its partner next
-    if (warp) {
-      ev.warped = { from: { x: h.x, z: h.z }, to: { x: nx, z: nz } };
-      this.stats.warps++;
-    }
-    else if (!this.flying) {
-      const exit = this.portalExit(nx, nz);
-      if (exit) {
-        this.warpTo = { x: exit.x, z: exit.z };
-        ev.portal = { x: nx, z: nz, to: { ...this.warpTo }, id: this.portalCell(nx, nz).id };
-      }
-    }
 
-    if (ateFood) {
+    if (eaten === this.food) {
       this.food = this.spawn('orb');
       const r = this.rng();
       if (!this.bonus && this.foodEaten >= 3 && r < 0.28) {
@@ -1311,10 +875,8 @@ export class SnakeGame {
         const c = this.spawnChain();
         if (c) ev.chainSpawned = { ...c, links: c.links.map((l) => ({ ...l })) };
       }
-      if (!this.power && this.foodEaten >= POWER_MIN_APPLES && this.rng() < POWER_CHANCE) {
-        const pw = this.spawnPower();
-        if (pw) ev.powerSpawned = { ...pw };
-      }
+    } else if (eaten && eaten === this.bonus) {
+      this.bonus = null;
     }
 
     if (!this.food && !this.bonus && this.freeCells().length === 0) {

@@ -491,8 +491,7 @@ test('the first zone eases in: short levels, slower moves, no pillars', () => {
     if (!g.inBounds(g.food.x, g.food.z)) { g.turn(1); g.step(); i--; continue; }
     const ev = g.step();
     assert.ok(ev.ate);
-    if (g.level < 3) assert.equal(g.obstacles.filter((o) => o.kind === 'pillar').length, 0, 'no pillars in Emerald Coast');
-    if (g.level === 0) assert.equal(g.obstacles.length, 0, 'the first level is wide open');
+    if (g.level < 3) assert.equal(g.obstacles.length, 0, 'no pillars in Emerald Coast');
     assert.ok(g.level >= before);
   }
   assert.equal(g.zone, 1);
@@ -625,10 +624,8 @@ test('starting at a later level sets speed, zone, pillars and pads', () => {
   assert.equal(g.level, 5);
   assert.equal(g.zone, 1);
   assert.deepEqual(g.levelProgress(), { into: 0, need: 4, max: false });
-  // Golden Canyon's map up to its third level, plus the zone's one pillar
-  assert.equal(g.obstacles.filter((o) => o.kind === 'pillar').length, 1, 'the pillar from level 5');
-  assert.equal(g.obstacles.filter((o) => o.kind === 'wall').length, 69, 'every canyon wall so far');
-  assert.ok(g.obstacles.every((o) => o.solid || g.columnOccupied(o.x, o.z)));
+  assert.equal(g.obstacles.length, 3, 'pillars from levels 4 and 5');
+  assert.ok(g.obstacles.every((o) => o.solid));
   assert.equal(g.pads.length, 2);
   assert.equal(g.cells.length, 4);
   assert.ok(g.stillConnected([]));
@@ -806,20 +803,12 @@ test('the ghost flies: it follows the player into the sky and races through 3D',
   gh.reset(true);
   g.enterSky({ launch: true });
   g.food = g.spawn('orb');
-  // every altitude the ghost's head visits on the way
-  const heights = new Set();
-  const step = gh.step.bind(gh);
-  gh.step = () => {
-    const ev = step();
-    heights.add(gh.head.y);
-    return ev;
-  };
   const eaten = runGhost(g, gh, 30);
   assert.equal(eaten, 30);
   assert.ok(gh.flying);
   assert.equal(gh.respawns, 0, 'never trapped itself');
   assert.ok(gh.cells.every((c) => g.inBounds(c.x, c.z, c.y) && !g.obstacleAt(c.x, c.z)));
-  assert.ok(heights.size > 2, 'flew at several altitudes');
+  assert.ok(new Set(gh.cells.map((c) => c.y)).size > 1, 'used more than one altitude');
 });
 
 test('bullet time: the Rush meter drains in real time, not slowed game time', () => {

@@ -62,7 +62,7 @@ export function saveBest(v) {
 }
 
 // Lifetime totals used to unlock skins and accessories.
-export const STAT_DEFAULTS = { games: 0, apples: 0, mice: 0, chains: 0, pads: 0, maxZone: 0, maxLevel: 0, saves: 0, warps: 0, powers: 0 };
+export const STAT_DEFAULTS = { games: 0, apples: 0, mice: 0, chains: 0, pads: 0, maxZone: 0, maxLevel: 0 };
 
 export function loadStats() {
   try {
@@ -87,7 +87,7 @@ export function saveStats(s) {
 // the 3D scene is then rendered at `scale` x that, adjusted on the fly
 // between minScale and 1 to hold a smooth frame rate.
 export const QUALITY = {
-  high: { maxPR: 1.5, minScale: 0.6, samples: 4, bloomLevels: 5, taps: 8, shadows: 'high', particles: 600, ambient: 520, radial: 14, rays: 24, rain: 1400 },
-  medium: { maxPR: 1.25, minScale: 0.6, samples: 2, bloomLevels: 4, taps: 6, shadows: 'medium', particles: 350, ambient: 320, radial: 12, rays: 14, rain: 900 },
-  low: { maxPR: 1, minScale: 0.55, samples: 0, bloomLevels: 0, taps: 0, shadows: 'low', particles: 160, ambient: 140, radial: 10, rays: 0, rain: 450 },
+  high: { maxPR: 1.5, minScale: 0.6, samples: 4, bloomLevels: 5, taps: 8, shadows: 'high', particles: 600, ambient: 520, radial: 14 },
+  medium: { maxPR: 1.25, minScale: 0.6, samples: 2, bloomLevels: 4, taps: 6, shadows: 'medium', particles: 350, ambient: 320, radial: 12 },
+  low: { maxPR: 1, minScale: 0.55, samples: 0, bloomLevels: 0, taps: 0, shadows: 'low', particles: 160, ambient: 140, radial: 10 },
 };
