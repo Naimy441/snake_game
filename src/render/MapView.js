@@ -7,7 +7,7 @@ import { fbm, mulberry32 } from './geo.js';
 // still a warning, swirling portals and laser gates. Everything is a fixed
 // set of instanced meshes, so maps appearing mid-game never compile shaders.
 
-const CAP = 96; // walls per zone style
+const CAP = 160; // walls per zone style (an old map sinking while the same zone rises again)
 const HOLO_CAP = 128;
 const GATE_CAP = 40;
 const TAU = Math.PI * 2;
