@@ -137,10 +137,11 @@ export class Effects {
     const f = dy ? game.lastFacing() : d;
     this.tmpQ.setFromAxisAngle(this.yAxis, Math.atan2(f.x, f.z) + Math.PI);
     if (dy) this.tmpQ.multiply(this.tmpQ2.setFromAxisAngle(this.xAxis, (dy * Math.PI) / 2));
-    const h = game.head;
     const lift = game.flying ? 0.27 : 0.03;
     for (let i = 0; i < n; i++) {
-      const w = toWorld(h.x + d.x * (i + 1), h.z + d.z * (i + 1), (h.y || 0) + dy * (i + 1));
+      // (the cells follow a portal through to its far side)
+      const c = look.cells[i];
+      const w = toWorld(c.x, c.z, c.y);
       this.tmpP.set(w.x, (w.y || 0) + lift, w.z);
       const s = 1 - (i / 24) * 0.4;
       this.tmpS.set(s, s, s);

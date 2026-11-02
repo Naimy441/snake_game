@@ -59,6 +59,7 @@
           <div id="hud-combo" class="combo hidden"><span id="hud-combo-x">x2</span><span class="combo-label">combo</span><div class="combo-bar"><i id="hud-combo-bar"></i></div></div>
           <div id="hud-chain" class="chain hidden"><span class="chain-label">Chain</span><span id="hud-chain-dots" class="chain-dots"></span><span id="hud-chain-time" class="chain-time"></span></div>
         </div>
+        <div class="powers" id="hud-powers"></div>
         <div class="rush" id="hud-rush-wrap">
           <div class="rush-label"><span>Rush</span> <kbd>Space</kbd><span id="hud-boost" class="boost-tag hidden">Boost!</span></div>
           <div class="rush-bar"><i id="hud-rush"></i><div class="rush-ticks"></div></div>
@@ -213,11 +214,23 @@
                 <li><b class="gold">Golden mouse</b> runs away from you. Corner it for 100 points.</li>
                 <li><b class="orange">Boost pad</b> a free burst of speed and double points.</li>
               </ul>
+              <h3>Power-ups</h3>
+              <ul class="plain">
+                <li><b class="blue">Shield</b> takes one crash for you: the snake swerves to the safest side instead.</li>
+                <li><b class="pink">Magnet</b> for 10 s, apples slide towards your head.</li>
+                <li><b class="ice">Chill</b> for 8 s, you move much slower. A breather at top speed.</li>
+              </ul>
               <h3>Speed levels and zones</h3>
               <ul class="plain">
                 <li>Eat again within 5 s to build a combo, up to <b>x8</b>.</li>
                 <li>Eating apples raises your speed level: 3 apples per level in the first zone, more later. From the second zone, some level-ups raise <b>pillars</b>: a red ring on the floor warns you where.</li>
                 <li>Every 3 levels the world transforms into a new zone.</li>
+              </ul>
+              <h3>Zone maps</h3>
+              <ul class="plain">
+                <li>Each zone has its own map that grows over its levels: hedges, canyon ridges, a neon city, a data core. New walls show as holograms first and never rise onto you or right in front of you.</li>
+                <li><b class="cyan">Portals</b> come in pairs: dive into one and you come out of the other, still heading the same way.</li>
+                <li><b class="red">Laser gates</b> switch on and off in turn: cross while they are off. They never switch on with you in them.</li>
               </ul>
             </div>
           </div>

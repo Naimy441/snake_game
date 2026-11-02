@@ -6,7 +6,7 @@ void main(){ vDir = position; vec4 p = projectionMatrix * modelViewMatrix * vec4
 
 const SKY_FS = `
 uniform vec3 uTop; uniform vec3 uHorizon; uniform vec3 uGround; uniform vec3 uSunColor; uniform vec3 uSunDir;
-uniform float uSunSize; uniform float uStars; uniform float uCyber; uniform float uTime;
+uniform float uSunSize; uniform float uStars; uniform float uCyber; uniform float uTime; uniform float uFlash;
 varying vec3 vDir;
 float hash(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 void main(){
@@ -35,6 +35,8 @@ void main(){
     float band = exp(-abs(h - 0.03) * 22.0);
     col += uHorizon * uCyber * band * 0.9;
   }
+  // lightning lights up the whole sky, most of all overhead
+  col += vec3(0.55, 0.62, 0.9) * uFlash * (0.35 + 0.65 * smoothstep(-0.1, 0.6, h));
   gl_FragColor = vec4(col, 1.0);
 }`;
 
@@ -79,6 +81,7 @@ export class Sky {
       uStars: { value: 0 },
       uCyber: { value: 0 },
       uTime: { value: 0 },
+      uFlash: { value: 0 },
     };
     this.material = new THREE.ShaderMaterial({
       uniforms: this.uniforms,

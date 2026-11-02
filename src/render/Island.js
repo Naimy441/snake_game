@@ -32,6 +32,9 @@ export class Island {
       uPulse: { value: 0 },
       uPulseAt: { value: new THREE.Vector2() },
       uDetail: { value: 1 },
+      uWet: { value: 0 },
+      uRainAmt: { value: 0 },
+      uBevel: { value: 1 },
     };
     this.checker = {
       uA: { value: new THREE.Color() },
@@ -312,6 +315,8 @@ export class Island {
     b.uGridColor.value.copy(p.gridColor);
     b.uLines.value = p.boardLines;
     b.uDetail.value = Math.min(1, p.boardRough * 1.1);
+    b.uWet.value = p.wet;
+    b.uRainAmt.value = p.rain * p.wet;
     this.checker.uA.value.copy(p.cliffA);
     this.checker.uB.value.copy(p.cliffB);
     this.checker.uEdge.value = p.cliffEdge;

@@ -99,6 +99,8 @@ export function makeCheckerMaterial(shared, { scale = new THREE.Vector2(1, 1), r
 
 // The play surface: two-tone cells whose colours, roughness and glowing grid
 // all come from uniforms, so it can turn from a sunny lawn into neon glass.
+// Tiles are bevelled (the normal rolls off at their edges); in the rain the
+// board gets wet, with glossy puddles and rings rippling out of them.
 export function makeBoardMaterial(size, detailTex, uniforms) {
   const mat = new THREE.MeshStandardMaterial({ map: detailTex, roughness: 0.9, metalness: 0 });
   mat.onBeforeCompile = (shader) => {
@@ -113,7 +115,25 @@ export function makeBoardMaterial(size, detailTex, uniforms) {
         `#include <common>
         varying vec2 vBUv; varying vec3 vBW;
         uniform vec3 uBoardA; uniform vec3 uBoardB; uniform float uRough; uniform float uGrid; uniform vec3 uGridColor;
-        uniform float uLines; uniform float uSize; uniform float uTime; uniform float uPulse; uniform vec2 uPulseAt; uniform float uDetail;`
+        uniform float uLines; uniform float uSize; uniform float uTime; uniform float uPulse; uniform vec2 uPulseAt; uniform float uDetail;
+        uniform float uWet; uniform float uRainAmt; uniform float uBevel;
+        float bh(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+        // rings spreading from random spots in a jittered grid (two offset layers)
+        vec2 rainRipples(vec2 p, float t){
+          vec2 acc = vec2(0.0);
+          for (int k = 0; k < 2; k++) {
+            vec2 q = p + vec2(float(k) * 0.5, float(k) * 0.31);
+            vec2 ii = floor(q);
+            float h = bh(ii + float(k) * 7.0);
+            vec2 d = fract(q) - 0.5 - (vec2(fract(h * 17.0), fract(h * 29.0)) - 0.5) * 0.5;
+            float ph = fract(t * 0.85 + h);
+            float r = length(d);
+            float R = ph * 0.42;
+            float ring = sin((r - R) * 46.0) * smoothstep(0.07, 0.0, abs(r - R)) * (1.0 - ph);
+            acc += d / max(r, 1e-3) * ring;
+          }
+          return acc;
+        }`
       )
       .replace(
         '#include <map_fragment>',
@@ -122,13 +142,30 @@ export function makeBoardMaterial(size, detailTex, uniforms) {
         vec3 base = mix(uBoardA, uBoardB, ck);
         vec4 det = texture2D(map, cell * 0.5);
         base *= mix(vec3(1.0), det.rgb * 1.6, uDetail);
-        vec2 fc = abs(fract(cell) - 0.5);
+        vec2 sfc = fract(cell) - 0.5;
+        vec2 fc = abs(sfc);
         float edge = max(fc.x, fc.y);
         base *= 1.0 - smoothstep(0.43, 0.5, edge) * 0.12;
         base = mix(base, vec3(1.0), smoothstep(0.47, 0.5, edge) * uLines);
+        // wet patches: big soft puddles, glossier and darker
+        float puddle = smoothstep(0.42, 0.62, texture2D(uCloudTex, vBW.xz * 0.045 + 0.31).r);
+        float wetMask = uWet * (0.45 + 0.55 * puddle);
+        base *= 1.0 - 0.32 * wetMask;
         diffuseColor.rgb *= base;`
       )
-      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = uRough;')
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = mix(uRough, 0.05, wetMask);')
+      .replace(
+        '#include <normal_fragment_maps>',
+        `#include <normal_fragment_maps>
+        // bevelled tiles: the surface rolls off towards each tile's edge
+        vec2 bev = sign(sfc) * smoothstep(0.38, 0.5, fc) * 0.55 * uBevel;
+        vec3 tilt = vec3(bev.x, 0.0, -bev.y);
+        if (uRainAmt > 0.001) {
+          vec2 rp = rainRipples(vBW.xz * 1.7, uTime) * 0.5 * uRainAmt * (0.35 + 0.65 * puddle);
+          tilt += vec3(rp.x, 0.0, rp.y);
+        }
+        normal = normalize(normal + mat3(viewMatrix) * tilt);`
+      )
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>

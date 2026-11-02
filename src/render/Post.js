@@ -53,12 +53,43 @@ void main(){
   gl_FragColor = vec4(s / 12.0, 1.0);
 }`;
 
+// Light shafts (god rays): march from each pixel towards the sun's position
+// on screen, summing sky pixels (depth at the far plane) near the sun, so
+// light streams through every gap in the scenery. Runs at quarter size.
+const RAYS_FS = `
+uniform sampler2D tScene; uniform sampler2D tDepth; uniform vec2 uScale; uniform vec2 uTexel;
+uniform vec2 uSun; uniform float uAspect; uniform vec3 uSunColor; uniform float uSpread;
+varying vec2 vUv;
+vec3 src(vec2 uv){
+  if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return vec3(0.0);
+  vec2 suv = min(uv * uScale, uScale - uTexel);
+  float sky = step(0.99999, texture2D(tDepth, suv).r);
+  vec2 d = (uv - uSun) * vec2(uAspect, 1.0);
+  float near = exp(-dot(d, d) * uSpread);
+  vec3 c = texture2D(tScene, suv).rgb;
+  return (uSunColor * 0.7 + min(c, vec3(3.0)) * 0.3) * sky * near;
+}
+void main(){
+  vec2 delta = (vUv - uSun) * (0.85 / float(RAYS));
+  float jit = fract(sin(dot(vUv, vec2(12.9898, 78.233))) * 43758.5453);
+  vec2 p = vUv - delta * jit;
+  vec3 acc = vec3(0.0);
+  float w = 1.0;
+  for (int i = 0; i < RAYS; i++) {
+    acc += src(p) * w;
+    w *= 0.955;
+    p -= delta;
+  }
+  gl_FragColor = vec4(acc * (2.6 / float(RAYS)), 1.0);
+}`;
+
 const FINAL_FS = `
 uniform sampler2D tScene; uniform sampler2D tBloom; uniform vec2 uScale; uniform vec2 uTexel;
 uniform float uBloom; uniform float uSpeed; uniform float uChroma; uniform float uVignette;
 uniform float uDanger; uniform vec3 uDangerColor; uniform float uFlash; uniform vec3 uFlashColor;
 uniform float uTime; uniform float uLines; uniform vec2 uCenter; uniform float uAspect;
 uniform float uSat; uniform float uContrast; uniform vec3 uTint; uniform vec3 uLift; uniform bool uUseBloom;
+uniform sampler2D tRays; uniform float uRays; uniform float uGrain;
 varying vec2 vUv;
 float hash(float n){ return fract(sin(n) * 43758.5453123); }
 vec3 scene(vec2 uv){ return texture2D(tScene, min(clamp(uv, 0.0, 1.0) * uScale, uScale - uTexel * 0.5)).rgb; }
@@ -88,6 +119,7 @@ void main(){
     col.b = mix(col.b, scene(uv - off).b, 0.85);
   }
   if (uUseBloom) col += texture2D(tBloom, uv).rgb * uBloom;
+  if (uRays > 0.001) col += texture2D(tRays, uv).rgb * uRays;
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
   // colour grade in tone-mapped linear space
@@ -115,6 +147,7 @@ void main(){
     o = mix(o, vec3(1.0), on * thin * rad * min(1.0, uLines) * 0.55);
   }
   o = mix(o, uFlashColor, uFlash);
+  if (uGrain > 0.001) o += (hash(dot(vUv, vec2(127.1, 311.7)) * 43.0 + fract(uTime * 7.0) * 91.0) - 0.5) * uGrain;
   gl_FragColor = vec4(o, 1.0);
 }`;
 
@@ -148,6 +181,25 @@ export class PostFX {
     this.finalMat = this.makeFinal(8);
     this.quad = new FullScreenQuad(this.downMat);
     this.params = this.finalMat.uniforms;
+    this.rays = 24; // samples per light shaft (0: off)
+    this.raysRT = null;
+    this.raysMat = this.makeRays(this.rays);
+    // set by the app every frame: sun position on screen, colour, strength
+    this.sun = { uv: new THREE.Vector2(0.5, 0.5), color: new THREE.Color(1, 1, 1), amount: 0, spread: 7 };
+  }
+
+  makeRays(samples) {
+    return new THREE.ShaderMaterial({
+      defines: { RAYS: Math.max(1, samples) },
+      uniforms: {
+        tScene: { value: null }, tDepth: { value: null }, uScale: { value: new THREE.Vector2(1, 1) }, uTexel: { value: new THREE.Vector2(1, 1) },
+        uSun: { value: new THREE.Vector2() }, uAspect: { value: 1 }, uSunColor: { value: new THREE.Color() }, uSpread: { value: 7 },
+      },
+      vertexShader: VS,
+      fragmentShader: RAYS_FS,
+      depthTest: false,
+      depthWrite: false,
+    });
   }
 
   makeFinal(taps) {
@@ -175,6 +227,9 @@ export class PostFX {
         uContrast: { value: 1.05 },
         uTint: { value: new THREE.Color(1, 1, 1) },
         uLift: { value: new THREE.Color(0, 0, 0) },
+        tRays: { value: null },
+        uRays: { value: 0 },
+        uGrain: { value: 0.025 },
       },
       vertexShader: VS,
       fragmentShader: FINAL_FS,
@@ -185,10 +240,15 @@ export class PostFX {
 
   // samples: MSAA sample count for the scene; bloomLevels: 0 disables bloom;
   // taps: radial blur samples (0 disables).
-  configure({ samples, bloomLevels, taps }) {
+  configure({ samples, bloomLevels, taps, rays = 24 }) {
     const changed = samples !== this.samples || bloomLevels !== this.bloomLevels;
     this.samples = samples;
     this.bloomLevels = bloomLevels;
+    if (rays !== this.rays) {
+      this.raysMat.dispose();
+      this.raysMat = this.makeRays(rays);
+      this.rays = rays;
+    }
     if (taps !== this.taps) {
       const old = this.finalMat;
       this.finalMat = this.makeFinal(taps);
@@ -219,12 +279,19 @@ export class PostFX {
   allocate() {
     const w = Math.max(2, Math.round(this.size.x));
     const h = Math.max(2, Math.round(this.size.y));
-    if (this.sceneRT) this.sceneRT.dispose();
+    if (this.sceneRT) {
+      this.sceneRT.depthTexture?.dispose();
+      this.sceneRT.dispose();
+    }
+    // the depth texture lets the light shafts tell sky from scenery
     this.sceneRT = new THREE.WebGLRenderTarget(w, h, {
       type: THREE.HalfFloatType,
       samples: this.samples,
       depthBuffer: true,
+      depthTexture: new THREE.DepthTexture(w, h),
     });
+    if (this.raysRT) this.raysRT.dispose();
+    this.raysRT = new THREE.WebGLRenderTarget(Math.max(1, Math.floor(w / 4)), Math.max(1, Math.floor(h / 4)), { type: THREE.HalfFloatType, depthBuffer: false });
     for (const l of this.levels) l.dispose();
     this.levels = [];
     let lw = w;
@@ -261,6 +328,25 @@ export class PostFX {
     const r = this.renderer;
     r.setRenderTarget(this.sceneRT);
     r.render(scene, camera);
+
+    const sun = this.sun;
+    const useRays = this.rays > 0 && sun.amount > 0.002;
+    if (useRays) {
+      const m = this.raysMat.uniforms;
+      m.tScene.value = this.sceneRT.texture;
+      m.tDepth.value = this.sceneRT.depthTexture;
+      m.uScale.value.copy(this.params.uScale.value);
+      m.uTexel.value.copy(this.params.uTexel.value);
+      m.uSun.value.copy(sun.uv);
+      m.uAspect.value = this.params.uAspect.value;
+      m.uSunColor.value.copy(sun.color);
+      m.uSpread.value = sun.spread;
+      this.quad.material = this.raysMat;
+      r.setRenderTarget(this.raysRT);
+      this.quad.render(r);
+      this.params.tRays.value = this.raysRT.texture;
+    }
+    this.params.uRays.value = useRays ? sun.amount : 0;
 
     const useBloom = this.levels.length > 0 && this.params.uBloom.value > 0.001;
     if (useBloom) {
@@ -299,7 +385,10 @@ export class PostFX {
   }
 
   dispose() {
+    this.sceneRT?.depthTexture?.dispose();
     this.sceneRT?.dispose();
+    this.raysRT?.dispose();
+    this.raysMat.dispose();
     for (const l of this.levels) l.dispose();
     this.downMat.dispose();
     this.upMat.dispose();

@@ -225,6 +225,42 @@ export const SKINS = [
     aura: '#ff8a3a', trail: '#ff6aa8',
   },
   {
+    id: 'aegis', name: 'Aegis', desc: 'Hexagonal armour plates with gold seams.',
+    swatch: 'radial-gradient(circle at 30% 30%, #6fa8ff 0 22%, transparent 24%), radial-gradient(circle at 72% 68%, #6fa8ff 0 22%, transparent 24%), linear-gradient(135deg, #1a3a8a, #2f5fd8 55%, #ffd060)',
+    unlock: { stat: 'saves', value: 3, label: 'Survive 3 crashes with a shield' },
+    color(d, t, c) {
+      if (belly(t)) return c.set('#c8d8f0').multiplyScalar(Math.abs(fract(d * 2.5) - 0.5) < 0.08 ? 0.85 : 1);
+      const h = hexEdge(d * 2.2, (t / TAU) * 7);
+      if (h > 0.4) return c.set('#ffcf50');
+      return c.set('#2f5fd8').lerp(c.clone().set('#1a3a8a'), Math.max(0, dorsal(t)) * 0.6).multiplyScalar(0.85 + 0.3 * (1 - h * 2));
+    },
+    glow: (d, t) => (!belly(t) && hexEdge(d * 2.2, (t / TAU) * 7) > 0.4 ? 0.7 : 0),
+    mat: { roughness: 0.22, metalness: 0.75, env: 1.8 },
+    head: { top: '#1a3a8a', side: '#2f5fd8', belly: '#c8d8f0', accent: '#ffcf50', eye: '#8fe8ff', eyeGlow: 2.2 },
+    aura: '#5aa6ff', trail: '#ffcf50',
+  },
+  {
+    id: 'wormhole', name: 'Wormhole', desc: 'A swirl of deep space that pulls at the eye.',
+    swatch: 'conic-gradient(from 30deg, #08021a, #ff4fd8, #08021a 30%, #38f6ff, #08021a 60%, #8a4aff, #08021a)',
+    unlock: { stat: 'warps', value: 15, label: 'Dive through 15 portals' },
+    color(d, t, c) {
+      const sw = fract(d * 0.55 + (t / TAU) * 2);
+      c.set('#08021a');
+      if (sw < 0.12) c.set('#ff4fd8');
+      else if (sw > 0.5 && sw < 0.6) c.set('#38f6ff');
+      else if (hash(Math.floor(d * 9), Math.floor(t * 6)) > 0.95) c.set('#ffffff');
+      return c;
+    },
+    glow: (d, t) => {
+      const sw = fract(d * 0.55 + (t / TAU) * 2);
+      return sw < 0.12 || (sw > 0.5 && sw < 0.6) ? 1.5 : hash(Math.floor(d * 9), Math.floor(t * 6)) > 0.95 ? 2 : 0;
+    },
+    anim: 'flow',
+    mat: { roughness: 0.18, metalness: 0.4 },
+    head: { top: '#08021a', side: '#160838', belly: '#1e0a48', accent: '#ff4fd8', eye: '#38f6ff', eyeGlow: 3 },
+    aura: '#8a4aff', trail: '#ff4fd8',
+  },
+  {
     id: 'ghost', name: 'Phantom', desc: 'A pale spirit with an eerie glow.',
     swatch: 'radial-gradient(circle at 50% 40%, #ffffff, #cfe6ff 50%, #7a9ac8)',
     unlock: { stat: 'games', value: 10, label: 'Play 10 runs' },
@@ -238,6 +274,19 @@ export const SKINS = [
     aura: '#cfe6ff', trail: '#ffffff',
   },
 ];
+
+// 0 inside a hexagonal plate, rising to 0.5 on its seam.
+function hexEdge(u, v) {
+  const ry = 1.7320508;
+  const ax = ((u % 1) + 1) % 1 - 0.5;
+  const ay = ((((v % ry) + ry) % ry) - ry / 2);
+  const bx = (((u - 0.5) % 1) + 1) % 1 - 0.5;
+  const by = (((((v - ry / 2) % ry) + ry) % ry) - ry / 2);
+  const [gx, gy] = ax * ax + ay * ay < bx * bx + by * by ? [ax, ay] : [bx, by];
+  const px = Math.abs(gx);
+  const py = Math.abs(gy);
+  return Math.max(px * 0.5 + py * 0.8660254, px);
+}
 
 function circuit(d, t) {
   const u = d * 3;
