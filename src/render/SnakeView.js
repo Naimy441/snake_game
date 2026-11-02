@@ -86,7 +86,7 @@ export class SnakeView {
     this.path = new SnakePath(maxCells + 4);
     this.radial = radial;
     this.maxRings = Math.ceil((maxCells + 2) / STEP) + 4;
-    this.sample = new Float32Array(6);
+    this.sample = new Float32Array(7);
     this.headPos = new THREE.Vector3();
     this.headDir = new THREE.Vector3(0, 0, -1);
     this.headUp = new THREE.Vector3(0, 1, 0);
@@ -551,6 +551,8 @@ export class SnakeView {
       if (d < 0.5) r = 0.27 + 0.07 * (d / 0.5);
       const u = (total - d) / tailTaper;
       if (u < 1) r *= 0.1 + 0.9 * Math.sqrt(Math.max(0, u));
+      // squeezing through a portal
+      if (s[6] > 0) r *= 1 - 0.4 * s[6];
       // gentle world-fixed slither wave, faded in behind the head
       const amp = this.wiggle * 0.07 * Math.min(1, d / 1.4) * Math.min(1, (total - d) / 1.5 + 0.3);
       const off = amp * Math.sin((this.travel - d) * 2.6);

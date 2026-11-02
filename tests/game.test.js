@@ -491,7 +491,8 @@ test('the first zone eases in: short levels, slower moves, no pillars', () => {
     if (!g.inBounds(g.food.x, g.food.z)) { g.turn(1); g.step(); i--; continue; }
     const ev = g.step();
     assert.ok(ev.ate);
-    if (g.level < 3) assert.equal(g.obstacles.length, 0, 'no pillars in Emerald Coast');
+    if (g.level < 3) assert.equal(g.obstacles.filter((o) => o.kind === 'pillar').length, 0, 'no pillars in Emerald Coast');
+    if (g.level === 0) assert.equal(g.obstacles.length, 0, 'the first level is wide open');
     assert.ok(g.level >= before);
   }
   assert.equal(g.zone, 1);
@@ -624,8 +625,10 @@ test('starting at a later level sets speed, zone, pillars and pads', () => {
   assert.equal(g.level, 5);
   assert.equal(g.zone, 1);
   assert.deepEqual(g.levelProgress(), { into: 0, need: 4, max: false });
-  assert.equal(g.obstacles.length, 3, 'pillars from levels 4 and 5');
-  assert.ok(g.obstacles.every((o) => o.solid));
+  // Golden Canyon's map up to its third level, plus the zone's one pillar
+  assert.equal(g.obstacles.filter((o) => o.kind === 'pillar').length, 1, 'the pillar from level 5');
+  assert.equal(g.obstacles.filter((o) => o.kind === 'wall').length, 69, 'every canyon wall so far');
+  assert.ok(g.obstacles.every((o) => o.solid || g.columnOccupied(o.x, o.z)));
   assert.equal(g.pads.length, 2);
   assert.equal(g.cells.length, 4);
   assert.ok(g.stillConnected([]));
