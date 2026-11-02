@@ -2,6 +2,7 @@ import * as THREE from 'three';
 
 import { GhostBot } from './game/GhostBot.js';
 import { SnakeGame, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, SKY_H, zoneForLevel, MAGNET_MS, CHILL_MS } from './game/SnakeGame.js';
+import { layoutUpTo } from './game/maps.js';
 import { SKINS, ACCESSORIES, skinById, accessoryById, isUnlocked, unlockProgress } from './skins.js';
 import { World } from './render/World.js';
 import { SnakeView } from './render/SnakeView.js';
@@ -395,6 +396,9 @@ class App {
     st.mice += g.stats.prey;
     st.chains += g.stats.chains;
     st.pads += g.stats.pads;
+    st.saves = (st.saves || 0) + g.stats.saves;
+    st.warps = (st.warps || 0) + g.stats.warps;
+    st.powers = (st.powers || 0) + g.stats.powers;
     st.maxZone = Math.max(st.maxZone, g.zone);
     st.maxLevel = Math.max(st.maxLevel || 0, g.level);
     saveStats(st);
@@ -1505,6 +1509,50 @@ class App {
     this.audio.setRain(w.p.rain * w.p.wet * (this.state === 'paused' ? 0.4 : 1));
   }
 
+  // Attract mode: on the main menu the world slowly cycles through the four
+  // ground zones, each with its full map rising on the board, so the menu
+  // shows off what's ahead. Returns a stand-in for the game state for the
+  // MapView, or null when the real game should be drawn.
+  attractMap(dt) {
+    if (this.state !== 'menu') {
+      this.attract = null;
+      return null;
+    }
+    const w = this.world;
+    const a = this.attract || (this.attract = { t: 0, zone: -1, map: null });
+    const idle = !this.garageOpen && !this.openPanel && !this.settings.reduceMotion;
+    if (idle && !w.transitioning) {
+      a.t += dt;
+      if (a.t > 11) {
+        a.t = 0;
+        w.setZone((w.zone + 1) % 4, { duration: 3.2 });
+      }
+    }
+    const zone = w.transitioning ? w.trans.to : w.zone;
+    if (a.zone !== zone && zone < 4) {
+      a.zone = zone;
+      a.born = w.time;
+      const lay = layoutUpTo(zone, 2, 0, BOARD);
+      const id = (i) => -1 - zone * 1000 - i;
+      a.map = {
+        time: 0,
+        obstacles: lay.walls.map((c, i) => ({ x: c.x, z: c.z, kind: 'wall', zone, id: id(i), solid: false })),
+        gates: lay.gates.map((q, i) => ({ id: id(500 + i), cells: q.cells, axis: q.axis, state: 'off', phase: q.phase })),
+        portals: lay.portals.map((p, i) => ({ id: id(700 + i), key: p.key, a: p.a, b: p.b, activeAt: 1.4 })),
+      };
+    }
+    if (!a.map) return null;
+    // walls rise as the zone's wave sweeps past; gates take turns
+    const age = w.time - a.born;
+    a.map.time = age;
+    for (const o of a.map.obstacles) o.solid = age > 1.4;
+    for (const q of a.map.gates) {
+      const ph = (age / 6 + q.phase) % 1;
+      q.state = age < 2 ? 'off' : ph < 0.42 ? 'on' : ph > 0.85 ? 'warn' : 'off';
+    }
+    return a.map;
+  }
+
   // Dust (or sparks) where map walls burst up out of the floor.
   mapDust() {
     const cols = ['#9be07a', '#e8b07a', '#ff7ae8', '#5ff6ff'];
@@ -1653,7 +1701,7 @@ class App {
     const headingYaw = Math.atan2(f.x, f.z);
     this.board.applyPalette(this.world.p);
     this.board.sync(g, this.toWorld, gdt, this.simTime, headingYaw, sky);
-    this.map.sync(g, this.toWorld, gdt, this.simTime, this.world.p, rm);
+    this.map.sync(this.attractMap(dt) || g, this.toWorld, gdt, this.simTime, this.world.p, rm);
     this.mapDust();
     const playing = this.state === 'playing' || this.state === 'countdown' || this.state === 'paused';
     this.effects.updateGuide(g, this.toWorld, playing && this.settings.guide && view);

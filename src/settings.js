@@ -62,7 +62,7 @@ export function saveBest(v) {
 }
 
 // Lifetime totals used to unlock skins and accessories.
-export const STAT_DEFAULTS = { games: 0, apples: 0, mice: 0, chains: 0, pads: 0, maxZone: 0, maxLevel: 0 };
+export const STAT_DEFAULTS = { games: 0, apples: 0, mice: 0, chains: 0, pads: 0, maxZone: 0, maxLevel: 0, saves: 0, warps: 0, powers: 0 };
 
 export function loadStats() {
   try {
