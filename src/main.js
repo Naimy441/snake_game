@@ -15,6 +15,7 @@ import { CORNER } from './render/SnakePath.js';
 import { HEAD_LEAD } from './render/SnakeView.js';
 import { makeGlowTexture, makeScaleNormalMap, makeRingTexture, makeChevronTexture } from './render/textures.js';
 import { AudioEngine } from './audio/Audio.js';
+import { atmosAll } from './render/atmos.js';
 import { Input } from './Input.js';
 import { loadSettings, saveSettings, loadBest, saveBest, loadStats, saveStats, QUALITY } from './settings.js';
 
@@ -48,7 +49,7 @@ class App {
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.toneMappingExposure = 1.0;
     r.shadowMap.enabled = true;
-    r.shadowMap.type = THREE.PCFShadowMap;
+    r.shadowMap.type = THREE.PCFSoftShadowMap;
     r.info.autoReset = false;
 
     this.isTouch = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
@@ -135,6 +136,8 @@ class App {
     this.rig.setMode('orbit', { instant: true });
     this.updateCameraUI();
     this.syncFood();
+    // cloud shadows and the lightning flash reach every lit material
+    atmosAll(this.scene);
     this.precompile();
     this.last = performance.now();
     this.renderer.setAnimationLoop((now) => this.frame(now));
@@ -187,9 +190,9 @@ class App {
     const q = QUALITY[this.activeQuality];
     this.q = q;
     this.world.setShadowQuality(q.shadows);
-    this.world.setParticleBudget(q.ambient);
+    this.world.setParticleBudget(q.ambient, q.rain);
     this.effects.setParticleBudget(q.particles);
-    this.post.configure({ samples: q.samples, bloomLevels: q.bloomLevels, taps: q.taps });
+    this.post.configure({ samples: q.samples, bloomLevels: q.bloomLevels, taps: q.taps, rays: q.rays });
     if (!this.snake || this.snake.radial !== q.radial) {
       const old = this.snake;
       this.snake = new SnakeView({ maxCells: BOARD * BOARD, radial: q.radial, scaleMap: this.scaleMap, skin: this.equippedSkin(), accessory: this.equippedAccessory() });
@@ -201,6 +204,7 @@ class App {
         old.dispose();
       }
       this.scene.add(this.snake.group);
+      atmosAll(this.snake.group);
     }
     this.dyn.scale = 1;
     this.dyn.grace = 2;
@@ -1364,6 +1368,17 @@ class App {
     c.fill();
   }
 
+  // Thunder after each lightning strike; the rain's hiss follows the weather.
+  weatherSounds() {
+    const w = this.world;
+    for (let i = w.thunder.length - 1; i >= 0; i--) {
+      if (w.thunder[i].at > w.time) continue;
+      this.audio.thunder(w.thunder[i].power);
+      w.thunder.splice(i, 1);
+    }
+    this.audio.setRain(w.p.rain * w.p.wet * (this.state === 'paused' ? 0.4 : 1));
+  }
+
   // Dust (or sparks) where map walls burst up out of the floor.
   mapDust() {
     const cols = ['#9be07a', '#e8b07a', '#ff7ae8', '#5ff6ff'];
@@ -1512,7 +1527,8 @@ class App {
     this.effects.update(gdt);
     const rs = this.post.renderSize;
     const pxScale = rs.y / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
-    this.world.update(dt, { level: this.state === 'menu' ? 0 : g.level, reduceMotion: rm, pxScale });
+    this.world.update(dt, { level: this.state === 'menu' ? 0 : g.level, reduceMotion: rm, pxScale, camera: this.camera });
+    this.weatherSounds();
     this.world.updateWalls(g, dt, this.state === 'playing');
     const food = g.food ? this.toWorld(g.food.x, g.food.z, g.food.y) : null;
     arena.update(dt, this.simTime, this.world.skyAmount, this.snake.headPos, food, g.flying && this.state !== 'menu');
@@ -1565,8 +1581,25 @@ class App {
     P.uFlashColor.value.copy(this.flashColor);
     P.uTime.value = this.simTime;
     P.uCenter.value.set(0.5, view ? 0.56 : 0.5);
+    this.aimSunRays(pp);
     this.renderer.toneMappingExposure = pp.exposure;
     this.post.render(this.scene, this.camera, { threshold: pp.threshold });
+  }
+
+  // Where the sun is on screen, for the light shafts. They fade out as the
+  // sun goes behind the camera or far off the edge of the screen.
+  aimSunRays(pp) {
+    const sun = this.post.sun;
+    const dir = this.world.sunDir;
+    const fwd = this.camera.getWorldDirection(this.tmpFwd || (this.tmpFwd = new THREE.Vector3()));
+    const facing = fwd.dot(dir);
+    const v = (this.tmpSunV || (this.tmpSunV = new THREE.Vector3())).copy(this.camera.position).addScaledVector(dir, 400).project(this.camera);
+    const off = Math.max(Math.abs(v.x), Math.abs(v.y));
+    const k = THREE.MathUtils.smoothstep(facing, 0.02, 0.4) * (1 - THREE.MathUtils.smoothstep(off, 1.15, 2.4));
+    sun.uv.set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5);
+    sun.color.copy(this.world.p.sunColor);
+    sun.amount = pp.rays * k;
+    sun.spread = 6.5 + 4 * (1 - this.world.p.sunSize / 3);
   }
 
   // Frame-time driven resolution scaling, then quality stepping (Auto only).
