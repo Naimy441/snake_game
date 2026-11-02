@@ -49,7 +49,6 @@ export class GhostBot {
       this.score = 0;
     }
     this.pendingGrowth = 0;
-    this.warpTo = fromPlayer && g.warpTo ? { ...g.warpTo } : null;
     this.ticks = 0;
     this.time = 0;
     this.t = 1;
@@ -97,15 +96,9 @@ export class GhostBot {
   // layer level with the board.
   liftOff() {
     this.flying = true;
-    this.warpTo = null;
     const move = (c) => ({ ...c, x: c.x + SKY_PAD, z: c.z + SKY_PAD, y: SKY_LIFT });
     this.cells = this.cells.map(move);
     if (this.removedTail) this.removedTail = move(this.removedTail);
-  }
-
-  // Partner of an open portal on this cell (portals only exist on the ground).
-  exitOf(x, z) {
-    return this.game.flying ? null : this.game.portalExit(x, z);
   }
 
   get level() {
@@ -176,46 +169,27 @@ export class GhostBot {
     return f;
   }
 
-  // Time-aware BFS from the head. Returns parent/dist arrays. Stepping onto
-  // an open portal carries on to its partner on the next move (the portal
-  // cell itself is only passed through), and the snake can't then reverse
-  // straight back out of the exit.
+  // Time-aware BFS from the head. Returns parent/dist arrays.
   bfs(cells, growth, blocked) {
     const free = this.freeTimes(cells, growth);
     const dist = new Int32Array(this.cellCount).fill(-1);
     const parent = new Int32Array(this.cellCount).fill(-1);
-    const came = new Int8Array(this.cellCount).fill(-1); // move that warped us onto an exit
     const h = cells[0];
     const start = this.idx(h.x, h.z, Y(h));
     dist[start] = 0;
     const queue = [start];
     const nbs = this.nb;
-    const portals = !this.game.flying && this.game.portals.length > 0;
     for (let qi = 0; qi < queue.length; qi++) {
       const k = queue[qi];
       const c = this.cellOf(k);
       const d = dist[k] + 1;
-      for (let i = 0; i < nbs.length; i++) {
-        if (came[k] >= 0 && (came[k] ^ 1) === i) continue; // no U-turn out of a portal
-        const nb = nbs[i];
+      for (const nb of nbs) {
         const nx = c.x + nb.x;
         const nz = c.z + nb.z;
         const ny = c.y + Y(nb);
         if (!this.inside(nx, nz, ny)) continue;
         const nk = this.idx(nx, nz, ny);
         if (dist[nk] >= 0 || blocked[nk] || free[nk] > d) continue;
-        const exit = portals ? this.exitOf(nx, nz) : null;
-        if (exit) {
-          const ek = this.idx(exit.x, exit.z, 0);
-          if (dist[ek] >= 0 || blocked[ek] || free[ek] > d + 1) continue;
-          dist[nk] = d;
-          parent[nk] = k;
-          dist[ek] = d + 1;
-          parent[ek] = nk;
-          came[ek] = i;
-          queue.push(ek);
-          continue;
-        }
         dist[nk] = d;
         parent[nk] = k;
         queue.push(nk);
@@ -302,10 +276,7 @@ export class GhostBot {
       if (!this.inside(nx, nz, ny)) continue;
       const k = this.idx(nx, nz, ny);
       if (blocked[k] || free[k] > 1) continue;
-      // a portal takes us on to its partner
-      const exit = this.exitOf(nx, nz);
-      if (exit && (blocked[this.idx(exit.x, exit.z, 0)] || free[this.idx(exit.x, exit.z, 0)] > 2)) continue;
-      const sim = this.simulate(exit ? [{ x: nx, z: nz, y: 0 }, { x: exit.x, z: exit.z, y: 0 }] : [{ x: nx, z: nz, y: ny }], 0);
+      const sim = this.simulate([{ x: nx, z: nz, y: ny }], 0);
       const safe = this.tailReachable(sim.body, sim.growth, blocked);
       const { dist } = this.bfs(sim.body, sim.growth, blocked);
       let area = 0;
@@ -335,7 +306,6 @@ export class GhostBot {
           this.facing = { ...DIRS.up };
           this.removedTail = null;
           this.pendingGrowth = 0;
-          this.warpTo = null;
           this.respawns++;
           return;
         }
@@ -351,10 +321,7 @@ export class GhostBot {
   // One move.
   step() {
     const g = this.game;
-    // halfway through a portal: this move is the jump to its partner
-    const warp = this.warpTo;
-    this.warpTo = null;
-    const plan = warp ? { dir: this.dir, rush: this.rushing } : this.decide();
+    const plan = this.decide();
     if (!plan.dir) {
       this.respawn();
       return { respawned: true };
@@ -366,9 +333,9 @@ export class GhostBot {
     if (this.rushing) this.rush = Math.max(0, this.rush - (RUSH_DRAIN_PER_SEC * interval) / 1000);
     this.dir = plan.dir;
     if (!Y(this.dir)) this.facing = this.dir;
-    const nx = warp ? warp.x : this.head.x + this.dir.x;
-    const nz = warp ? warp.z : this.head.z + this.dir.z;
-    const ny = warp ? 0 : Y(this.head) + Y(this.dir);
+    const nx = this.head.x + this.dir.x;
+    const nz = this.head.z + this.dir.z;
+    const ny = Y(this.head) + Y(this.dir);
     // The plan is always legal; this guards against the board changing
     // under the ghost (a pillar rising in its way). Checked before any pickup
     // adds growth: an apple may spawn on the ghost's own tail, and a ghost
@@ -425,19 +392,13 @@ export class GhostBot {
     } else {
       this.removedTail = this.cells.pop();
     }
-    if (warp) ev.warped = true;
-    else {
-      const exit = this.exitOf(nx, nz);
-      if (exit) this.warpTo = { x: exit.x, z: exit.z };
-    }
     return ev;
   }
 
   // Advance by real time. Waits (paused) when nothing is left to collect.
   update(dtMs) {
     if (this.game.flying && !this.flying) this.liftOff();
-    // (never stop halfway through a portal)
-    const wanted = this.targets().length > 0 || !!this.warpTo;
+    const wanted = this.targets().length > 0;
     if (!wanted) {
       // finish gliding into the last cell, then hold still
       this.paused = true;
@@ -453,7 +414,7 @@ export class GhostBot {
     while (this.t >= 1 && guard++ < 4) {
       this.t -= 1;
       events.push(this.step());
-      if (!this.targets().length && !this.warpTo) {
+      if (!this.targets().length) {
         this.paused = true;
         this.t = Math.min(this.t, 1);
         break;
