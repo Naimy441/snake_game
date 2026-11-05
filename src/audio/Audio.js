@@ -1,13 +1,199 @@
 // Every sound is synthesised with Web Audio at runtime: no audio files.
-// Sound effects only; the game has no music.
+//
+// Music is an adaptive chiptune engine. Each zone has its own song (key,
+// chords, a composed verse and chorus melody). Instrument layers (bass, arp,
+// drums, lead, chord stabs, counter-melody, rush sparkle) fade in and out
+// smoothly with the game's intensity, the drums step up through three
+// grooves, sections hand over on bar lines with drum fills, and zone changes
+// land on a downbeat after a fill and a crash, so nothing ever cuts abruptly.
 
 const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
+
+const SCALES = { major: [0, 2, 4, 5, 7, 9, 11], minor: [0, 2, 3, 5, 7, 8, 10] };
+const QUALITY = { maj: [0, 4, 7], m: [0, 3, 7], maj7: [0, 4, 7, 11], m7: [0, 3, 7, 10], 7: [0, 4, 7, 10], 6: [0, 4, 7, 9] };
+
+// Melodies: 16 tokens per bar. Numbers are scale degrees (1 = key root,
+// 8 = an octave up), '-' holds the previous note, '.' is a rest.
+const SONGS = [
+  {
+    name: 'Emerald Coast', key: 0, scale: 'major', tempo: 140, lead: 0.25,
+    A: {
+      chords: [[5, 'maj7'], [7, '6'], [4, 'm7'], [9, 'm7']],
+      melody: [
+        '8 - - 7 - - 6 - 5 - - - 3 - 5 -', '6 - - 5 - - 4 - 5 - - - - - . .',
+        '7 - - 6 - - 5 - 3 - - - 2 - 3 -', '6 - - - - - . . 5 - 6 - 8 - 9 -',
+        '10 - - 9 - - 8 - 6 - - - 8 - 9 -', '9 - - 8 - - 7 - 5 - - - 7 - 8 -',
+        '7 - 5 - 7 - 9 - 8 - 7 - 5 - 3 -', '6 - - - - - - - . . . . 5 6 7 8',
+      ],
+    },
+    B: {
+      chords: [[2, 'm7'], [7, '7'], [0, 'maj7'], [9, 'm7']],
+      melody: [
+        '11 - - 10 - - 9 - 10 - - - 8 - 9 -', '9 - - 7 - - 5 - 7 - - - 9 - 11 -',
+        '10 - - - - - 12 - - - 10 - 8 - - -', '6 - 8 - 10 - - - 9 - 8 - 7 - - -',
+        '11 - - 10 - - 9 - 10 - - - 12 - 11 -', '11 - - 9 - - 7 - 9 - - - 11 - 12 -',
+        '14 - - - - - 12 - - - 10 - 12 - - -', '13 - - - 12 - - - 10 - - - 8 - 9 -',
+      ],
+    },
+  },
+  {
+    name: 'Golden Canyon', key: 2, scale: 'major', tempo: 146, lead: 0.25,
+    A: {
+      chords: [[9, 'm7'], [5, 'maj7'], [0, 'maj'], [7, 'maj']],
+      melody: [
+        '6 - - 5 - - 3 - 5 - - - 6 - 8 -', '7 - - 8 - - 7 - 5 - - - 3 - - -',
+        '5 - - 3 - - 2 - 3 - 5 - 8 - - -', '7 - - - 6 - 5 - 6 - - - . . . .',
+        '10 - - 9 - - 8 - 9 - - - 10 - 12 -', '11 - - 10 - - 9 - 7 - - - 5 - 7 -',
+        '8 - 7 - 8 - 10 - 12 - - - 10 - 8 -', '9 - - - - - - - 7 . 8 . 9 . 10 .',
+      ],
+    },
+    B: {
+      chords: [[2, 'm7'], [7, '7'], [4, 'm7'], [9, 'm7']],
+      melody: [
+        '9 - - 8 - - 9 - 11 - - - 12 - - -', '12 - - 11 - - 9 - 7 - - - 9 - 11 -',
+        '10 - - - 12 - - - 14 - - - 12 - 10 -', '13 - - 12 - - 10 - 12 - - - - - . .',
+        '9 - - 8 - - 9 - 11 - - - 12 - 13 -', '14 - - 13 - - 12 - 11 - - - 9 - 11 -',
+        '12 - - 10 - - 12 - 14 - - - 15 - - -', '13 - - - - - 12 - 10 - 9 - 8 - - -',
+      ],
+    },
+  },
+  {
+    name: 'Neon Night', key: 9, scale: 'minor', tempo: 152, lead: 0.5,
+    A: {
+      chords: [[0, 'm7'], [8, 'maj7'], [10, 'maj'], [7, 'm7']],
+      melody: [
+        '8 - . 8 - . 7 - 8 - - - 10 - 8 -', '6 - - 5 - - 3 - 5 - - - 6 - - -',
+        '7 - . 7 - . 6 - 7 - - - 9 - 7 -', '5 - - - - - . . 3 - 4 - 5 - 7 -',
+        '8 - . 8 - . 10 - 12 - - - 10 - 8 -', '10 - - 9 - - 8 - 6 - - - 8 - - -',
+        '9 - - 8 - - 7 - 9 - 11 - 12 - - -', '12 - - - 11 - - - 9 - - - 7 - - -',
+      ],
+    },
+    B: {
+      chords: [[5, 'm7'], [7, 'm7'], [8, 'maj7'], [10, '6']],
+      melody: [
+        '11 - - 10 - - 11 - 12 - - - 13 - 12 -', '12 - - 11 - - 9 - 7 - - - 9 - - -',
+        '10 - - - 12 - - - 13 - - - 12 - 10 -', '11 - - - - - 12 - 14 - - - - - . .',
+        '11 - - 10 - - 11 - 12 - - - 13 - 15 -', '14 - - 12 - - 11 - 12 - - - 9 - - -',
+        '10 - 12 - 13 - 12 - 10 - 9 - 8 - - -', '7 - - - 9 - - - 11 - 12 - 14 - 15 -',
+      ],
+    },
+  },
+  {
+    name: 'Cyber Overdrive', key: 6, scale: 'minor', tempo: 160, lead: 0.5,
+    A: {
+      chords: [[0, 'm'], [8, 'maj'], [10, 'maj'], [7, 'm']],
+      melody: [
+        '8 - 8 - 10 - 8 - 12 - - - 10 - 8 -', '6 - 6 - 8 - 6 - 10 - - - 8 - 6 -',
+        '7 - 7 - 9 - 7 - 11 - - - 12 - 11 -', '12 - - - 10 - - - 9 - - - 8 - - -',
+        '15 - - 12 - - 10 - 12 - - - 15 - 14 -', '13 - - 10 - - 8 - 10 - - - 13 - 12 -',
+        '11 - - 12 - - 14 - 12 - 11 - 9 - 11 -', '12 - - - - - - - 12 . 14 . 15 . 16 .',
+      ],
+    },
+    B: {
+      chords: [[5, 'm'], [8, 'maj'], [10, 'maj'], [0, 'm']],
+      melody: [
+        '11 - - 12 - - 13 - 12 - 11 - 10 - 11 -', '13 - - 12 - - 10 - 8 - - - 10 - 12 -',
+        '14 - - - 12 - - - 11 - - - 12 - 14 -', '15 - - - - - 12 - 10 - - - 8 - - -',
+        '11 - - 12 - - 13 - 15 - - - 13 - 12 -', '13 - - 15 - - 17 - 15 - - - 13 - 12 -',
+        '14 - 12 - 14 - 16 - 14 - 12 - 11 - 9 -', '8 - - - - - - - 15 - - - - - - -',
+      ],
+    },
+  },
+  {
+    // soaring synthwave in a bright major key for the flight above the clouds
+    name: 'Sunset Heavens', key: 5, scale: 'major', tempo: 150, lead: 0.5,
+    A: {
+      chords: [[0, 'maj7'], [7, 'maj'], [9, 'm7'], [5, 'maj7']],
+      melody: [
+        '5 - - 6 - - 8 - - - 9 - 8 - 6 -', '5 - - - - - 3 - 5 - - - . . . .',
+        '5 - - 6 - - 8 - - - 10 - 9 - 8 -', '9 - - - 8 - - - 6 - - - . . 5 6',
+        '8 - - 9 - - 10 - - - 12 - 10 - 9 -', '8 - - - - - 6 - 8 - - - 9 - 10 -',
+        '12 - - 10 - - 9 - 10 - - - 8 - 9 -', '8 - - - - - - - . . 5 . 6 . 7 .',
+      ],
+    },
+    B: {
+      chords: [[2, 'm7'], [5, 'maj7'], [0, 'maj'], [7, '7']],
+      melody: [
+        '10 - - 9 - - 10 - 12 - - - 13 - 12 -', '12 - - 10 - - 9 - 8 - - - 9 - 10 -',
+        '9 - - - 8 - 6 - 8 - - - 10 - - -', '12 - - 10 - - 12 - 14 - - - - - . .',
+        '15 - - 14 - - 12 - 14 - - - 12 - 10 -', '12 - - 10 - - 9 - 10 - - - 12 - 13 -',
+        '14 - - 12 - - 10 - 12 - - - 10 - 9 -', '8 - - - - - - - 12 . 13 . 14 . 15 .',
+      ],
+    },
+  },
+  {
+    // the finale: a vast, slow minor-key anthem in orbit round the black hole
+    name: 'Galactic Core', key: 2, scale: 'minor', tempo: 132, lead: 0.5,
+    A: {
+      chords: [[0, 'm7'], [8, 'maj7'], [3, 'maj'], [10, 'maj']],
+      melody: [
+        '5 - - - 8 - - - 7 - 8 - 5 - - -', '3 - - - 4 - 5 - - - - - . . . .',
+        '6 - - - 5 - - - 4 - 5 - 6 - - -', '8 - - - 7 - - - 5 - - - . . 5 6',
+        '8 - - 9 - - 10 - - - 9 - 8 - - -', '7 - - - 5 - - - 3 - 5 - - - . .',
+        '7 - 8 - 9 - 10 - 11 - - - 10 - 9 -', '8 - - - - - - - . . . . 5 6 7 8',
+      ],
+    },
+    B: {
+      chords: [[8, 'maj7'], [10, '6'], [0, 'm'], [7, 'm7']],
+      melody: [
+        '10 - - - 12 - - - 11 - 10 - 8 - - -', '10 - - - 9 - 8 - 6 - - - 8 - - -',
+        '9 - - - 11 - - - 12 - 11 - 9 - - -', '12 - - - 14 - - - 12 - - - . . . .',
+        '15 - - - 14 - 12 - 10 - - - 12 - - -', '13 - - - 12 - - - 10 - 9 - 8 - - -',
+        '9 - - 10 - - 12 - - - 14 - 12 - 10 -', '12 - - - - - - - 12 . 13 . 14 . 15 .',
+      ],
+    },
+  },
+];
+
+const SONG_STARTS = [0, 3, 6, 9, 12, 14]; // first level of each zone
+
+const BASS = {
+  menu: 'R - - - - - - - 5 - - - - - - -',
+  1: 'R - - - - - . R - - . . 5 - . .',
+  2: 'R - . R O . R - . R - . 5 . 7 .',
+  3: 'R . O R . O R . R O . R 5 . 7 O',
+};
+const DRUMS = {
+  1: { k: 'x.......x.x.....', s: '....x.......x...', h: '..x...x...x...x.' },
+  2: { k: 'x.....x...x.....', s: '....x.......x..x', h: 'x.x.x.x.x.x.x.x.' },
+  3: { k: 'x..x..x...x..x..', s: '....x..x....x.x.', h: 'xxxxxxxxxxxxxxxx' },
+};
+const FILL = { k: 'x.....x.x.......', s: '....x...xxxxxxxx', h: 'x.x.x.x.........' };
+
+function parseMelody(lines) {
+  const toks = lines.join(' ').split(/\s+/);
+  const notes = new Array(toks.length).fill(null);
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    if (t === '-' || t === '.') continue;
+    let len = 1;
+    while (toks[i + len] === '-') len++;
+    notes[i] = { deg: Number(t), len };
+  }
+  return notes;
+}
+
+for (const s of SONGS) {
+  s.A.notes = parseMelody(s.A.melody);
+  s.B.notes = parseMelody(s.B.melody);
+  s.root = s.key > 5 ? 48 + s.key : 60 + s.key;
+}
+
+function degreeToSemis(scale, deg) {
+  const d = deg - 1;
+  const oct = Math.floor(d / 7);
+  return SCALES[scale][((d % 7) + 7) % 7] + oct * 12;
+}
 
 export class AudioEngine {
   constructor() {
     this.ctx = null;
     this.sfxVolume = 0.8;
+    this.musicVolume = 0.45;
     this.muted = false;
+    this.musicOn = false;
+    this.timer = null;
+    this.state = { menu: true, intensity: 0, rush: false, zone: 0, level: 0, paused: false };
   }
 
   // Browsers only allow audio after a user gesture; call this from one.
@@ -32,6 +218,29 @@ export class AudioEngine {
     this.master.connect(this.comp).connect(c.destination);
     this.sfx = c.createGain();
     this.sfx.connect(this.master);
+    this.music = c.createGain();
+    this.musicFilter = c.createBiquadFilter();
+    this.musicFilter.type = 'lowpass';
+    this.musicFilter.frequency.value = 18000;
+    this.musicFilter.Q.value = 0.7;
+    this.musicFade = c.createGain();
+    // separate low-pass for slow-motion moments (pause/death use musicFilter)
+    this.slowFilter = c.createBiquadFilter();
+    this.slowFilter.type = 'lowpass';
+    this.slowFilter.frequency.value = 20000;
+    this.music.connect(this.musicFilter).connect(this.slowFilter).connect(this.musicFade).connect(this.master);
+
+    // echo + small room for the lead and sfx
+    this.delay = c.createDelay(1);
+    this.delayFb = c.createGain();
+    this.delayFb.gain.value = 0.32;
+    const dl = c.createBiquadFilter();
+    dl.type = 'lowpass';
+    dl.frequency.value = 3200;
+    this.delay.connect(dl).connect(this.delayFb).connect(this.delay);
+    this.delayOut = c.createGain();
+    this.delayOut.gain.value = 0.28;
+    dl.connect(this.delayOut).connect(this.music);
     this.reverb = c.createConvolver();
     this.reverb.buffer = this.makeImpulse(1.6);
     this.reverbOut = c.createGain();
@@ -46,6 +255,17 @@ export class AudioEngine {
     this.waves = {};
     for (const duty of [0.125, 0.25, 0.5]) this.waves[duty] = this.pulseWave(duty);
 
+    // one gain per music layer, faded smoothly with intensity
+    this.layers = {};
+    for (const name of ['bass', 'arp', 'drums', 'lead', 'stabs', 'counter', 'sparkle']) {
+      const g = c.createGain();
+      g.gain.value = 0;
+      g.connect(this.music);
+      this.layers[name] = { gain: g, level: 0, target: 0 };
+    }
+    this.layers.lead.gain.connect(this.delay);
+    this.layers.lead.gain.connect(this.reverb);
+    this.layers.counter.gain.connect(this.delay);
     this.sfxSend = c.createGain();
     this.sfxSend.gain.value = 0.35;
     this.sfx.connect(this.sfxSend).connect(this.reverb);
@@ -75,10 +295,12 @@ export class AudioEngine {
     if (!this.ctx) return;
     this.master.gain.value = this.muted ? 0 : 1;
     this.sfx.gain.value = this.sfxVolume * 0.55;
+    this.music.gain.value = this.musicVolume * 0.42;
   }
 
-  setVolumes({ sfx, muted }) {
+  setVolumes({ sfx, music, muted }) {
     if (sfx !== undefined) this.sfxVolume = sfx;
+    if (music !== undefined) this.musicVolume = music;
     if (muted !== undefined) this.muted = muted;
     this.applyVolumes();
   }
@@ -247,5 +469,358 @@ export class AudioEngine {
 
   ui() {
     this.voice(midi(88), { wave: 0.125, dur: 0.04, gain: 0.05 });
+  }
+
+  // Flying level with the apple: a soft, bright double ping.
+  altLevel() {
+    this.voice(midi(86), { wave: 'sine', dur: 0.08, gain: 0.06 });
+    this.voice(midi(93), { wave: 'sine', at: 0.07, dur: 0.16, gain: 0.05, release: 0.12 });
+  }
+
+  // ---------------------------------------------------------------- Galactic Core
+  // Charging up for hyperspeed: a whine that climbs and an engine that builds.
+  warpCharge() {
+    this.voice(180, { wave: 'sine', dur: 1.75, gain: 0.06, slide: 9, attack: 1.4, release: 0.05 });
+    this.voice(90, { wave: 'sawtooth', dur: 1.75, gain: 0.04, slide: 3, attack: 1.2, release: 0.05, vibrato: 0.03 });
+    this.voice(45, { wave: 'sine', dur: 1.75, gain: 0.25, slide: 1.6, attack: 1.5, release: 0.05 });
+    this.noiseHit({ dur: 1.75, gain: 0.05, freq: 400, sweep: 10, q: 3 });
+    [0, 5, 7, 12, 17, 19, 24].forEach((n, i) => this.voice(midi(62 + n), { wave: 0.125, at: 0.3 + i * 0.2, dur: 0.14, gain: 0.035 + i * 0.006 }));
+  }
+
+  // Hyperspeed: the jump's crack, then a roaring riser for the whole tunnel.
+  warp() {
+    this.noiseHit({ dur: 0.5, gain: 0.35, freq: 5000, sweep: 0.1, q: 0.5 });
+    this.voice(110, { wave: 'sine', dur: 0.9, gain: 0.45, slide: 0.35, release: 0.7 });
+    this.noiseHit({ dur: 4.7, gain: 0.2, freq: 150, sweep: 40, q: 1.1 });
+    this.noiseHit({ dur: 4.7, gain: 0.05, freq: 3500, type: 'highpass', sweep: 2.5 });
+    this.voice(55, { wave: 'sawtooth', dur: 4.7, gain: 0.05, slide: 16, attack: 0.6, release: 0.2 });
+    this.voice(82.4, { wave: 'sawtooth', dur: 4.7, gain: 0.04, slide: 16, attack: 0.6, release: 0.2 });
+    this.voice(41.2, { wave: 'sine', dur: 4.7, gain: 0.25, slide: 3, attack: 1.2, release: 0.2 });
+    [0, 7, 12, 19, 24, 31, 36, 43].forEach((n, i) => this.voice(midi(50 + n), { wave: 0.25, at: 0.25 + i * 0.52, dur: 0.45, gain: 0.05 }));
+  }
+
+  // Dropping out of hyperspeed: a deep boom, then a cold, wide chord.
+  dropOut() {
+    this.voice(70, { wave: 'sine', dur: 2.4, gain: 0.5, slide: 0.3, release: 2 });
+    this.noiseHit({ dur: 2.6, gain: 0.28, freq: 1200, type: 'lowpass', sweep: 0.06 });
+    this.noiseHit({ dur: 0.3, gain: 0.25, freq: 4000, type: 'highpass' });
+    [0, 7, 12, 15, 19, 26].forEach((n, i) => this.voice(midi(50 + n), { wave: 'sine', at: 0.5 + i * 0.14, dur: 3.2, gain: 0.045, attack: 0.4, release: 2.4, vibrato: 0.006 }));
+  }
+
+  // Cells are doomed: a crackle and a thin, rising whine as the black hole
+  // starts to pull on them (rate-limited, apples can come quickly).
+  doomWarn(n = 3) {
+    const now = this.ctx ? this.ctx.currentTime : 0;
+    if (now - (this.lastDoom || -9) < 0.25) return;
+    this.lastDoom = now;
+    for (let i = 0; i < Math.min(4, n); i++) this.noiseHit({ at: i * 0.06, dur: 0.05, gain: 0.05, freq: 3500 + i * 900, q: 3 });
+    this.voice(midi(81), { wave: 'sine', at: 0.05, dur: 1.2, gain: 0.02, slide: 1.35, attack: 1.0, release: 0.15, vibrato: 0.03 });
+  }
+
+  // Tiles break off and fall in: a falling, filtered whoosh, and a soft deep
+  // thud a moment later as the light hits the horizon.
+  suckIn(n = 1) {
+    const now = this.ctx ? this.ctx.currentTime : 0;
+    if (now - (this.lastSuck || -9) < 0.12) return;
+    this.lastSuck = now;
+    const g = Math.min(1, 0.55 + n * 0.15);
+    this.noiseHit({ dur: 0.9, gain: 0.12 * g, freq: 3200, sweep: 0.08, q: 1.4 });
+    this.voice(midi(76), { wave: 'sine', dur: 0.8, gain: 0.03 * g, slide: 0.25, release: 0.3 });
+    this.voice(55, { wave: 'sine', at: 2.3, dur: 0.7, gain: 0.2 * g, slide: 0.6, attack: 0.02, release: 0.5 });
+  }
+
+  // The last cell: everything goes quiet and the core draws itself in.
+  finaleGather() {
+    // (about as long as everything takes to pour into the black hole)
+    this.voice(32.7, { wave: 'sine', dur: 3.6, gain: 0.45, slide: 1.8, attack: 3.2, release: 0.05 });
+    this.voice(65.4, { wave: 'sawtooth', dur: 3.6, gain: 0.04, slide: 2.5, attack: 3.3, release: 0.05 });
+    this.noiseHit({ dur: 3.5, gain: 0.05, freq: 300, sweep: 12, q: 2 });
+    this.noiseHit({ at: 0.4, dur: 2.6, gain: 0.08, freq: 4000, sweep: 0.06, q: 1 });
+    [0, 12, 24].forEach((n) => this.voice(midi(86 + n), { wave: 'sine', dur: 3.5, gain: 0.02, attack: 3.3, release: 0.05, vibrato: 0.02 }));
+  }
+
+  // The eruption: a huge boom and a triumphant major chord that rings out.
+  finaleBoom() {
+    this.voice(90, { wave: 'sine', dur: 4.5, gain: 0.7, slide: 0.22, release: 3.5 });
+    this.noiseHit({ dur: 5, gain: 0.5, freq: 2500, type: 'lowpass', sweep: 0.05, q: 0.5 });
+    this.noiseHit({ dur: 3.2, gain: 0.18, freq: 6000, type: 'highpass' });
+    [38, 50, 57, 62, 66, 69, 74, 78, 81].forEach((n, i) => this.voice(midi(n), { wave: i < 3 ? 'sawtooth' : 0.25, dur: 6.5, gain: i < 2 ? 0.06 : 0.04, attack: 0.02 + i * 0.03, release: 4.5, vibrato: 0.005 }));
+    [0, 4, 7, 12, 16, 19, 24, 28, 31, 36].forEach((n, i) => this.voice(midi(74 + n), { wave: 0.125, at: 0.3 + i * 0.07, dur: 0.5, gain: 0.05, release: 0.4 }));
+  }
+
+  // Victory: a slow, rising chord progression that resolves to D major.
+  victory() {
+    const chords = [[46, 53, 58, 62, 65], [48, 55, 60, 64, 67], [45, 52, 57, 61, 64], [50, 57, 62, 66, 69, 74]];
+    chords.forEach((ch, i) => {
+      const at = i * 1.5;
+      const last = i === chords.length - 1;
+      ch.forEach((n, j) => this.voice(midi(n), { wave: j === 0 ? 'sawtooth' : 'sine', at, dur: last ? 5 : 1.7, gain: j === 0 ? 0.03 : 0.04, attack: 0.25, release: last ? 3.5 : 0.6, vibrato: 0.006 }));
+    });
+    [74, 78, 81, 86].forEach((n, i) => this.voice(midi(n), { wave: 0.25, at: 4.5 + i * 0.12, dur: 2.6, gain: 0.04, release: 2, vibrato: 0.01 }));
+    this.noiseHit({ at: 4.4, dur: 2.5, gain: 0.07, freq: 8000, type: 'highpass' });
+  }
+
+  // ---------------------------------------------------------------- music
+  startMusic({ menu = false } = {}) {
+    if (!this.ctx) return;
+    this.state.menu = menu;
+    clearTimeout(this.stopTimer);
+    const now = this.ctx.currentTime;
+    this.musicFade.gain.cancelScheduledValues(now);
+    this.musicFade.gain.setTargetAtTime(1, now, 0.15);
+    this.musicFilter.frequency.cancelScheduledValues(now);
+    this.musicFilter.frequency.setTargetAtTime(18000, now, 0.2);
+    if (this.musicOn) {
+      // already playing (e.g. menu -> game): restart the song on the next bar
+      this.restartAtBar = true;
+      return;
+    }
+    this.musicOn = true;
+    this.zone = this.state.zone;
+    this.section = 'A';
+    this.bar = 0;
+    this.step = 0;
+    this.tempo = menu ? 112 : SONGS[this.zone].tempo;
+    this.fill = false;
+    this.pendingZone = null;
+    this.nextTime = now + 0.06;
+    clearInterval(this.timer);
+    this.timer = setInterval(() => this.schedule(), 25);
+  }
+
+  // Fade out instead of cutting (death, back to silence).
+  stopMusic({ fade = 1.2 } = {}) {
+    if (!this.ctx || !this.musicOn) return;
+    const now = this.ctx.currentTime;
+    this.musicFade.gain.cancelScheduledValues(now);
+    this.musicFade.gain.setTargetAtTime(0, now, fade / 4);
+    this.musicFilter.frequency.cancelScheduledValues(now);
+    this.musicFilter.frequency.setTargetAtTime(400, now, fade / 4);
+    clearTimeout(this.stopTimer);
+    this.stopTimer = setTimeout(() => {
+      if (this.musicFade.gain.value < 0.05) {
+        this.musicOn = false;
+        clearInterval(this.timer);
+      }
+    }, fade * 1000 + 100);
+  }
+
+  // Slow motion: the music sinks under water for a moment.
+  setSlow(on) {
+    if (!this.ctx || this.slowOn === on) return;
+    this.slowOn = on;
+    const now = this.ctx.currentTime;
+    this.slowFilter.frequency.cancelScheduledValues(now);
+    this.slowFilter.frequency.setTargetAtTime(on ? 1200 : 20000, now, on ? 0.08 : 0.35);
+  }
+
+  // Muffled and quieter while paused, so the music keeps flowing.
+  setPaused(paused) {
+    if (!this.ctx) return;
+    this.state.paused = paused;
+    const now = this.ctx.currentTime;
+    this.musicFilter.frequency.cancelScheduledValues(now);
+    this.musicFilter.frequency.setTargetAtTime(paused ? 900 : 18000, now, 0.12);
+    this.musicFade.gain.cancelScheduledValues(now);
+    this.musicFade.gain.setTargetAtTime(paused ? 0.45 : 1, now, 0.12);
+  }
+
+  // Called every frame by the game.
+  setMusicState({ menu, intensity, rush, zone, level }) {
+    const s = this.state;
+    if (menu !== undefined) s.menu = menu;
+    if (intensity !== undefined) s.intensity = intensity;
+    if (rush !== undefined) s.rush = rush;
+    if (level !== undefined) s.level = level;
+    if (zone !== undefined && zone !== s.zone) {
+      s.zone = zone;
+      if (this.musicOn) this.pendingZone = zone;
+      else this.zone = zone;
+    }
+  }
+
+  tier() {
+    if (this.state.menu) return 0;
+    const i = this.state.intensity;
+    return i < 0.3 ? 1 : i < 0.65 ? 2 : 3;
+  }
+
+  updateLayers() {
+    const s = this.state;
+    const i = s.intensity;
+    const menu = s.menu;
+    const t = {
+      bass: menu ? 0.55 : 1,
+      arp: menu ? 0.75 : 0.55 + i * 0.45,
+      drums: menu ? 0 : 1,
+      lead: menu ? 0.5 : 1, // a soft melody on the title screen so each map's song is recognisable
+      stabs: !menu && i >= 0.35 ? 1 : 0,
+      counter: !menu && i >= 0.62 ? 1 : 0,
+      sparkle: !menu && s.rush ? 1 : 0,
+    };
+    const now = this.ctx.currentTime;
+    for (const [k, v] of Object.entries(t)) {
+      const L = this.layers[k];
+      if (L.target !== v) {
+        L.target = v;
+        L.gain.gain.cancelScheduledValues(now);
+        L.gain.gain.setTargetAtTime(v, now, k === 'sparkle' ? 0.25 : 1.4);
+      }
+      L.level = L.gain.gain.value;
+    }
+  }
+
+  active(name) {
+    const L = this.layers[name];
+    return L.target > 0 || L.level > 0.01;
+  }
+
+  schedule() {
+    if (!this.ctx || !this.musicOn) return;
+    this.updateLayers();
+    while (this.nextTime < this.ctx.currentTime + 0.15) {
+      this.playStep(this.nextTime);
+      this.nextTime += 60 / this.tempo / 4;
+      this.advance();
+    }
+  }
+
+  advance() {
+    this.step++;
+    if (this.step < 16) return;
+    this.step = 0;
+    this.bar++;
+    const song = SONGS[this.zone];
+    const target = this.state.menu ? 112 : song.tempo + Math.min(4, this.state.level - SONG_STARTS[this.zone]) * 1.5;
+    this.tempo += (target - this.tempo) * 0.35;
+    if (this.fill) {
+      this.fill = false;
+      if (this.pendingZone !== null) {
+        this.zone = this.pendingZone;
+        this.pendingZone = null;
+        this.section = 'A';
+        this.bar = 0;
+        this.crash = true;
+        return;
+      }
+    }
+    if (this.restartAtBar) {
+      this.restartAtBar = false;
+      this.section = 'A';
+      this.bar = 0;
+      this.crash = !this.state.menu;
+      return;
+    }
+    if (this.pendingZone !== null) {
+      this.fill = true; // one bar of fill, then the new zone lands
+      return;
+    }
+    if (this.bar >= 8) {
+      this.bar = 0;
+      const wantB = !this.state.menu && this.state.intensity >= 0.3;
+      this.section = this.section === 'A' && wantB ? 'B' : 'A';
+      this.crash = !this.state.menu;
+    } else if (this.bar === 7 && !this.state.menu) {
+      const wantB = this.state.intensity >= 0.3;
+      if (this.section === 'B' || wantB) this.fill = true;
+    }
+  }
+
+  playStep(t) {
+    const song = SONGS[this.zone];
+    const sec = song[this.section];
+    const s = this.step;
+    const barIdx = Math.min(7, this.bar);
+    const [cRoot, cQual] = sec.chords[barIdx % 4];
+    const chord = QUALITY[cQual];
+    const key = song.key;
+    const spb = 60 / this.tempo / 4;
+    const tier = this.tier();
+    const L = this.layers;
+
+    // bass: triangle with a thin pulse on top for presence
+    if (this.active('bass')) {
+      const pat = (tier === 0 ? BASS.menu : BASS[tier]).split(' ');
+      const tok = pat[s];
+      if (tok !== '-' && tok !== '.') {
+        let len = 1;
+        while (pat[s + len] === '-') len++;
+        const base = 36 + ((key + cRoot) % 12);
+        const off = tok === 'R' ? 0 : tok === 'O' ? 12 : tok === '5' ? 7 : tok === '7' ? chord[3] ?? 10 : chord[1];
+        const f = midi(base + off);
+        this.voice(f, { t, dur: spb * len * 0.92, gain: 0.34, wave: 'triangle', dest: L.bass.gain, release: 0.03 });
+        if (tier >= 2) this.voice(f * 2, { t, dur: spb * len * 0.7, gain: 0.035, wave: 0.5, dest: L.bass.gain, release: 0.03 });
+      }
+    }
+
+    // drums
+    if (this.active('drums') && tier > 0) {
+      const d = this.fill ? FILL : DRUMS[tier];
+      if (this.crash && s === 0) {
+        this.noiseHit({ t, dur: 1.1, gain: 0.13, freq: 5000, type: 'highpass', dest: L.drums.gain });
+        this.crash = false;
+      }
+      if (d.k[s] === 'x') this.kick(t, L.drums.gain);
+      if (d.s[s] === 'x') this.snare(t, L.drums.gain, this.fill ? 0.06 + (s / 16) * 0.12 : 0.16);
+      if (d.h[s] === 'x') this.hat(t, L.drums.gain, s % 4 === 2 ? 0.07 : 0.045, tier === 3 && s % 8 === 6);
+      if (this.fill && s >= 8 && s % 2 === 0) this.voice(midi(50 - (s - 8)), { t, dur: 0.12, gain: 0.22, wave: 'triangle', slide: 0.5, dest: L.drums.gain });
+    } else if (this.crash && s === 0) this.crash = false;
+
+    // arpeggio
+    if (this.active('arp')) {
+      const order = [0, 1, 2, 3, 2, 1, 0, 1];
+      const idx = order[s % 8] % chord.length;
+      const oct = s % 8 === 3 && chord.length === 3 ? 12 : 0;
+      const n = 72 + ((key + cRoot) % 12) + chord[idx] + oct;
+      this.voice(midi(n), { t, dur: spb * 0.8, gain: tier === 0 ? 0.05 : 0.04, wave: 0.125, dest: L.arp.gain, release: 0.05 });
+    }
+
+    // offbeat chord stabs
+    if (this.active('stabs') && s % 4 === 2) {
+      for (let k = 0; k < 3; k++) {
+        const n = 60 + ((key + cRoot) % 12) + chord[k];
+        this.voice(midi(n), { t, dur: spb * 0.9, gain: 0.03, wave: 0.5, dest: L.stabs.gain, release: 0.04 });
+      }
+    }
+
+    // lead melody and its harmony
+    const note = sec.notes[barIdx * 16 + s];
+    if (note && (this.active('lead') || this.active('counter'))) {
+      const semis = degreeToSemis(song.scale, note.deg);
+      const dur = spb * note.len * 0.95;
+      if (this.active('lead')) this.voice(midi(song.root + semis), { t, dur, gain: 0.085, wave: song.lead, dest: L.lead.gain, release: Math.min(0.08, dur * 0.3), vibrato: note.len >= 3 ? 0.008 : 0 });
+      if (this.active('counter')) {
+        const h = degreeToSemis(song.scale, note.deg - 2);
+        this.voice(midi(song.root + h), { t, dur, gain: 0.04, wave: 0.125, dest: L.counter.gain, release: Math.min(0.08, dur * 0.3) });
+      }
+    }
+
+    // rush sparkle: fast high arpeggio
+    if (this.active('sparkle')) {
+      const n = 84 + ((key + cRoot) % 12) + chord[s % chord.length] + (s % 2 ? 12 : 0);
+      this.voice(midi(n), { t, dur: spb * 0.5, gain: 0.03, wave: 0.125, dest: L.sparkle.gain, release: 0.03 });
+    }
+  }
+
+  kick(t, dest) {
+    const c = this.ctx;
+    const o = c.createOscillator();
+    const g = c.createGain();
+    o.frequency.setValueAtTime(160, t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
+    g.gain.setValueAtTime(0.5, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    o.connect(g).connect(dest);
+    o.start(t);
+    o.stop(t + 0.18);
+  }
+
+  snare(t, dest, gain = 0.16) {
+    this.noiseHit({ t, dur: 0.12, gain, freq: 1900, q: 0.9, dest });
+    this.voice(190, { t, dur: 0.06, gain: gain * 0.9, wave: 'triangle', slide: 0.6, dest });
+  }
+
+  hat(t, dest, gain, open = false) {
+    this.noiseHit({ t, dur: open ? 0.14 : 0.035, gain, freq: 8000, type: 'highpass', q: 0.7, dest });
   }
 }

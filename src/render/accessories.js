@@ -31,7 +31,7 @@ const BUILDERS = {
     g.add(mesh(new THREE.CylinderGeometry(0.12, 0.13, 0.25, 28), black, { y: 0.38 }));
     g.add(mesh(new THREE.CylinderGeometry(0.133, 0.133, 0.045, 28), std('#d81e3a'), { y: 0.285 }));
     g.rotation.set(-0.18, 0, 0.12);
-    g.position.z = -0.04;
+    g.position.set(0, 0.045, -0.04); // brim clear of the skull, even tilted
     return g;
   },
   party() {
@@ -43,6 +43,7 @@ const BUILDERS = {
     }
     g.add(mesh(new THREE.SphereGeometry(0.035, 12, 8), std('#ffe640', { emissive: '#ffb020', emissiveIntensity: 0.5 }), { y: 0.57 }));
     g.rotation.set(-0.1, 0, 0.28);
+    g.position.y = 0.035;
     return g;
   },
   horns() {
@@ -52,7 +53,7 @@ const BUILDERS = {
       const h = new THREE.Group();
       h.add(mesh(cone(0.05, 0.22, 12), ivory, { y: 0.11 }));
       h.add(mesh(cone(0.032, 0.14, 10), ivory, { y: 0.25, rx: -0.5, z: -0.03 }));
-      h.position.set(sx * 0.13, 0.2, -0.1);
+      h.position.set(sx * 0.13, 0.225, -0.1);
       h.rotation.set(-0.9, 0, -sx * 0.45);
       g.add(h);
     }
@@ -63,7 +64,7 @@ const BUILDERS = {
     const pink = std('#ff5aa8', { roughness: 0.35 });
     for (const sx of [-1, 1]) g.add(mesh(cone(0.07, 0.13, 12), pink, { x: sx * 0.07, rz: sx * Math.PI / 2, s: [1, 1, 0.45] }));
     g.add(mesh(new THREE.SphereGeometry(0.035, 12, 8), pink));
-    g.position.set(0.15, 0.24, -0.06);
+    g.position.set(0.17, 0.3, -0.06);
     g.rotation.set(0, 0.4, 0.5);
     return g;
   },
@@ -75,7 +76,7 @@ const BUILDERS = {
       g.add(mesh(new THREE.SphereGeometry(1, 10, 6), petal, { x: Math.cos(a) * 0.065, z: Math.sin(a) * 0.065, ry: -a, s: [0.055, 0.014, 0.03] }));
     }
     g.add(mesh(new THREE.SphereGeometry(0.035, 12, 8), std('#ffc21a', { emissive: '#ff9f1c', emissiveIntensity: 0.3 }), { y: 0.01 }));
-    g.position.set(-0.17, 0.23, -0.02);
+    g.position.set(-0.19, 0.28, -0.02);
     g.rotation.set(0.2, 0, 0.55);
     return g;
   },
@@ -107,7 +108,60 @@ export function buildAccessory(id) {
   if (!b) return null;
   const g = b();
   g.userData.id = id;
+  g.userData.round = { pos: g.position.clone(), rot: g.rotation.clone() };
   return g;
+}
+
+// Block heads are a flat-topped cube, bigger than the round head: each
+// accessory is scaled up and set down on the cube's top (or, for shades, on
+// its front over the eyes) instead. [x, y, z] and [rx, ry, rz] replace the
+// round-head pose; y is measured from the top of the head (0.25).
+const BLOCK_SCALE = 1.5;
+const BLOCK_POSE = {
+  tophat: { pos: [0, 0.015, -0.02], rot: [-0.05, 0, 0.06] },
+  party: { pos: [0, 0.03, 0], rot: [-0.05, 0, 0.18] },
+  horns: { pos: [0, 0.04, 0], rot: [0, 0, 0] },
+  bow: { pos: [0.22, 0.31, -0.12], rot: [0, 0.4, 0.15] },
+  flower: { pos: [-0.22, 0.262, -0.1], rot: [0, 0, 0] },
+  crown: { pos: [0, 0, -0.03], rot: [0, 0, 0] },
+  halo: { pos: [0, 0.05, 0], rot: [0, 0, 0] },
+};
+
+// Place an accessory (and the holder it hangs from) on the head. face: the
+// block head's face cube, { h: its height, eyeY: its eyes' height, eyeFront:
+// how far forward the eyes reach }, or null for the round head.
+export function poseAccessory(g, holder, face) {
+  const r = g.userData.round;
+  g.position.copy(r.pos);
+  g.rotation.copy(r.rot);
+  holder.rotation.set(0, 0, 0);
+  if (!face) {
+    holder.position.set(0, 0, 0);
+    holder.scale.setScalar(1);
+    return;
+  }
+  const top = (face.h + 0.02) / 2; // the cube's top, from its centre
+  if (g.userData.id === 'shades') {
+    // across the front of the cube, just clear of the eyes, lenses upright:
+    // turn the group so the lenses stand up, keeping their centre in place
+    const S = 2.1;
+    const a = 0.55;
+    holder.scale.setScalar(S);
+    holder.position.set(0, face.eyeY - 0.2 * S, face.eyeFront + 0.03 - 0.2 * S);
+    g.rotation.set(a, 0, 0);
+    const y = 0.2 * Math.cos(a) - 0.2 * Math.sin(a);
+    const z = 0.2 * Math.sin(a) + 0.2 * Math.cos(a);
+    g.position.set(0, 0.2 - y, 0.2 - z);
+    return;
+  }
+  const S = BLOCK_SCALE;
+  holder.scale.setScalar(S);
+  holder.position.set(0, top - 0.25 * S, 0);
+  const p = BLOCK_POSE[g.userData.id];
+  if (p) {
+    g.position.set(...p.pos);
+    g.rotation.set(...p.rot);
+  }
 }
 
 export function disposeAccessory(g) {

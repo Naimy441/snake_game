@@ -19,7 +19,7 @@ export const ZONES = [
     cloudLit: '#ffffff', cloudShade: '#b9cde6', cloudOpacity: 1,
     particle: '#fff6c0', particleSize: 0.09, particleRise: -0.15, particleTwinkle: 0.2,
     bloom: 0.32, threshold: 1.05, sat: 1.3, contrast: 1.14, tint: '#ffffff', lift: '#000000', exposure: 0.92, vignette: 0.3,
-    envIntensity: 0.8, heaven: 0,
+    envIntensity: 0.8, heaven: 0, space: 0,
   },
   {
     name: 'Golden Canyon',
@@ -37,7 +37,7 @@ export const ZONES = [
     cloudLit: '#ffd2a0', cloudShade: '#a0628a', cloudOpacity: 1,
     particle: '#ffd38a', particleSize: 0.08, particleRise: 0.12, particleTwinkle: 0.4,
     bloom: 0.45, threshold: 1.0, sat: 1.22, contrast: 1.12, tint: '#fff1e0', lift: '#140600', exposure: 1.0, vignette: 0.34,
-    envIntensity: 1.0, heaven: 0,
+    envIntensity: 1.0, heaven: 0, space: 0,
   },
   {
     name: 'Neon Night',
@@ -55,7 +55,7 @@ export const ZONES = [
     cloudLit: '#5a3c9a', cloudShade: '#1a1238', cloudOpacity: 0.7,
     particle: '#b6ff6a', particleSize: 0.1, particleRise: 0.05, particleTwinkle: 1,
     bloom: 0.8, threshold: 0.85, sat: 1.25, contrast: 1.1, tint: '#e8e8ff', lift: '#06001a', exposure: 1.05, vignette: 0.42,
-    envIntensity: 0.8, heaven: 0,
+    envIntensity: 0.8, heaven: 0, space: 0,
   },
   {
     name: 'Cyber Overdrive',
@@ -73,7 +73,7 @@ export const ZONES = [
     cloudLit: '#ff4fd8', cloudShade: '#2a0050', cloudOpacity: 0.25,
     particle: '#38f6ff', particleSize: 0.11, particleRise: 0.6, particleTwinkle: 0.6,
     bloom: 1.0, threshold: 0.8, sat: 1.2, contrast: 1.12, tint: '#f0e8ff', lift: '#0a0018', exposure: 1.05, vignette: 0.45,
-    envIntensity: 0.7, heaven: 0,
+    envIntensity: 0.7, heaven: 0, space: 0,
   },
   {
     // High above Neon Night at sunset: the island sinks into a sea of clouds,
@@ -94,7 +94,29 @@ export const ZONES = [
     cloudLit: '#ffc48a', cloudShade: '#6a3a8e', cloudOpacity: 1,
     particle: '#ffe2b8', particleSize: 0.1, particleRise: 0.25, particleTwinkle: 0.7,
     bloom: 0.5, threshold: 1.0, sat: 1.28, contrast: 1.16, tint: '#fff2ee', lift: '#08020e', exposure: 0.95, vignette: 0.4,
-    envIntensity: 1.0, heaven: 1,
+    envIntensity: 1.0, heaven: 1, space: 0,
+  },
+  {
+    // Deep space at the heart of a spiral galaxy. The board floats above a
+    // black hole; its accretion disk lights everything warm from below, a cold
+    // blue starlight comes from above. heaven stays 1 (the island is long
+    // gone), space fades the cloud sea out and the galaxy in.
+    name: 'Galactic Core',
+    skyTop: '#010208', skyHorizon: '#0a0620', skyGround: '#03020a',
+    sunColor: '#b8ccff', sunIntensity: 1.6, sunElev: 58, sunAzim: 140, sunSize: 0.5,
+    rimColor: '#ff8a4a', rimIntensity: 2.2,
+    stars: 0, cyber: 0,
+    hemiSky: '#6a7aff', hemiGround: '#ff7a3a', hemiIntensity: 1.25,
+    fogColor: '#05040f', fogNear: 600, fogFar: 2400,
+    waterDeep: '#02030c', waterShallow: '#0d1236', waterGlow: 0, waterGrid: 0,
+    boardA: '#0c0c1e', boardB: '#141430', boardRough: 0.3, boardGrid: 0.8, gridColor: '#5fd6ff', boardLines: 0.0,
+    strip: '#5fd6ff', wallA: '#0a0a1a', wallB: '#ff8a4a',
+    grass: '#140a34', grassDark: '#08041a', cliffA: '#12082e', cliffB: '#060214', cliffEdge: 1,
+    rock: '#16102e', waterfall: '#5fd6ff', waterfallGlow: 1,
+    cloudLit: '#3a2a6a', cloudShade: '#0a0620', cloudOpacity: 0,
+    particle: '#bcd2ff', particleSize: 0.07, particleRise: 0.04, particleTwinkle: 1,
+    bloom: 0.85, threshold: 0.82, sat: 1.22, contrast: 1.12, tint: '#f2f0ff', lift: '#020008', exposure: 1.0, vignette: 0.42,
+    envIntensity: 0.9, heaven: 1, space: 1,
   },
 ];
 

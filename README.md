@@ -3,9 +3,16 @@
 Classic Snake reimagined as a fast, cinematic 3D browser game. Race a scaly
 serpent around a floating checkered island, grab spinning crystal apples,
 chase down a golden mouse, string together orb chains and hit boost pads, while the world
-transforms around you through five zones. In the last zone the snake straps on a jetpack and flies
-through a laser-fenced box of sky at sunset, in full 3D. Play from overhead, from a chase camera behind the head,
-or in first person, and switch at any moment: every view plays the same game.
+transforms around you through six zones, each with its own adaptive
+chiptune soundtrack. In Sunset Heavens the snake straps on a jetpack and flies
+through a laser-fenced box of sky in full 3D; clear it and it jumps to
+hyperspeed, dropping out onto a board floating over the black hole at the
+heart of a galaxy, and the black hole starts eating it. Fill every cell that's
+left to win the game: a real, 100% ending. Play from
+overhead, from a chase camera behind the head, or in first person, and switch
+at any moment: every view plays the same game.
+
+Snake Rush is open source: <https://github.com/Naimy441/snake_game>.
 
 Built with [Three.js](https://threejs.org/) and [Vite](https://vitejs.dev/).
 Every model, texture and sound is generated in code at runtime; the only
@@ -48,6 +55,7 @@ your own body. The board is always clear: there are no obstacles on it.
 | Pause / resume | P or Esc | same |
 | Restart | R | same |
 | Mute | M | same |
+| Speedrun timer on / off | T | same |
 | Ghost guide on / off | G | same |
 | Climb / dive (Sunset Heavens) | ↑ / ↓ (the other key levels out) | same |
 | Pick the starting level (menu) | Left / Right | |
@@ -91,10 +99,10 @@ camera, Start pauses, bumpers turn left/right.
   levels take 4, then 5 apples and keep speeding up to the top speed. The HUD
   shows how many apples are left until the next level and which level brings
   the next zone.
-- **Zones:** every 3 speed levels the world transforms. A glowing wave sweeps
+- **Zones:** every 3 speed levels (2 in Sunset Heavens) the world transforms. A glowing wave sweeps
   out from the arena, the old scenery shrinks away, new scenery grows in, and
-  the sky, light, water and board all change: Emerald Coast, Golden
-  Canyon, Neon Night, Cyber Overdrive, then Sunset Heavens. The visuals get
+  the sky, light, water, board and music all change: Emerald Coast, Golden
+  Canyon, Neon Night, Cyber Overdrive, Sunset Heavens, then the Galactic Core. The visuals get
   more intense with each level inside a zone too.
 - **Living maps:** each zone has its own moving set pieces around the
   island, all animated on the GPU: a rainbow, drifting hot-air balloons,
@@ -107,13 +115,13 @@ camera, Start pauses, bumpers turn left/right.
 - **Slow motion on level-ups:** while the level-up banner or a new zone's
   title card covers the screen, the game drops into slow motion (about a
   quarter speed for a new zone, a short dip for a normal level-up), with
-  a softer, desaturated look. It eases back to full speed
+  muffled music and a softer, desaturated look. It eases back to full speed
   once the card clears, so the card never gets you killed.
 - **Level select:** the start menu has a "Start at" picker. Once you have
   reached a level in any run, you can start a new run straight from it (or
   from any lower level) with the ‹ › buttons or Left/Right on the menu. The run
   starts with that level's speed, zone, board size and apples-to-next-level.
-- At game over you get a rank from D to S.
+- At game over you get a rank from D to S. Beating the game always ranks ★.
 
 ### Sunset Heavens: flying in 3D
 
@@ -158,11 +166,74 @@ layers tall.
   can run up and down). Boost pads become spinning gold boost rings to fly
   through. The golden mouse can't fly, so it stays on the ground.
 - **Speed:** flying is a new skill, so the sky starts slower again (about 8
-  moves a second) and speeds back up over its four levels.
+  moves a second) and speeds back up over its two levels.
 - The ghost guide flies too, with the same perfect pathfinding in 3D.
 - Reaching Sunset Heavens unlocks the **Phoenix** skin in the Garage, and the
   level select lets you start a run straight in the sky once you've been
   there.
+
+### The Galactic Core: beating the game
+
+Snake Rush can be won. Clear the last level of Sunset Heavens and the run
+continues in the finale.
+
+- **Hyperspeed:** the stars stretch into streaks and the snake races down a
+  tunnel of light, still full length. It drops out over a spiral galaxy and
+  the camera glides down to a black hole with a burning accretion disk.
+- **Your tail is torn off:** you land on the board as four segments, with
+  the rest of your body hanging off the back of it and spiralling down into
+  the disk. Then it rips away and is reeled into the horizon, pouring in as
+  light, while the length counter runs down.
+- **The collapsing board:** you land on a 12 x 12 board of glowing glass
+  tiles floating high above the black hole, and the black hole is eating it.
+  Every apple grows you by one and dooms three more cells, spiralling in
+  from the outer edge, clockwise. Doomed tiles shiver, crack with light and
+  sag for 1.3 seconds, then break off and fall in: they stretch into needles
+  of light and pour down round the edge of the board into the accretion
+  disk as threads of light, and the core flares each time something reaches
+  the horizon (it burns brighter the more it has eaten). The edge of the
+  board is the void: slide off it and you fall in. Every camera works here;
+  the minimap shows what's left of the board.
+- **Fill what's left:** the board shrinks to meet you, so you never have to
+  fill all 144 cells: the run is won when every cell still standing is
+  snake, usually around 40. The HUD counts the empty cells left.
+- **Fair by construction:** a tile only falls once the snake is off it; the
+  collapse never takes the cells right in front of your head, never splits
+  the board in two, and never cuts your head off from your own tail, so
+  there is always a way to stay alive. Dead-end cells (one neighbour left,
+  which could only ever be filled last) are eaten first, for free. The game
+  speeds up as the board fills.
+- **Fair apples:** a new apple only goes where the snake can still get
+  itself safe (the game checks by playing it out ahead), preferring cells it
+  can actually reach, eat and survive; it never lands on a dead end, and the
+  collapse never turns its cell into one. If there's nowhere fair for it yet,
+  the next apple waits a moment. An apple that has sat for 8 seconds and
+  still can't be eaten without getting trapped is swallowed by the black
+  hole (which takes a bite of the board as it does, if that's safe), and a
+  fair one appears.
+- **The autoplay wins every time:** the title-screen demo plays the board by
+  trying moves out on copies of the game. It only goes for an apple if,
+  once it has eaten and the black hole has taken its cells, it can still
+  prove a way to be safe for good: nothing left to fall, and a clear run
+  from its head round to its tail that it could circle for ever. Otherwise
+  it stalls on a path it has already proved safe. It wins every run in
+  thousands of simulated games.
+- **The finale:** fill the last cell and everything goes silent. What's left
+  of the board pours into the black hole, and the snake itself turns to
+  light and unravels after it, tail first. When the light reaches the
+  horizon the whole galaxy erupts: a wave of light sweeps out through every
+  star, jets fire from the black hole, distant galaxies light up one by one,
+  and the run ends on **Galaxy complete! 100%**.
+- **Speedrun timer:** press **T** (or tick it in Settings) for a real-time
+  run clock in the top right, to the hundredth of a second. Pauses don't
+  count; the hyperspeed and finale cinematics do. It stops when the run ends,
+  and a run started from level 1 that beats the game sets your best 100% time,
+  shown under the clock.
+- Beating the game is remembered: a gold **★ 100%** sits next to your best
+  score, the title screen's tour shows the Galactic Core with its jets, and
+  the **Event Horizon** skin unlocks in the Garage.
+- The ghost guide sits the Galactic Core out; it's your puzzle. Once you've
+  reached it, the level select can start a run there.
 
 ### Controls that feel instant
 
@@ -201,11 +272,12 @@ Turning it on mid-run starts it from your snake's current position.
 Open the **Garage** from the main menu (or after a run) to customise your
 snake. The camera swings in close for a live preview.
 
-- **25 skins:** Viper, Coral, Python, Emerald Boa, Tiger, Candy Cane, Glacier,
+- **26 skins:** Viper, Coral, Python, Emerald Boa, Tiger, Candy Cane, Glacier,
   plus unlockables: Neon Runner and Circuit (glowing light lines), Magma
   (molten cracks that pulse), Golden King, Chrome (mirror metal), Galaxy
   (twinkling stars), Prism (an animated rainbow), Dragon, Phoenix (sunset
-  feathers, from reaching Sunset Heavens) and Phantom.
+  feathers, from reaching Sunset Heavens), Phantom and Event Horizon (from
+  beating the game).
 - **8 silly skins:** Hot Dog (a grilled sausage in a bun with mustard),
   Gummy Worm, Tape Measure, Toothpaste and Pickle are free; Watermelon
   (30 apples), Crispy Bacon (catch a golden mouse) and Disco Ball (play 5
@@ -220,12 +292,19 @@ snake. The camera swings in close for a live preview.
   and the furthest zone reached. New unlocks are announced on the results
   screen. You can preview a locked item, but it only equips once unlocked.
 
-### Sound
+### Music
 
-There is no music, only sound effects, all synthesised with Web Audio at
-runtime (no audio files): chimes that climb with the combo, chain and prism
-arpeggios, the boost whoosh, level-up and zone fanfares, and a
-jetpack-ignition roar at lift-off.
+The soundtrack is an adaptive chiptune engine (Web Audio, no files). Each zone
+has its own song with a verse and a chorus. Instrument layers (bass, arpeggio,
+drums, lead, chord stabs, a counter-melody and a Rush sparkle) fade in and out
+smoothly as the action heats up, the drums step through three grooves, and
+section and zone changes land on bar lines after a drum fill, so the music
+flows instead of cutting. Pausing muffles it rather than stopping it. Sunset
+Heavens gets a soaring major-key synthwave song, and lift-off has its own
+jetpack-ignition roar. The Galactic Core has a slow, vast minor-key anthem,
+with a hyperspeed riser, a deep boom as you drop out, and a finale that goes
+silent before the eruption and resolves into a major-key victory chord. On the
+title screen, the music follows the map the tour is showing.
 
 ### Chase and first-person aids
 
@@ -242,7 +321,7 @@ can be turned off in Settings.
 - **Reduce motion:** removes speed lines, motion blur, camera shake, camera
   roll and FOV kicks, softens animations and shortens camera transitions. It
   is on by default if your system asks for reduced motion.
-- Path guide, minimap and compass, FPS counter, sound effect volume.
+- Path guide, minimap and compass, FPS counter, sound effect and music volume.
 
 Settings, your snake's look, lifetime stats and your best score are saved in
 the browser.
@@ -298,10 +377,11 @@ numbers aren't real frame rates; it's for before/after comparisons.
 
 ```
 src/
-  game/SnakeGame.js      pure game state and rules: obstacles, chains, prey, pads, zones
+  game/SnakeGame.js      pure game state and rules: obstacles, chains, prey, pads, zones, the collapsing board
   game/GhostBot.js       the ghost guide: a perfect-play bot (safe pathfinding, Rush timing)
   render/World.js        orchestrates sky, sea, island, zone scenery, lighting and zone transitions
-  render/zones.js        the five zones' palettes and post-processing looks
+  render/zones.js        the six zones' palettes and post-processing looks
+  render/Space.js        the Galactic Core: galaxy, black hole, the collapsing board and its light, hyperspeed, finale
   render/Heavens.js      Sunset Heavens backdrop: the sea of clouds and the striped sunset sun
   render/SkyArena.js     the laser flight box: edges, force-field walls, floor grid, depth cues
   render/Scenery.js      procedural props for each zone, revealed by a growing wave
@@ -320,11 +400,12 @@ src/
   render/BoardObjects.js boost pads, the sky's boost rings (and pillars, unused)
   render/Spectacles.js   each zone's animated set pieces: balloons, lanterns, aurora, whales...
   render/Effects.js      particles, shockwaves, path guide
-  render/CameraRig.js    orbit / garage / overhead / chase / first-person cameras and blending
+  render/CameraRig.js    orbit / garage / overhead / chase / first-person cameras, the title tour, and blending
   render/textures.js     procedural textures
-  audio/Audio.js         synthesized sound effects
+  audio/Audio.js         synthesized sound effects and the adaptive music engine
   Input.js               keyboard, touch and gamepad
   main.js                app shell, game loop, HUD and menus
+  GalaxyDirector.js      the Galactic Core's set pieces: hyperspeed and the finale
 ```
 
 The game runs on a fixed grid tick; the renderer interpolates between ticks

@@ -123,6 +123,9 @@ export class Input {
       case 'KeyG':
         if (!e.repeat && this.h.ghost) this.h.ghost();
         break;
+      case 'KeyT':
+        if (!e.repeat && this.h.timer) this.h.timer();
+        break;
       default:
     }
   }
