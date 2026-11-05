@@ -9,6 +9,11 @@ const hash = (a, b) => fract(Math.sin(a * 127.1 + b * 311.7) * 43758.5453);
 const dorsal = (t) => Math.sin(t);
 const lateral = (t) => Math.abs(Math.cos(t));
 const belly = (t) => Math.sin(t) < -0.35;
+// c.lerp towards a hex colour without allocating (skins are baked in big loops)
+let tmpC = null;
+const mix = (c, hex, k) => c.lerp((tmpC = tmpC || c.clone()).set(hex), k);
+// zigzag running along the spine, as a value of cos(theta) in [-amp, amp]
+const zigzag = (d, freq, amp) => (Math.abs(fract(d * freq) - 0.5) * 4 - 1) * amp;
 
 export const SKINS = [
   {
@@ -237,7 +242,155 @@ export const SKINS = [
     head: { top: '#cfe0ff', side: '#e8f4ff', belly: '#ffffff', accent: '#9ab8e8', eye: '#2a2a5a' },
     aura: '#cfe6ff', trail: '#ffffff',
   },
+  // ------------------------------------------------------------ silly skins
+  {
+    id: 'hotdog', name: 'Hot Dog', desc: 'A grilled sausage in a toasty bun, mustard on top.',
+    swatch: 'linear-gradient(180deg, #e8a85a 0 22%, #b0402a 22% 44%, #ffd21a 44% 54%, #b0402a 54% 76%, #e8a85a 76%)',
+    color(d, t, c) {
+      const up = Math.sin(t);
+      if (up < 0.3) {
+        // the bun: soft crumb at the lip, toasted crust below
+        if (up > 0.18) return c.set('#fbe0a6');
+        c.set('#ee9a3c');
+        mix(c, '#b8742e', Math.min(1, -up * 0.9));
+        return c.multiplyScalar(0.94 + hash(Math.floor(d * 6), Math.floor(t * 6)) * 0.08);
+      }
+      // the sausage, with diagonal grill marks and a mustard zigzag
+      c.set('#c04a2e');
+      mix(c, '#8a2a18', Math.max(0, up - 0.4));
+      if (fract(d * 1.4 + Math.cos(t) * 0.6) < 0.12) c.set('#3a140c');
+      if (up > 0.5 && Math.abs(Math.cos(t) - zigzag(d, 1.1, 0.45)) < 0.13) c.set('#ffd21a');
+      return c;
+    },
+    mat: { roughness: 0.32, metalness: 0.02, normal: 0.35 },
+    head: { top: '#a8382a', side: '#c04a2e', belly: '#e8a85a', accent: '#ffd21a', eye: '#ffffff', eyeGlow: 0.4 },
+    aura: '#ffb020', trail: '#ffd21a',
+  },
+  {
+    id: 'gummy', name: 'Gummy Worm', desc: 'Sugar-dusted, see-through and very chewy.',
+    swatch: 'linear-gradient(90deg, #ff2e63, #ff8a1a 33%, #ffe640 50%, #3ae06a 70%, #2e9bff)',
+    color(d, t, c) {
+      const stops = ['#ff2e63', '#ff8a1a', '#ffe640', '#3ae06a', '#2e9bff'];
+      const u = fract(d / 12) * stops.length;
+      const i = Math.floor(u);
+      c.set(stops[i]);
+      mix(c, stops[(i + 1) % stops.length], Math.max(0, Math.min(1, (fract(u) - 0.6) / 0.4)));
+      if (sugar(d, t)) c.set('#ffffff');
+      return c;
+    },
+    glow: (d, t) => (sugar(d, t) ? 0.1 : 0.45),
+    mat: { roughness: 0.12, metalness: 0, normal: 0.15, env: 1.6 },
+    head: { top: '#ff2e63', side: '#ff5a80', belly: '#ff8aa2', accent: '#ffffff', eye: '#ffffff', eyeGlow: 0.5 },
+    aura: '#ff6a9a', trail: '#ffe640',
+  },
+  {
+    id: 'tape', name: 'Tape Measure', desc: 'Always knows exactly how long you are.',
+    swatch: 'repeating-linear-gradient(90deg, #ffd21a 0 6px, #1a1a1a 6px 7px), #ffd21a',
+    color(d, t, c) {
+      if (belly(t)) return c.set('#d8b010');
+      const w = Math.abs(Math.cos(t)); // 0 on the spine, 1 at the sides
+      // a red line every cell, long black ticks every half cell, short every quarter
+      if (fract(d) < 0.08 && w < 0.9) return c.set('#e8102a');
+      if (fract(d * 4) < 0.24 && w < (fract(d * 2) < 0.12 ? 0.75 : 0.4)) return c.set('#141414');
+      return c.set('#ffd21a');
+    },
+    mat: { roughness: 0.3, metalness: 0.15, normal: 0.1 },
+    head: { top: '#b8bec8', side: '#d8dde6', belly: '#8a909a', accent: '#141414', eye: '#141414', eyeGlow: 0 },
+    aura: '#ffe640', trail: '#ffd21a',
+  },
+  {
+    id: 'toothpaste', name: 'Toothpaste', desc: 'Minty fresh, with stripes.',
+    swatch: 'repeating-linear-gradient(0deg, #ffffff 0 8px, #e8102a 8px 12px, #ffffff 12px 20px, #18c8c0 20px 24px)',
+    color(d, t, c) {
+      const f = fract((t / TAU) * 3 + d * 0.06);
+      return c.set(f < 0.18 ? '#e8102a' : f > 0.5 && f < 0.68 ? '#18c8c0' : '#f8fbff');
+    },
+    mat: { roughness: 0.25, metalness: 0, normal: 0.05 },
+    head: { top: '#f8fbff', side: '#f8fbff', belly: '#f8fbff', accent: '#18c8c0', eye: '#18c8c0', eyeGlow: 0.6 },
+    aura: '#9ffff0', trail: '#ffffff',
+  },
+  {
+    id: 'pickle', name: 'Pickle', desc: 'Bumpy, briny and proud of it.',
+    swatch: 'radial-gradient(circle at 30% 35%, #b8d860 0 10%, transparent 12%), radial-gradient(circle at 70% 70%, #b8d860 0 9%, transparent 11%), #5a8a22',
+    color(d, t, c) {
+      c.set('#5a8a22');
+      mix(c, '#3a6014', 0.5 + 0.5 * Math.cos(t * 10 + Math.sin(d * 0.8)));
+      if (belly(t)) mix(c, '#8aaa3a', 0.4);
+      const bump = hash(Math.floor(d * 3), Math.floor(t * 2.5));
+      const bu = fract(d * 3) - 0.5;
+      const bv = fract(t * 2.5) - 0.5;
+      if (bump > 0.6 && bu * bu + bv * bv < 0.06) c.set('#b8d860');
+      return c;
+    },
+    mat: { roughness: 0.4, metalness: 0, normal: 1.4 },
+    head: { top: '#3a6014', side: '#5a8a22', belly: '#8aaa3a', accent: '#b8d860', eye: '#ffffff', eyeGlow: 0.4 },
+    aura: '#b8ff6a', trail: '#d8ff9a',
+  },
+  {
+    id: 'watermelon', name: 'Watermelon', desc: 'Striped rind on top, juicy and seedy underneath.',
+    swatch: 'linear-gradient(180deg, #1e6a1e 0 20%, #6ac040 20% 30%, #1e6a1e 30% 45%, #eaffd0 45% 52%, #ff4a6a 52%)',
+    unlock: { stat: 'apples', value: 30, label: 'Eat 30 apples in total' },
+    color(d, t, c) {
+      const up = Math.sin(t);
+      if (up < -0.45) {
+        c.set('#ff4a6a');
+        const su = fract(d * 2.2) - 0.5;
+        const sv = fract(t * 3) - 0.5;
+        if (hash(Math.floor(d * 2.2), Math.floor(t * 3)) > 0.45 && su * su * 3 + sv * sv < 0.04) c.set('#1a0c0c');
+        return c;
+      }
+      if (up < -0.3) return c.set('#eaffd0');
+      // dark rind with wavy light stripes running along the body
+      return c.set(Math.sin(Math.cos(t) * 9 + Math.sin(d * 2.4) * 0.9) > 0.35 ? '#6ac040' : '#1e6a1e');
+    },
+    mat: { roughness: 0.3, metalness: 0, normal: 0.3 },
+    head: { top: '#1e6a1e', side: '#3a8a2a', belly: '#ff4a6a', accent: '#6ac040', eye: '#1a0c0c', eyeGlow: 0 },
+    aura: '#ff6a8a', trail: '#ff9aaa',
+  },
+  {
+    id: 'bacon', name: 'Crispy Bacon', desc: 'Sizzling streaks of meat and fat.',
+    swatch: 'linear-gradient(170deg, #b8302a 0 22%, #f8d0b0 22% 34%, #d8483a 34% 58%, #f8d0b0 58% 68%, #8a2018 68%)',
+    unlock: { stat: 'mice', value: 1, label: 'Catch a golden mouse' },
+    color(d, t, c) {
+      const f = fract((t / TAU) * 4 + Math.sin(d * 2.1) * 0.07 + Math.sin(d * 0.7 + t) * 0.04);
+      if (f < 0.3) c.set('#f8d0b0');
+      else c.set('#c8382a');
+      mix(c, '#6a1a10', Math.max(0, hash(Math.floor(d * 5), Math.floor(t * 4)) - 0.7) * 2); // crispy bits
+      return c;
+    },
+    mat: { roughness: 0.45, metalness: 0.05, normal: 0.6 },
+    head: { top: '#a8281e', side: '#c8382a', belly: '#f8d0b0', accent: '#f8d0b0', eye: '#ffe640', eyeGlow: 0.6 },
+    aura: '#ff7a3a', trail: '#ffb080',
+  },
+  {
+    id: 'disco', name: 'Disco Ball', desc: 'A thousand tiny mirrors. Saturday night on the island.',
+    swatch: 'repeating-linear-gradient(0deg, #1a1a22 0 1px, transparent 1px 7px), repeating-linear-gradient(90deg, #1a1a22 0 1px, transparent 1px 7px), linear-gradient(135deg, #ffffff, #9aa6b8 40%, #ff9af2 60%, #ffffff)',
+    unlock: { stat: 'games', value: 5, label: 'Play 5 runs' },
+    color(d, t, c) {
+      const u = d * 3;
+      const v = (t / TAU) * 10;
+      if (Math.abs(fract(u) - 0.5) > 0.4 || Math.abs(fract(v) - 0.5) > 0.4) return c.set('#20202a');
+      const h = hash(Math.floor(u), Math.floor(v));
+      c.set('#d8dee8').multiplyScalar(0.55 + h * 0.5);
+      if (h > 0.9) c.set(['#ff5af2', '#5ae8ff', '#ffe65a'][Math.floor(h * 100) % 3]);
+      return c;
+    },
+    glow: (d, t) => (hash(Math.floor(d * 3), Math.floor((t / TAU) * 10)) > 0.9 ? 1.6 : 0),
+    anim: 'pulse',
+    mat: { roughness: 0.12, metalness: 0.9, env: 2, normal: 0.05 },
+    head: { top: '#d8dee8', side: '#eef2f8', belly: '#b8c0cc', accent: '#ff5af2', eye: '#5ae8ff', eyeGlow: 2.5 },
+    aura: '#ff9af2', trail: '#5ae8ff',
+  },
 ];
+
+// sugar crystals dusted over the gummy worm
+function sugar(d, t) {
+  const u = d * 10;
+  const v = t * 6;
+  const du = fract(u) - 0.5;
+  const dv = fract(v) - 0.5;
+  return hash(Math.floor(u), Math.floor(v)) > 0.8 && du * du + dv * dv < 0.07;
+}
 
 function circuit(d, t) {
   const u = d * 3;

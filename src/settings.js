@@ -20,17 +20,27 @@ export const DEFAULTS = {
   showFps: false,
   sfx: 0.8,
   muted: false,
-  camera: 'overhead',
+  camera: 'tp', // chase
   skin: 'viper',
   accessory: 'none',
   ghost: false,
   startLevel: 0,
+  chaseDefault: true,
 };
 
 export function loadSettings() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...DEFAULTS, ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      // Chase became the default camera; saves from before that move over to
+      // it once (overhead used to be the default, not necessarily a choice).
+      if (!saved.chaseDefault) {
+        saved.camera = 'tp';
+        saved.chaseDefault = true;
+      }
+      return { ...DEFAULTS, ...saved };
+    }
   } catch {
     /* storage unavailable: use defaults */
   }
