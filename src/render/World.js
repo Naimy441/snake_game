@@ -5,9 +5,10 @@ import { Ocean, Waterfalls, WATER_Y } from './Water.js';
 import { Island, GRASS_Y } from './Island.js';
 import { Scenery } from './Scenery.js';
 import { Ambient } from './Ambient.js';
-import { makeGrassDetail, makeCloudTexture, makeWindowTexture, makeNoiseTexture } from './textures.js';
+import { makeGrassDetail, makeCloudTexture, makeWindowTexture, makeNoiseTexture, makeGlowTexture } from './textures.js';
 import { Heavens } from './Heavens.js';
 import { SkyArena } from './SkyArena.js';
+import { Space } from './Space.js';
 import { ZONE_STARTS, MAX_LEVEL, SKY_SIZE } from '../game/SnakeGame.js';
 
 const smooth = (t) => t * t * (3 - 2 * t);
@@ -48,6 +49,10 @@ export class World {
     this.scene.add(this.heavens.group);
     this.skyArena = new SkyArena(SKY_SIZE);
     this.scene.add(this.skyArena.group);
+    // Galactic Core: galaxy, black hole, the collapsing board and the hyperspeed tunnel
+    this.space = new Space(makeGlowTexture());
+    this.scene.add(this.space.group);
+    this.scene.add(this.space.warp);
 
     this.buildLights();
     this.buildWave();
@@ -223,11 +228,17 @@ export class World {
     this.ocean.mesh.position.y = WATER_Y - sink;
     this.ocean.mesh.visible = p.heaven < 0.995;
     this.heavens.apply(p, sun);
+    this.space.apply(clamp01(p.space));
   }
 
   // How much of the flight box is present (0 on the ground, 1 in the sky).
   get skyAmount() {
-    return clamp01(this.p.heaven);
+    return clamp01(this.p.heaven * (1 - this.p.space));
+  }
+
+  // How much of the Galactic Core is present.
+  get spaceAmount() {
+    return clamp01(this.p.space);
   }
 
   // Post-processing look for the current blend.
@@ -291,6 +302,10 @@ export class World {
     this.heavens.update(this.time);
   }
 
+  updateSpace(dt, camera, opts) {
+    this.space.update(dt, camera, opts);
+  }
+
   // The arena under the snake grows with the zones (15 -> 17 -> 19).
   setBoardSize(size, opts) {
     if (!this.island.setSize(size, opts)) return false;
@@ -311,7 +326,7 @@ export class World {
     extra.forEach((o) => (o.visible = true));
     this.wave.visible = true;
     try {
-      fn();
+      this.space.forCompile(fn);
     } finally {
       this.scenery.zones.forEach((z, i) => (z.group.visible = vis[i]));
       extra.forEach((o, i) => (o.visible = extraVis[i]));

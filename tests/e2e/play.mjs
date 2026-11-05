@@ -319,7 +319,7 @@ await page.waitForFunction(() => window.__coil.game.flying, null, { timeout: 200
 s = await page.evaluate(() => { const g = window.__coil.game; return { flying: g.flying, zone: g.zone, y: g.head.y, alive: g.alive }; });
 check(s.flying && s.zone === 4, `eating into level 13 lifts off into Sunset Heavens (${JSON.stringify(s)})`);
 s = await page.evaluate(() => { const a = window.__coil; const g = a.game; return { cine: !!a.rig.cine, launch: g.launch, obs: g.obstacles.length, size: g.size, h: g.height }; });
-check(s.obs === 0 && s.size === 25 && s.h === 13, `the sky box is bigger and has no obstacles (${JSON.stringify(s)})`);
+check(s.obs === 0 && s.size === 23 && s.h === 13, `the sky box is bigger and has no obstacles (${JSON.stringify(s)})`);
 check(s.cine && s.launch > 0, 'lift-off: the camera circles while the snake rockets up on its own');
 await page.waitForFunction(() => window.__coil.game.launch === 0 && !window.__coil.rig.cine, null, { timeout: 30000 }).catch(() => {});
 s = await page.evaluate(() => ({ launch: window.__coil.game.launch, cine: !!window.__coil.rig.cine, alive: window.__coil.game.alive, maxY: Math.max(...window.__coil.game.cells.map((c) => c.y)) }));
@@ -351,6 +351,87 @@ if (s) {
   check(await page.evaluate(() => window.__coil.game.dir.y === 0), 'ArrowDown levels out again');
   await shot('10-flying');
 }
+
+// --- Galactic Core: hyperspeed, the collapsing board, and beating the game
+await page.evaluate(() => window.__coil.toMenu());
+await waitState('menu');
+await page.evaluate(() => { const a = window.__coil; a.stats.maxLevel = 13; a.settings.startLevel = 13; a.renderLevelSelect(); });
+await page.keyboard.press('Enter');
+await waitState('playing');
+await page.evaluate(() => {
+  const g = window.__coil.game;
+  g.foodEaten = 61; // one apple before the Galactic Core
+  g.queue = [];
+  const d = g.dir;
+  g.food = { x: g.head.x + d.x, z: g.head.z + d.z, y: g.head.y + (d.y || 0), type: 'orb', id: 9292 };
+});
+await page.waitForFunction(() => window.__coil.galaxy.kind === 'warp', null, { timeout: 20000 }).catch(() => {});
+s = await page.evaluate(() => { const a = window.__coil; return { kind: a.galaxy.kind, space: a.game.space, warp: a.world.space.warp.visible, zone: a.game.zone }; });
+check(s.kind === 'warp' && s.space && s.zone === 5, `clearing Sunset Heavens jumps to hyperspeed (${JSON.stringify(s)})`);
+await page.waitForTimeout(2500);
+check(await page.evaluate(() => window.__coil.world.space.warp.visible), 'the hyperspeed tunnel streams past');
+await shot('11-hyperspeed');
+await waitState('playing', 30000).catch(() => {});
+s = await page.evaluate(() => { const a = window.__coil; return { mode: a.rig.mode, cam: a.cameraMode, size: a.game.size, tiles: a.world.space.tiles.visible, unlocked: a.unlockedLevel() }; });
+check(s.mode === s.cam && s.size === 12 && s.tiles, `dropping out puts the snake on the board over the black hole, in the player's camera (${JSON.stringify(s)})`);
+check(s.unlocked >= 14, 'reaching the Galactic Core unlocks it in the level select');
+await shot('12-galactic-core');
+// an apple dooms cells, and they fall into the black hole as light
+await page.evaluate(() => {
+  const a = window.__coil;
+  const g = a.game;
+  window.__auto = setInterval(() => {
+    if (a.state !== 'playing' || !g.space) return;
+    const d = g.corePlan();
+    g.queue.length = 0;
+    if (d) g.queueDirection(d);
+  }, 30);
+  g.queue = [];
+  const h = g.head;
+  g.food = { x: h.x + g.dir.x * 2, z: h.z + g.dir.z * 2, y: 0, type: 'orb', id: 9393 };
+});
+await page.waitForFunction(() => window.__coil.game.doomed.length > 0 || window.__coil.game.fallen > 0, null, { timeout: 10000 }).catch(() => {});
+check(await page.evaluate(() => window.__coil.game.doomed.length > 0 || window.__coil.game.fallen > 0), 'eating an apple dooms cells of the board');
+await page.waitForFunction(() => window.__coil.world.space.falling.length > 0, null, { timeout: 15000 }).catch(() => {});
+s = await page.evaluate(() => { const a = window.__coil; return { falling: a.world.space.falling.length, streams: a.world.space.streams.visible, fallen: a.game.fallen }; });
+check(s.falling > 0 && s.streams && s.fallen > 0, `doomed cells fall into the black hole as light (${JSON.stringify(s)})`);
+await page.waitForTimeout(600);
+await shot('13-collapse');
+await page.evaluate(() => clearInterval(window.__auto));
+// one cell from the end: the last apple wins, and the galaxy goes off
+await page.evaluate(() => {
+  const a = window.__coil;
+  a.settings.startLevel = 14;
+  a.stats.maxLevel = 14;
+  a.startGame();
+});
+await waitState('playing', 20000).catch(() => {});
+await page.evaluate(() => {
+  const g = window.__coil.game;
+  const S = g.size;
+  g.land.fill(0);
+  g.doomed = [];
+  g.cells = [];
+  for (let x = 9; x >= 2; x--) g.cells.push({ x, z: 6, y: 0 });
+  for (const c of g.cells) g.land[c.x * S + c.z] = 1;
+  g.land[10 * S + 6] = 1;
+  g.removedTail = { x: 1, z: 6, y: 0 };
+  g.dir = { x: 1, z: 0, y: 0 };
+  g.facing = { ...g.dir };
+  g.queue = [];
+  g.food = { x: 10, z: 6, y: 0, type: 'orb', id: 9494 };
+  window.__coil.syncFood();
+});
+await page.waitForFunction(() => window.__coil.galaxy.kind === 'finale', null, { timeout: 20000 }).catch(() => {});
+check(await page.evaluate(() => window.__coil.galaxy.kind === 'finale' && window.__coil.game.fill === 1), 'filling the last cell starts the finale');
+await page.waitForTimeout(1600);
+await shot('14-pour-in');
+await page.waitForTimeout(3500);
+await shot('15-supernova');
+await waitState('over', 30000).catch(() => {});
+s = await page.evaluate(() => ({ title: document.getElementById('over-title').textContent, stamp: !document.getElementById('over-stamp').classList.contains('hidden'), wins: window.__coil.stats.wins }));
+check(s.title === 'Galaxy complete!' && s.stamp && s.wins >= 1, `the run is won: 100% (${JSON.stringify(s)})`);
+await shot('16-galaxy-complete');
 
 check(errors.length === 0, `no console errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
 await browser.close();

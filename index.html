@@ -63,6 +63,7 @@
           <div class="rush-label"><span>Rush</span> <kbd>Space</kbd><span id="hud-boost" class="boost-tag hidden">Boost!</span></div>
           <div class="rush-bar"><i id="hud-rush"></i><div class="rush-ticks"></div></div>
         </div>
+        <div id="speedrun" class="speedrun hidden" aria-label="Run timer"><span id="sr-time">0:00.00</span><span id="sr-pb" class="sr-pb hidden"></span></div>
         <div id="fps" class="fps hidden">60 fps</div>
       </div>
 
@@ -78,6 +79,7 @@
         <span class="alt-label">Alt</span>
         <div class="alt-track"><i class="alt-food" id="alt-food"></i><i class="alt-head" id="alt-head"></i></div>
         <span id="alt-text" class="alt-text">5</span>
+        <div id="alt-delta" class="alt-delta"><b id="alt-delta-n">0</b><span id="alt-delta-l">apple level</span></div>
       </div>
       <div id="popups" aria-hidden="true"></div>
       <div id="toast" role="status" aria-live="polite"></div>
@@ -125,7 +127,13 @@
           <b id="ns-name">Emerald Coast</b>
           <div class="ns-dots" id="ns-dots"></div>
         </div>
-        <div class="title-best"><span>Best</span><b id="start-best">0</b></div>
+        <div class="title-corner">
+          <a class="gh-link" href="https://github.com/Naimy441/snake_game" target="_blank" rel="noopener noreferrer" aria-label="Snake Rush is open source: view it on GitHub (opens in a new tab)">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            <span>open source</span>
+          </a>
+          <div class="title-best"><span>Best</span><b id="start-best">0</b><i id="win-badge" class="win-badge hidden" aria-label="Galaxy finished: 100%">★ 100%</i></div>
+        </div>
       </section>
 
       <!-- Pause -->
@@ -150,6 +158,7 @@
           <p id="over-cause" class="muted"></p>
           <div id="over-newbest" class="badge hidden">New best!</div>
           <div class="final-score" id="over-score">0</div>
+          <div id="over-stamp" class="stamp hidden" aria-hidden="true">100%</div>
           <div class="stats-grid">
             <div><span>Best</span><b id="over-best">0</b></div>
             <div><span>Length</span><b id="over-length">0</b></div>
@@ -209,6 +218,7 @@
                 <li><kbd>Space</kbd> hold <span>Rush: faster, double points, uses the meter</span></li>
                 <li><kbd>C</kbd> <span>cycle camera: chase, first-person, overhead</span></li>
                 <li><kbd>G</kbd> <span>ghost guide: race a perfect bot</span></li>
+                <li><kbd>T</kbd> <span>speedrun timer on / off</span></li>
                 <li><kbd>P</kbd> / <kbd>Esc</kbd> <span>pause</span> · <kbd>R</kbd> <span>restart</span> · <kbd>M</kbd> <span>mute</span></li>
                 <li>Gamepad <span>D-pad / stick to steer, A rush, Y camera, Start pause</span></li>
               </ul>
@@ -226,7 +236,13 @@
               <ul class="plain">
                 <li>Eat again within 5 s to build a combo, up to <b>x8</b>.</li>
                 <li>Eating apples raises your speed level: 3 apples per level in the first zone, more later. From the second zone, some level-ups raise <b>pillars</b>: a red ring on the floor warns you where.</li>
-                <li>Every 3 levels the world transforms into a new zone.</li>
+                <li>Every 3 levels (2 in Sunset Heavens) the world transforms into a new zone with its own music.</li>
+              </ul>
+              <h3>Beat the game</h3>
+              <ul class="plain">
+                <li>Clear Sunset Heavens and the snake jumps to <b class="cyan">hyperspeed</b>, dropping out onto a board floating over a black hole.</li>
+                <li>The black hole is <b>eating the board</b>: every apple dooms a few cells, spiralling in from the edge. They <b class="red">glow</b>, then fall in once you're off them. Don't slide off the edge!</li>
+                <li>Fill <b>every cell that's left</b> to finish the galaxy and win the game: <b class="gold">100%</b>. The board shrinks to meet you, and it never cuts you off from your own tail.</li>
               </ul>
             </div>
           </div>
@@ -251,8 +267,10 @@
           <label class="setting"><span>Path guide <small>floor arrows ahead of the snake (chase and first-person)</small></span><input type="checkbox" id="set-guide" /></label>
           <label class="setting"><span>Minimap &amp; compass <small>navigation aids (chase and first-person)</small></span><input type="checkbox" id="set-minimap" /></label>
           <label class="setting"><span>Ghost guide <small>a perfect bot races the same apples, then waits for you (G)</small></span><input type="checkbox" id="set-ghost" /></label>
+          <label class="setting"><span>Speedrun timer <small>real time for the run, with your best 100% time (T)</small></span><input type="checkbox" id="set-timer" /></label>
           <label class="setting"><span>Show FPS</span><input type="checkbox" id="set-fps" /></label>
           <label class="setting"><span>Sound effects</span><input type="range" id="set-sfx" min="0" max="1" step="0.05" /></label>
+          <label class="setting"><span>Music</span><input type="range" id="set-music" min="0" max="1" step="0.05" /></label>
           <p class="muted small" id="quality-note"></p>
           <button class="primary" data-close>Done</button>
         </div>

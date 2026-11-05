@@ -230,6 +230,27 @@ export const SKINS = [
     aura: '#ff8a3a', trail: '#ff6aa8',
   },
   {
+    id: 'horizon', name: 'Event Horizon', desc: 'Black as the core, wrapped in a burning accretion disk. Only for those who finished the galaxy.',
+    swatch: 'radial-gradient(circle at 50% 50%, #000 0 30%, #fff0c8 34%, #ff9a3a 44%, #b02a8a 60%, #05030c 75%)',
+    unlock: { stat: 'wins', value: 1, label: 'Finish the galaxy (100%)' },
+    color(d, t, c) {
+      if (belly(t)) return c.set('#0a0612');
+      // a hot band of light spirals down the body
+      const band = Math.abs(fract(d * 0.42 + t / TAU) - 0.5) * 2;
+      if (band < 0.18) return c.set('#fff0c8').lerp(c.clone().set('#ff9a3a'), band / 0.18);
+      if (band < 0.32) return c.set('#ff9a3a').lerp(c.clone().set('#b02a8a'), (band - 0.18) / 0.14);
+      return c.set('#05030c');
+    },
+    glow: (d, t) => {
+      const band = Math.abs(fract(d * 0.42 + t / TAU) - 0.5) * 2;
+      return belly(t) ? 0 : band < 0.18 ? 2.2 : band < 0.32 ? 1 : 0;
+    },
+    anim: 'flow',
+    mat: { roughness: 0.15, metalness: 0.6 },
+    head: { top: '#05030c', side: '#0a0612', belly: '#0a0612', accent: '#ffb347', eye: '#fff0c8', eyeGlow: 3.2 },
+    aura: '#ff9a3a', trail: '#ffb347',
+  },
+  {
     id: 'ghost', name: 'Phantom', desc: 'A pale spirit with an eerie glow.',
     swatch: 'radial-gradient(circle at 50% 40%, #ffffff, #cfe6ff 50%, #7a9ac8)',
     unlock: { stat: 'games', value: 10, label: 'Play 10 runs' },
