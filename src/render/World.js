@@ -282,12 +282,20 @@ export class World {
       this.island.boardUniforms.uPulse.value = this.pulseT >= 1 ? 0 : this.pulseT;
     }
     this.island.boardUniforms.uTime.value = this.time;
+    this.island.update(dt);
     this.sky.update(dt * (reduceMotion ? 0.3 : 1), this.time);
     this.ocean.uniforms.uTime.value = this.time;
     this.waterfalls.uniforms.uTime.value = this.time;
     this.scenery.update(dt, this.time, reduceMotion);
     this.ambient.update(dt, this.time, pxScale);
     this.heavens.update(this.time);
+  }
+
+  // The arena under the snake grows with the zones (17 -> 19 -> 21).
+  setBoardSize(size, opts) {
+    if (!this.island.setSize(size, opts)) return false;
+    this.size = size;
+    return true;
   }
 
   updateWalls(game, dt, active) {

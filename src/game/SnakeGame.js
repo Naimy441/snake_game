@@ -19,7 +19,8 @@ export const FOOD_TYPES = {
 };
 
 export const COMBO_WINDOW_MS = 5000;
-export const MAX_COMBO = 8;
+// No cap: every quick follow-up eat raises the multiplier by one.
+export const MAX_COMBO = Infinity;
 export const PRISM_LIFETIME_MS = 9000;
 export const RUSH_DRAIN_PER_SEC = 32;
 export const MAX_LEVEL = 15;
@@ -48,6 +49,12 @@ export const ZONE_NAMES = ['Emerald Coast', 'Golden Canyon', 'Neon Night', 'Cybe
 export const SKY_ZONE = 4;
 export const SKY_PAD = 2;
 export const SKY_SIZE = 21 + SKY_PAD * 2;
+
+// The board grows as the zones change: 17 x 17 in Emerald Coast, 19 x 19 in
+// Golden Canyon, then 21 x 21 for the rest of the ground (the sky box is
+// built around the 21 board). It grows by a ring of cells on every side, so
+// everything on it keeps its place on screen.
+export const BOARD_SIZES = [17, 19, 21];
 export const SKY_H = 13;
 export const SKY_LIFT = 3;
 export const SKY_CLIMB = 3;
@@ -68,10 +75,10 @@ export const PAD_POINTS = 25;
 export const PAD_RUSH = 15;
 export const PAD_RESPAWN_MS = 5000;
 
-// Obstacles rise at these speed levels (level index -> how many).
-// No pillars in the first zone; they start partway into the second.
-// The sky has none: pillars are left behind on the ground at lift-off.
-export const OBSTACLE_PLAN = { 4: 2, 5: 1, 7: 2, 8: 1, 10: 2, 11: 1 };
+// Obstacles rise at these speed levels (level index -> how many). The
+// board is kept clear: no level raises pillars any more (the machinery stays
+// so a mode could bring them back).
+export const OBSTACLE_PLAN = {};
 export const MAX_OBSTACLES = 12;
 export const OBSTACLE_WARN_MS = 2200;
 
@@ -85,6 +92,13 @@ export const NEIGHBOURS = [DIRS.up, DIRS.down, DIRS.left, DIRS.right];
 export const NEIGHBOURS_3D = [...NEIGHBOURS, DIRS.rise, DIRS.dive];
 export const cellKey = (x, z, y = 0) => (x * 64 + z) * 16 + y;
 
+// Apples grow the snake more on each map: 1 cell on the first, 2 on the
+// second, then 3 from the third map on.
+export const MAX_APPLE_GROWTH = 3;
+export function appleGrowth(zone) {
+  return Math.min(MAX_APPLE_GROWTH, zone + 1);
+}
+
 export function zoneForLevel(level) {
   let z = 0;
   for (let i = 0; i < ZONE_STARTS.length; i++) if (level >= ZONE_STARTS[i]) z = i;
@@ -92,9 +106,12 @@ export function zoneForLevel(level) {
 }
 
 export class SnakeGame {
-  constructor({ size = 21, rng = Math.random, best = 0 } = {}) {
-    this.boardSize = size;
-    this.size = size;
+  // sizes: board width per zone (the last one repeats). Without it the
+  // board stays `size` wide.
+  constructor({ size = 21, sizes = null, rng = Math.random, best = 0 } = {}) {
+    this.sizes = sizes && sizes.length ? sizes.slice() : [size];
+    this.boardSize = this.sizes[this.sizes.length - 1];
+    this.size = this.sizes[0];
     this.rng = rng;
     this.best = best;
     this.uid = 1;
@@ -102,7 +119,7 @@ export class SnakeGame {
   }
 
   reset() {
-    this.size = this.boardSize; // the sky box is bigger; a new run is back on the board
+    this.size = this.boardSizeFor(0); // a new run is back on the first, smallest board
     const c = Math.floor(this.size / 2);
     const startZ = this.size - 5;
     this.dir = { ...DIRS.up };
@@ -153,6 +170,40 @@ export class SnakeGame {
 
   get head() {
     return this.cells[0];
+  }
+
+  boardSizeFor(zone) {
+    return this.sizes[Math.min(zone, this.sizes.length - 1)];
+  }
+
+  // Shift everything by pad cells on x and z (the grid grew by pad on every
+  // side). Pickups are moved in place: callers may hold the same objects.
+  shiftGrid(pad, y) {
+    const moved = (c) => ({ ...c, x: c.x + pad, z: c.z + pad, y: y == null ? Y(c) : y });
+    this.cells = this.cells.map(moved);
+    if (this.removedTail) this.removedTail = moved(this.removedTail);
+    const inPlace = (c, ny) => c && Object.assign(c, { x: c.x + pad, z: c.z + pad }, ny == null ? {} : { y: ny });
+    return inPlace;
+  }
+
+  // On the ground, between zones: widen the board by a ring of cells.
+  growBoard(size) {
+    if (this.flying || size <= this.size) return 0;
+    const pad = Math.floor((size - this.size) / 2);
+    const shift = this.shiftGrid(pad);
+    shift(this.food);
+    shift(this.bonus);
+    if (this.chain) this.chain.links.forEach((c) => shift(c));
+    if (this.prey) {
+      shift(this.prey);
+      this.prey.px += pad;
+      this.prey.pz += pad;
+    }
+    this.pads.forEach((c) => shift(c));
+    this.obstacles.forEach((c) => shift(c));
+    this.size = size;
+    this.undoOk = false;
+    return pad;
   }
 
   get level() {
@@ -508,7 +559,13 @@ export class SnakeGame {
     const lvl = this.level;
     const zonePrev = zoneForLevel(prevLevel);
     ev.levelUp = { level: lvl, zone: this.zone, zoneUp: this.zone > zonePrev };
+    if (!this.flying && this.zone < SKY_ZONE) {
+      const grew = this.growBoard(this.boardSizeFor(this.zone));
+      if (grew) ev.levelUp.grew = { pad: grew, size: this.size };
+      if (grew) ev.levelUp.shift = grew;
+    }
     if (this.zone >= SKY_ZONE && !this.flying) {
+      ev.levelUp.shift = Math.floor((SKY_SIZE - this.size) / 2);
       this.enterSky({ launch: true });
       ev.levelUp.liftoff = true;
     }
@@ -532,6 +589,7 @@ export class SnakeGame {
     const L = Math.max(0, Math.min(MAX_LEVEL, Math.floor(level)));
     if (L === 0) return;
     this.foodEaten = LEVEL_AT[L];
+    this.growBoard(this.boardSizeFor(Math.min(this.zone, SKY_ZONE - 1)));
     if (this.zone >= SKY_ZONE) {
       this.enterSky();
       return void this.fillPads();
@@ -553,16 +611,15 @@ export class SnakeGame {
   // behind (rings take the pads' place), and so is the golden mouse.
   enterSky({ launch = false } = {}) {
     if (this.flying) return;
+    // the box is centred on the board, whatever size the board had grown to
+    const pad = Math.floor((SKY_SIZE - this.size) / 2);
+    const y0 = launch ? SKY_LIFT : SKY_CENTER;
+    const shift = this.shiftGrid(pad, y0);
+    const lift = (c) => shift(c, SKY_CENTER);
     this.flying = true;
     this.size = SKY_SIZE;
     this.height = SKY_H;
     this.yMid = SKY_LIFT;
-    const y0 = launch ? SKY_LIFT : SKY_CENTER;
-    const move = (c, y) => ({ ...c, x: c.x + SKY_PAD, z: c.z + SKY_PAD, y });
-    this.cells = this.cells.map((c) => move(c, y0));
-    if (this.removedTail) this.removedTail = move(this.removedTail, y0);
-    // pickups are moved in place: callers may hold the same objects
-    const lift = (c) => c && Object.assign(c, { x: c.x + SKY_PAD, z: c.z + SKY_PAD, y: SKY_CENTER });
     lift(this.food);
     lift(this.bonus);
     if (this.chain) this.chain.links.forEach(lift);
@@ -788,19 +845,21 @@ export class SnakeGame {
       this.registerEat();
       const points = def.points * this.combo * this.scoreMult;
       this.score += points;
-      this.pendingGrowth += def.grow;
+      // an apple grows by the map it was eaten on (before any level-up it brings)
+      this.pendingGrowth += eaten.type === 'orb' ? appleGrowth(this.zone) : def.grow;
       this.rush = Math.min(100, this.rush + def.rush);
       const prevLevel = this.level;
       if (eaten.type === 'orb') this.foodEaten++;
       ev.ate = { ...eaten, points, combo: this.combo, rushing: this.scoreMult > 1, levelUp: this.level > prevLevel };
       if (this.level > prevLevel) {
         this.onLevelUp(ev, prevLevel);
-        if (ev.levelUp.liftoff) {
-          // the whole board just turned into the sky box around us
-          nx += SKY_PAD;
-          nz += SKY_PAD;
-          ny = SKY_LIFT;
-          Object.assign(ev.ate, { x: eaten.x, z: eaten.z, y: SKY_LIFT });
+        const pad = ev.levelUp.shift || 0;
+        if (pad) {
+          // the board just grew (or turned into the sky box) around us
+          nx += pad;
+          nz += pad;
+          if (ev.levelUp.liftoff) ny = SKY_LIFT;
+          Object.assign(ev.ate, { x: eaten.x, z: eaten.z, y: ev.levelUp.liftoff ? SKY_LIFT : ny });
         }
       }
     }

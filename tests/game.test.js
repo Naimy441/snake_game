@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SnakeGame, DIRS } from '../src/game/SnakeGame.js';
+import { SnakeGame, DIRS, BOARD_SIZES, SKY_SIZE as SKY_W } from '../src/game/SnakeGame.js';
 
 const seq = (vals) => {
   let i = 0;
@@ -559,8 +559,9 @@ test('the ghost survives a long run without trapping itself', () => {
     const rng = () => ((s = (s * 16807) % 2147483647) / 2147483647);
     const g = new SnakeGame({ rng });
     const gh = new GhostBot(g);
-    const eaten = runGhost(g, gh, 110, { pillars: true });
-    assert.equal(eaten, 110);
+    // apples grow the snake more on every map, so 45 already make it long
+    const eaten = runGhost(g, gh, 45, { pillars: true });
+    assert.equal(eaten, 45);
     assert.equal(gh.respawns, 0, `seed ${seed}: ghost got trapped (length ${gh.cells.length})`);
     assert.ok(gh.cells.length > 60);
     // never overlaps itself or a pillar
@@ -618,14 +619,15 @@ test('the ghost ignores the golden mouse and steers around pillars', () => {
   assert.ok(g.prey, 'mouse untouched');
 });
 
-test('starting at a later level sets speed, zone, pillars and pads', () => {
-  const g = new SnakeGame();
+test('starting at a later level sets speed, zone, board size and pads', () => {
+  const g = new SnakeGame({ sizes: BOARD_SIZES });
   g.startAtLevel(5);
   assert.equal(g.level, 5);
   assert.equal(g.zone, 1);
+  assert.equal(g.size, 19, 'Golden Canyon is played on the 19 board');
   assert.deepEqual(g.levelProgress(), { into: 0, need: 4, max: false });
-  assert.equal(g.obstacles.length, 3, 'pillars from levels 4 and 5');
-  assert.ok(g.obstacles.every((o) => o.solid));
+  assert.equal(g.obstacles.length, 0, 'no pillars');
+  assert.ok(g.cells.every((c) => g.inBounds(c.x, c.z)));
   assert.equal(g.pads.length, 2);
   assert.equal(g.cells.length, 4);
   assert.ok(g.stillConnected([]));
@@ -826,4 +828,80 @@ test('bullet time: the Rush meter drains in real time, not slowed game time', ()
   assert.equal(slowed.real, slowed.game * 2);
   // half-speed game time: one move takes twice as long, so it drains twice as much
   assert.ok(Math.abs(slowed.drained - normal.drained * 2) < 1e-9);
+});
+
+// ---------------------------------------------------------------- growing board
+test('no level ever raises pillars', () => {
+  const g = new SnakeGame({ sizes: BOARD_SIZES, rng: seq([0.31, 0.77, 0.12, 0.58]) });
+  for (let i = 0; i < 60 && g.alive && !g.flying; i++) {
+    g.food = { x: g.head.x + g.dir.x, z: g.head.z + g.dir.z, type: 'orb', id: 5000 + i };
+    if (!g.inBounds(g.food.x, g.food.z)) { g.turn(1); g.step(); i--; continue; }
+    const ev = g.step();
+    assert.equal(ev.obstaclesWarned, undefined);
+    assert.equal(g.obstacles.length, 0);
+  }
+});
+
+test('the board grows 17 -> 19 -> 21 with the zones and stays 21', () => {
+  const g = new SnakeGame({ sizes: BOARD_SIZES, rng: seq([0.5]) });
+  assert.equal(g.size, 17);
+  const seen = [];
+  for (let i = 0; i < 80 && g.alive && !g.flying; i++) {
+    const before = g.head;
+    g.food = { x: g.head.x + g.dir.x, z: g.head.z + g.dir.z, type: 'orb', id: 6000 + i };
+    if (!g.inBounds(g.food.x, g.food.z)) { g.turn(1); g.step(); i--; continue; }
+    const size0 = g.size;
+    const ev = g.step();
+    assert.ok(ev.ate && !ev.died);
+    const pad = (g.size - size0) / 2;
+    if (ev.levelUp && ev.levelUp.grew) {
+      assert.equal(pad, 1, 'one ring of cells on every side');
+      // the head kept its place relative to the centre
+      assert.equal(g.head.x, before.x + g.dir.x + pad);
+      assert.equal(g.head.z, before.z + g.dir.z + pad);
+    }
+    if (!g.flying) {
+      assert.equal(g.size, BOARD_SIZES[Math.min(g.zone, 2)]);
+      if (!seen.includes(g.size)) seen.push(g.size);
+      assert.ok(g.cells.every((c) => g.inBounds(c.x, c.z)));
+    }
+  }
+  assert.deepEqual(seen, [17, 19, 21]);
+  assert.ok(g.flying, 'reached the sky');
+  assert.equal(g.size, SKY_W, 'the sky box is still built around the 21 board');
+  g.reset();
+  assert.equal(g.size, 17, 'a new run starts small again');
+});
+
+// ---------------------------------------------------------------- growth and combos
+test('apples grow the snake by 1, 2, then 3 from the third map on', () => {
+  for (let zone = 0; zone < ZONE_STARTS.length; zone++) {
+    const g = new SnakeGame({ rng: seq([0.5]) });
+    g.startAtLevel(ZONE_STARTS[zone]);
+    assert.equal(g.zone, zone);
+    const d = g.dir;
+    g.food = { x: g.head.x + d.x, z: g.head.z + d.z, y: g.head.y || 0, type: 'orb', id: 7000 };
+    const len = g.cells.length;
+    g.step();
+    assert.equal(g.pendingGrowth + (g.cells.length - len), Math.min(3, zone + 1), `map ${zone + 1}`);
+  }
+  // the apple that opens the next map still grows by the map it was eaten on
+  const g = new SnakeGame({ rng: seq([0.5]) });
+  g.foodEaten = LEVEL_AT[ZONE_STARTS[1]] - 1;
+  g.food = { x: g.head.x, z: g.head.z - 1, type: 'orb', id: 7001 };
+  const len = g.cells.length;
+  g.step();
+  assert.equal(g.zone, 1);
+  assert.equal(g.pendingGrowth + (g.cells.length - len), 1);
+});
+
+test('the combo has no cap', () => {
+  const g = new SnakeGame({ size: 21, rng: seq([0.5]) });
+  for (let i = 0; i < 12; i++) {
+    if (!g.inBounds(g.head.x + g.dir.x, g.head.z + g.dir.z)) { g.turn(1); i--; g.step(); continue; }
+    g.food = { x: g.head.x + g.dir.x, z: g.head.z + g.dir.z, type: 'orb', id: 7100 + i };
+    g.step();
+  }
+  assert.equal(g.combo, 12);
+  assert.equal(g.maxCombo, 12);
 });

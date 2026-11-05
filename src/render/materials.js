@@ -103,7 +103,7 @@ export function makeBoardMaterial(size, detailTex, uniforms) {
   const mat = new THREE.MeshStandardMaterial({ map: detailTex, roughness: 0.9, metalness: 0 });
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
-    shader.uniforms.uSize = { value: size };
+    if (!uniforms.uSize) shader.uniforms.uSize = { value: size };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec2 vBUv; varying vec3 vBW;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBUv = uv; vBW = (modelMatrix * vec4(transformed, 1.0)).xyz;');

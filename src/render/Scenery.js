@@ -4,6 +4,7 @@ import { PropBuilder, mulberry32, displace, ribbon, xform, clean, cone } from '.
 import { makeRevealUniforms, propMaterials, makeCheckerMaterial, addReveal } from './materials.js';
 import { islandRadius, GRASS_Y } from './Island.js';
 import { makeWaterfall, WATER_Y } from './Water.js';
+import { buildSpectacle } from './Spectacles.js';
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const TAU = Math.PI * 2;
@@ -21,6 +22,65 @@ function islandSpot(rng, { margin = 1.4, avoidSouth = false } = {}) {
     return { x, z, r, th };
   }
   return { x: 20, z: -20, r: 28, th: -0.8 };
+}
+
+// n spots spread evenly around the island: one per angular sector (with a
+// little jitter), at least minDist from each other and from anything already
+// in `taken` (which they are added to). Keeps a zone's set pieces from
+// piling up in one place.
+function spreadSpots(rng, n, { margin = 1.6, avoidSouth = false, minDist = 5, taken = [], rMin = 13.5 } = {}) {
+  const spots = [];
+  const ok = (x, z) => {
+    if (Math.abs(x) < 12.8 && Math.abs(z) < 12.8) return false;
+    if (avoidSouth && z > 9 && Math.abs(x) < 16) return false;
+    for (const t of taken) if (Math.hypot(t.x - x, t.z - z) < minDist) return false;
+    return true;
+  };
+  const off = rng() * TAU;
+  for (let i = 0; i < n; i++) {
+    for (let tries = 0; tries < 40; tries++) {
+      // stay in this spot's sector for most tries, then look anywhere
+      const th = tries < 25 ? off + ((i + 0.15 + rng() * 0.7) / n) * TAU : rng() * TAU;
+      const R = islandRadius(th);
+      const r = rMin + rng() * Math.max(0.5, R - rMin - margin);
+      const x = Math.cos(th) * r;
+      const z = Math.sin(th) * r;
+      if (!ok(x, z)) continue;
+      const p = { x, z, r, th };
+      spots.push(p);
+      taken.push(p);
+      break;
+    }
+  }
+  return spots;
+}
+
+// A crystal formation: a dark rock with faceted, pointed hexagonal crystals
+// growing out of it, the tallest in the middle and the rest leaning outward.
+function crystalCluster(b, rng, x, y, z, s, colors) {
+  const anchor = V(x, y, z);
+  const base = clean(new THREE.DodecahedronGeometry(0.75 * s, 0));
+  displace(base, 0.12 * s, 1.5, rng() * 30);
+  xform(base, { sy: 0.45, x, y: y + 0.12 * s, z, ry: rng() * TAU });
+  b.add(base, { color: '#16142a', top: '#2a2648', anchor, bucket: 'flat', ao: 0.7, aoHeight: 0.5 * s });
+  const n = 5 + Math.floor(rng() * 3);
+  for (let i = 0; i < n; i++) {
+    const main = i === 0;
+    const a = (i / (n - 1)) * TAU + rng() * 0.5;
+    const d = main ? 0 : (0.25 + rng() * 0.3) * s;
+    const h = (main ? 2.2 + rng() * 0.6 : 0.9 + rng() * 1.0) * s;
+    const w = (main ? 0.24 : 0.12 + rng() * 0.08) * s;
+    const tilt = main ? rng() * 0.1 : 0.35 + rng() * 0.4;
+    const prism = new THREE.CylinderGeometry(w, w * 1.08, h * 0.78, 6, 1);
+    prism.translate(0, h * 0.39, 0);
+    const tip = cone(w, h * 0.22, 6, 1);
+    tip.translate(0, h * 0.78 + h * 0.11, 0);
+    const g = mergeGeometries([clean(prism, { smoothNormals: false }), clean(tip, { smoothNormals: false })]);
+    // lean away from the middle of the cluster
+    xform(g, { rx: Math.sin(a) * tilt, rz: -Math.cos(a) * tilt, ry: rng() * TAU, x: x + Math.cos(a) * d, y: y + 0.1 * s, z: z + Math.sin(a) * d });
+    const c = colors[main ? 0 : Math.floor(rng() * colors.length)];
+    b.add(g, { color: c, glow: main ? 1.6 : 0.9 + rng() * 0.6, anchor, bucket: 'flat', ao: 1 });
+  }
 }
 
 // ------------------------------------------------------------------ props
@@ -400,25 +460,20 @@ function buildCanyon(b, rng) {
 
 function buildNeon(b, rng) {
   const neon = ['#38f6ff', '#ff3df2', '#ffb627', '#7dff6a'];
-  for (let i = 0; i < 12; i++) {
-    const p = islandSpot(rng, { margin: 1.5 });
+  const taken = [];
+  for (const p of spreadSpots(rng, 12, { margin: 1.5, minDist: 3.5, taken })) {
+    const i = taken.indexOf(p);
     const anchor = V(p.x, GRASS_Y, p.z);
     const c = neon[i % neon.length];
     b.add(xform(new THREE.CylinderGeometry(0.06, 0.09, 2.8, 8), { x: p.x, y: GRASS_Y + 1.4, z: p.z }), { color: '#1a1c2c', anchor, bucket: 'shiny' });
     b.add(xform(new THREE.SphereGeometry(0.2, 14, 10), { x: p.x, y: GRASS_Y + 2.9, z: p.z }), { color: c, glow: 4, anchor, bucket: 'smooth', ao: 1 });
     b.add(xform(new THREE.TorusGeometry(0.26, 0.03, 6, 20), { x: p.x, y: GRASS_Y + 2.9, z: p.z, rx: Math.PI / 2 }), { color: '#2a2c3c', anchor, bucket: 'shiny', ao: 1 });
   }
-  for (let i = 0; i < 12; i++) {
-    const p = islandSpot(rng, { margin: 1.8, avoidSouth: true });
-    const anchor = V(p.x, GRASS_Y, p.z);
-    const c = neon[Math.floor(rng() * 2)];
-    b.add(xform(new THREE.CylinderGeometry(0.08, 0.12, 1.2, 6), { x: p.x, y: GRASS_Y + 0.6, z: p.z }), { color: '#14162a', anchor, bucket: 'flat' });
-    for (let k = 0; k < 6; k++) {
-      const g = new THREE.OctahedronGeometry(0.35 + rng() * 0.35, 0);
-      xform(g, { sy: 1.8, x: p.x + (rng() - 0.5) * 1.1, y: GRASS_Y + 1.4 + rng() * 1.4, z: p.z + (rng() - 0.5) * 1.1, ry: rng() * 3, rz: (rng() - 0.5) * 0.6 });
-      b.add(g, { color: c, glow: 0.9 + rng() * 0.6, anchor, bucket: 'flat', ao: 1 });
-    }
-  }
+  // crystal formations, spread around the island and well apart
+  const crystalCols = [['#ff3df2', '#ff7af6', '#b34dff'], ['#38f6ff', '#8afcff', '#4a7dff']];
+  spreadSpots(rng, 8, { margin: 2, avoidSouth: true, minDist: 6, taken, rMin: 14.5 }).forEach((p, i) => {
+    crystalCluster(b, rng, p.x, GRASS_Y, p.z, 0.85 + rng() * 0.45, crystalCols[i % 2]);
+  });
   for (let i = 0; i < 4; i++) {
     const p = islandSpot(rng, { margin: 2, avoidSouth: true });
     const yaw = Math.atan2(p.x, p.z) + Math.PI / 2;
@@ -631,8 +686,11 @@ export class Scenery {
           special.push(ring);
         }
       }
+      // the living set pieces: balloons, lanterns, aurora, whales...
+      const spectacle = buildSpectacle(i);
+      group.add(spectacle.group);
       group.visible = i === 0;
-      this.zones.push({ group, uniforms, special, state: i === 0 ? 1 : 0 });
+      this.zones.push({ group, uniforms, special, spectacle, state: i === 0 ? 1 : 0 });
     });
   }
 
@@ -646,12 +704,14 @@ export class Scenery {
     for (const s of z.special) {
       if (s.isMesh) s.scale.setScalar(Math.max(0.001, scale));
     }
+    z.spectacle.setFade(scale);
   }
 
   update(dt, time, reduceMotion) {
     for (const z of this.zones) {
       if (!z.group.visible) continue;
       z.uniforms.uTime.value = time;
+      z.spectacle.update(time * (reduceMotion ? 0.5 : 1), dt * (reduceMotion ? 0.5 : 1));
       for (const s of z.special) if (s.userData.spin) s.rotation.z += dt * s.userData.spin * (reduceMotion ? 0.3 : 1);
     }
   }

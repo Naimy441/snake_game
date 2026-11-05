@@ -36,8 +36,8 @@ npm run preview   # serves dist/ at http://localhost:4173
 
 ## How to play
 
-Eat spinning crystal **apples** to grow and score. Don't hit the walls, the pillars or
-your own body.
+Eat spinning crystal **apples** to grow and score. Don't hit the walls or
+your own body. The board is always clear: there are no obstacles on it.
 
 | Action | Overhead view | Chase and first-person views |
 | --- | --- | --- |
@@ -61,7 +61,8 @@ camera, Start pauses, bumpers turn left/right.
 
 ### Pickups and hazards
 
-- **Crystal apple:** 10 points, grows the snake by 1, adds 25% Rush.
+- **Crystal apple:** 10 points, adds 25% Rush, and grows the snake by 1
+  cell on Emerald Coast, 2 in Golden Canyon, then 3 from Neon Night on.
 - **Prism:** appears now and then, worth 50 points, grows by 2 and fills Rush.
   It disappears after 9 seconds (it blinks near the end).
 - **Orb chain:** 3 to 5 numbered orbs. Eat them in order for rising points,
@@ -73,17 +74,20 @@ camera, Start pauses, bumpers turn left/right.
   14 seconds.
 - **Boost pad:** from zone 2 on. Driving over one gives a free burst of speed
   and double points, then it reappears somewhere else.
-- **Pillars:** from Golden Canyon on, some level-ups raise pillars on the board. A pulsing red ring
-  marks each spot for a couple of seconds first. Pillars never rise under the
-  snake and never wall off part of the board.
+- **A growing board:** the first map is played on a 17 x 17 board. At
+  Golden Canyon it widens to 19 x 19 and at Neon Night to 21 x 21, where it
+  stays. It grows by a ring of cells on every side as the zone wave rolls
+  out: the walls slide outward, the camera eases back to fit, and nothing
+  on the board moves.
 
 ### Scoring, levels and zones
 
-- **Combo:** eat again within 5 seconds to raise the multiplier, up to x8.
+- **Combo:** eat again within 5 seconds to raise the multiplier by one. There
+  is no cap: keep eating quickly and it keeps climbing.
 - **Rush:** hold Space to move 1.7x faster and score double while the meter lasts.
 - **Speed levels:** eating apples raises your speed level. The difficulty
   eases in: Emerald Coast levels take 3 apples each, start slow (about 6
-  moves a second) and have no pillars, so 9 apples reach Golden Canyon. Later
+  moves a second), so 9 apples reach Golden Canyon. Later
   levels take 4, then 5 apples and keep speeding up to the top speed. The HUD
   shows how many apples are left until the next level and which level brings
   the next zone.
@@ -92,6 +96,14 @@ camera, Start pauses, bumpers turn left/right.
   the sky, light, water and board all change: Emerald Coast, Golden
   Canyon, Neon Night, Cyber Overdrive, then Sunset Heavens. The visuals get
   more intense with each level inside a zone too.
+- **Living maps:** each zone has its own moving set pieces around the
+  island, all animated on the GPU: a rainbow, drifting hot-air balloons,
+  sailboats and butterflies on Emerald Coast; a festival of rising sky
+  lanterns, warm balloons and swirling dust devils in Golden Canyon; an
+  aurora, streams of flying cars, sweeping searchlights and shooting stars
+  over Neon Night; a giant spinning hologram, falling data rain, a ringed
+  planet and sonar pulses on the sea in Cyber Overdrive; and sky whales
+  swimming through lanterns and drifting blossom petals in Sunset Heavens.
 - **Slow motion on level-ups:** while the level-up banner or a new zone's
   title card covers the screen, the game drops into slow motion (about a
   quarter speed for a new zone, a short dip for a normal level-up), with
@@ -100,7 +112,7 @@ camera, Start pauses, bumpers turn left/right.
 - **Level select:** the start menu has a "Start at" picker. Once you have
   reached a level in any run, you can start a new run straight from it (or
   from any lower level) with the ‹ › buttons or Left/Right on the menu. The run
-  starts with that level's speed, zone, apples-to-next-level and pillars.
+  starts with that level's speed, zone, board size and apples-to-next-level.
 - At game over you get a rank from D to S.
 
 ### Sunset Heavens: flying in 3D
@@ -141,8 +153,7 @@ layers tall.
   prisms drop a beam to the floor, and the compass says whether the apple is
   above (▲) or below (▼).
 - **Hazards:** flying out of the box hits the laser fence; that's the only
-  hazard besides your own body. The ground's pillars are left behind at
-  lift-off and no new obstacles appear in the sky.
+  hazard besides your own body. There are no obstacles in the sky.
 - **Pickups:** apples, prisms and orb chains float at any altitude (chains
   can run up and down). Boost pads become spinning gold boost rings to fly
   through. The golden mouse can't fly, so it stays on the ground.
@@ -176,8 +187,7 @@ little so it can glide smoothly. A few things keep that from feeling laggy:
 Turn on the **ghost guide** (G, the button on the main menu, or Settings)
 to race a perfect bot. A translucent ghost snake plays the same board
 alongside you: it takes the shortest safe route to each pickup, grabbing
-chain orbs in order and prisms before they vanish, then the apple. It steers
-around pillars (even ones still in their warning phase), never traps itself
+chain orbs in order and prisms before they vanish, then the apple. It never traps itself
 on its own tail, ignores the golden mouse and fires its Rush only when the
 meter carries it all the way to the next pickup, so it scores double. Once
 it has collected everything on the board it waits in place until you eat
@@ -301,7 +311,8 @@ src/
   skins.js               skin patterns, accessories and their unlock rules
   render/SnakePath.js    smooth path through grid cells with rounded corners
   render/FoodView.js     crystal apples, prisms, orb chains and the golden mouse
-  render/BoardObjects.js pillars with warnings, boost pads and the sky's boost rings
+  render/BoardObjects.js boost pads, the sky's boost rings (and pillars, unused)
+  render/Spectacles.js   each zone's animated set pieces: balloons, lanterns, aurora, whales...
   render/Effects.js      particles, shockwaves, path guide
   render/CameraRig.js    orbit / garage / overhead / chase / first-person cameras and blending
   render/textures.js     procedural textures
