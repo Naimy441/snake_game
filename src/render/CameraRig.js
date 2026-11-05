@@ -27,10 +27,17 @@ const TOUR_KEYS = [
   { u: 0.85, r: 30, y: 17, w: 0.07, tr: 8, ta: 0.3, ty: -1, fov: 44, fs: 0 },
 ];
 const TOUR_FIELDS = ['r', 'y', 'w', 'tr', 'ta', 'ty', 'fov', 'fs'];
+// The Galactic Core gets its own flight: a wide reveal of the galaxy, down
+// over the floating board, a low pass under it past the black hole, and out again.
+const GALAXY_KEYS = [
+  { u: 0.0, r: 80, y: 44, w: 0.05, tr: 0, ta: 0, ty: -14, fov: 50, fs: 0 },
+  { u: 0.25, r: 20, y: 17, w: 0.1, tr: 0, ta: 0, ty: -3, fov: 48, fs: 0.3 },
+  { u: 0.5, r: 12, y: 4.5, w: 0.14, tr: 0, ta: 0, ty: -8, fov: 58, fs: 0.2 },
+  { u: 0.75, r: 34, y: 12, w: 0.08, tr: 0, ta: 0, ty: -12, fov: 50, fs: 0 },
+];
 
 // Catmull-Rom through the (cyclic) key table at segment fraction u.
-function tourKey(u, out) {
-  const K = TOUR_KEYS;
+function tourKey(u, out, K = TOUR_KEYS) {
   const n = K.length;
   let i = n - 1;
   while (i > 0 && K[i].u > u) i--;
@@ -105,15 +112,15 @@ export class CameraRig {
     this.fitOverhead(this.camera.aspect);
   }
 
-  setMode(mode, { instant = false, reduceMotion = false } = {}) {
+  setMode(mode, { instant = false, reduceMotion = false, duration = null } = {}) {
     if (mode !== this.mode && (mode === 'orbit' || mode === 'showcase' || mode === 'tour')) this.cine = null;
-    if (mode === this.mode && !instant) return;
+    if (mode === this.mode && !instant && mode !== 'director') return;
     this.from.pos.copy(this.camera.position);
     this.from.quat.copy(this.camera.quaternion);
     this.from.fov = this.camera.fov;
     this.mode = mode;
     this.blend = instant ? 1 : 0;
-    this.blendDur = reduceMotion ? 0.3 : mode === 'tour' ? 2.2 : 0.75;
+    this.blendDur = duration ?? (reduceMotion ? 0.3 : mode === 'tour' ? 2.2 : 0.75);
     if (mode === 'fp') this.fpYaw = null;
     if (mode === 'tp') this.tpYaw = null;
   }
@@ -230,10 +237,17 @@ export class CameraRig {
 
   // The title-screen tour (see TOUR_KEYS). sky: 0..1, how far the world has
   // lifted into Sunset Heavens, where the flight box is wider than the board.
-  computeTour(dt, reduceMotion, sky, snake, out) {
+  computeTour(dt, reduceMotion, sky, snake, out, space = 0) {
     const speed = reduceMotion ? 0.45 : 1;
     this.tourT += dt * speed;
     const k = tourKey((this.tourT / TOUR_SEGMENT) % 1, this.tourK || (this.tourK = {}));
+    if (space > 0.001) {
+      // blend the island key towards the galaxy's
+      const g = tourKey((this.tourT / TOUR_SEGMENT) % 1, this.tourG || (this.tourG = {}), GALAXY_KEYS);
+      const f = Math.min(1, space);
+      for (const key of TOUR_FIELDS) k[key] += (g[key] - k[key]) * f;
+      sky *= 1 - f;
+    }
     this.tourAngle += k.w * dt * speed;
     const a = this.tourAngle;
     const grow = 1 + 0.45 * sky;
@@ -241,9 +255,13 @@ export class CameraRig {
     const t = this.tourT;
     // a drone's slow, breathing drift (never in reduce motion)
     const d = reduceMotion ? 0 : 1;
-    out.pos.set(Math.sin(a) * r + Math.sin(t * 0.53) * 0.25 * d, k.y + (k.y < 6 ? sky * 2 : 0) + Math.sin(t * 0.71 + 1) * 0.18 * d, Math.cos(a) * r + Math.cos(t * 0.47) * 0.25 * d);
+    // In the sky the low pass rides a little higher and the near look-at
+    // points spread out with the wider flight box; both fade in and out
+    // smoothly (a hard cut-off here made the shot jump twice per map)
+    const low = 1 - smoothstep(4, 8, k.y);
+    out.pos.set(Math.sin(a) * r + Math.sin(t * 0.53) * 0.25 * d, k.y + sky * 2 * low + Math.sin(t * 0.71 + 1) * 0.18 * d, Math.cos(a) * r + Math.cos(t * 0.47) * 0.25 * d);
     const ta = a + k.ta;
-    const tr = k.tr < 40 ? k.tr * grow : k.tr;
+    const tr = k.tr * (1 + (grow - 1) * (1 - smoothstep(20, 60, k.tr)));
     this.tmpObj.position.copy(out.pos);
     this.tmpObj.up.set(0, 1, 0);
     // lean toward the (smoothed) snake head so the demo play stays in shot
@@ -267,6 +285,12 @@ export class CameraRig {
   // Fraction of the way through the current map's segment.
   get tourProgress() {
     return (this.tourT / TOUR_SEGMENT) % 1;
+  }
+
+  // Cinematics hand the camera to a director: fn(dt, out) fills the pose.
+  setDirector(fn, opts) {
+    this.director = fn;
+    this.setMode('director', { instant: false, ...opts });
   }
 
   computeOrbit(dt, reduceMotion, out) {
@@ -374,7 +398,7 @@ export class CameraRig {
 
   // aim: horizontal heading to face; pitch: +1 climbing, -1 diving, 0 level.
   // box: { floorY, ceilY } of the sky's flight box (chase cameras stay inside it)
-  update(dt, snake, { speedFx = 0, reduceMotion = false, aim = null, flying = false, pitch = 0, box = null, sky = 0 } = {}) {
+  update(dt, snake, { speedFx = 0, reduceMotion = false, aim = null, flying = false, pitch = 0, box = null, sky = 0, space = 0 } = {}) {
     this.easeBoardSize(dt);
     this.aim = aim;
     this.box = box;
@@ -392,7 +416,8 @@ export class CameraRig {
     }
     this.pitch += ((flying ? pitch : 0) - this.pitch) * Math.min(1, dt * 5);
     const target = this.pose;
-    if (this.mode === 'tour') this.computeTour(dt, reduceMotion, sky, snake, target);
+    if (this.mode === 'director' && this.director) this.director(dt, target);
+    else if (this.mode === 'tour') this.computeTour(dt, reduceMotion, sky, snake, target, space);
     else if (this.mode === 'orbit') this.computeOrbit(dt, reduceMotion, target);
     else if (this.mode === 'showcase') this.computeShowcase(dt, snake, reduceMotion, target);
     else if (this.mode === 'fp') this.computeFP(dt, snake, speedFx, reduceMotion, target);
@@ -414,14 +439,14 @@ export class CameraRig {
     cam.quaternion.copy(this.from.quat).slerp(target.quat, b);
     // Lift the camera through the middle of an overhead<->FP transition so it
     // sweeps over the board instead of cutting through the walls.
-    if (b < 1 && this.mode !== 'orbit' && this.mode !== 'showcase' && this.mode !== 'tour') cam.position.y += Math.sin(b * Math.PI) * 2.5;
+    if (b < 1 && this.mode !== 'orbit' && this.mode !== 'showcase' && this.mode !== 'tour' && this.mode !== 'director') cam.position.y += Math.sin(b * Math.PI) * 2.5;
 
     this.kick *= Math.exp(-dt * 6);
     cam.fov = this.from.fov + (target.fov - this.from.fov) * b + (reduceMotion ? 0 : this.kick);
     if (this.cine) this.applyCinematic(dt, snake);
 
     // Small, quickly damped shake (never in first person).
-    if (this.shake > 0.001 && !reduceMotion && (this.mode === 'overhead' || this.mode === 'tp')) {
+    if (this.shake > 0.001 && !reduceMotion && (this.mode === 'overhead' || this.mode === 'tp' || this.mode === 'director')) {
       const k = this.mode === 'tp' ? 0.5 : 1;
       cam.position.x += (Math.random() - 0.5) * this.shake * k;
       cam.position.y += (Math.random() - 0.5) * this.shake * k * 0.5;

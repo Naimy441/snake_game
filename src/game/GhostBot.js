@@ -48,6 +48,7 @@ export class GhostBot {
       this.removedTail = { x: c, z: startZ + 4, y: 0 };
       this.apples = 0;
       this.score = 0;
+      this.route = null;
     }
     this.pendingGrowth = 0;
     this.ticks = 0;
@@ -149,7 +150,10 @@ export class GhostBot {
     const b = new Uint8Array(this.cellCount);
     // pillars, or in the sky laser columns through every layer
     for (const o of g.obstacles) for (let y = 0; y < g.height; y++) b[this.idx(o.x, o.z, y)] = 1;
-    if (g.chain && !this.chainDone.has(g.chain.id)) {
+    // (Only while going for the chain: touching an orb just breaks the chain,
+    // so to every other route and to the safety checks they're open cells.
+    // Treating them as walls made it think it was trapped when a chain appeared.)
+    if (nextChain && g.chain && !this.chainDone.has(g.chain.id)) {
       const next = this.chainId === g.chain.id ? this.chainNext : g.chain.next;
       g.chain.links.forEach((l, i) => {
         if (!this.inside(l.x, l.z, Y(l))) return;
@@ -210,11 +214,14 @@ export class GhostBot {
   }
 
   // Simulate following `path`, eating a target at its end that grows by `grow`.
+  // Anything else eaten on the way (the apple or a prism the route happens to
+  // cross) grows the snake too, so it counts: missing that is how it used to
+  // box itself in while chasing an orb chain.
   simulate(path, grow) {
     const body = this.cells.slice();
     let growth = this.pendingGrowth;
     path.forEach((c, i) => {
-      if (i === path.length - 1) growth += grow;
+      growth += Math.max(i === path.length - 1 ? grow : 0, this.pickupGrowth(c));
       body.unshift(c);
       if (growth > 0) growth--;
       else body.pop();
@@ -222,10 +229,48 @@ export class GhostBot {
     return { body, growth };
   }
 
+  // Is every cell of the route free by the time the head gets there, even
+  // with whatever it eats on the way? (Growth keeps the tail where it is for
+  // longer, so cells it would have left in time may still be body.) Counts
+  // all the growth from the start, to be safe.
+  routeClear(route, chain) {
+    let extra = 0;
+    for (const c of route) extra += this.pickupGrowth(c);
+    const free = this.freeTimes(this.cells, this.pendingGrowth + extra);
+    const blocked = this.staticBlocked(chain);
+    for (let j = 0; j < route.length; j++) {
+      const c = route[j];
+      if (!this.inside(c.x, c.z, Y(c))) return false;
+      const k = this.idx(c.x, c.z, Y(c));
+      if (blocked[k] || free[k] > j + 1) return false;
+    }
+    return true;
+  }
+
+  // How much eating whatever is on cell c would grow the snake by.
+  pickupGrowth(c) {
+    const g = this.game;
+    const y = Y(c);
+    if (g.food && this.ateFood !== g.food.id && at(g.food, c.x, c.z, y)) return appleGrowth(zoneForLevel(this.level));
+    if (g.bonus && this.atePrism !== g.bonus.id && at(g.bonus, c.x, c.z, y)) return FOOD_TYPES.prism.grow;
+    if (g.prey && at(g.prey, c.x, c.z, y)) return FOOD_TYPES.prey.grow;
+    return 0;
+  }
+
   // Can the head still reach its own tail? (the classic never-trap test)
-  tailReachable(body, growth, blocked) {
+  // The way back must not run over the apple, a prism or the mouse: eating
+  // one on the way grows the snake, which can close the very loop it relies on.
+  // (strict = false allows them: the fallback when no way avoids them.)
+  tailReachable(body, growth, blocked, strict = true) {
     if (body.length < 3) return true;
     const tail = body[body.length - 1];
+    const g = this.game;
+    const h = body[0];
+    blocked = blocked.slice();
+    if (strict) for (const p of [g.food && this.ateFood !== g.food.id ? g.food : null, g.bonus && this.atePrism !== g.bonus.id ? g.bonus : null, g.prey]) {
+      if (!p || !this.inside(p.x, p.z, Y(p)) || at(h, p.x, p.z, Y(p))) continue;
+      blocked[this.idx(p.x, p.z, Y(p))] = 1;
+    }
     // time-aware: the tail cell counts once it has been vacated
     return this.bfs(body, growth, blocked).dist[this.idx(tail.x, tail.z, Y(tail))] > 0;
   }
@@ -233,6 +278,27 @@ export class GhostBot {
   // Pick the next direction and whether to Rush.
   decide() {
     const g = this.game;
+    // Finish the route it committed to. Its end was checked safe, but the
+    // cells along the way weren't: dropping it halfway (say an orb chain ran
+    // out) could leave the snake where it is boxed in. Only a change to the
+    // board (a pillar rising in the way) breaks it off.
+    const r = this.route;
+    this.route = null;
+    if (r && r.length && r.from === this.idx(this.head.x, this.head.z, Y(this.head))) {
+      const c = r[0];
+      const k = this.idx(c.x, c.z, Y(c));
+      // (and the rest of it is still safe with whatever is on it now: a mouse
+      // can wander onto it, or a new apple appear there)
+      const sim = this.simulate(r, 0);
+      // (loosely: dropping a route halfway is worse than a pickup on the way back)
+      if (this.routeClear(r, !!r.chain) && this.tailReachable(sim.body, sim.growth, this.staticBlocked(false), false)) {
+        this.route = r.slice(1);
+        this.route.from = k;
+        this.route.rush = r.rush;
+        this.route.chain = r.chain;
+        return { dir: { x: c.x - this.head.x, z: c.z - this.head.z, y: Y(c) - Y(this.head) }, rush: !!r.rush && this.rush > 0 };
+      }
+    }
     for (const tg of this.targets()) {
       if (!this.inside(tg.cell.x, tg.cell.z, Y(tg.cell))) continue;
       const blocked = this.staticBlocked(tg.kind === 'chain');
@@ -250,6 +316,7 @@ export class GhostBot {
         }
       }
       const path = this.pathTo(parent, key);
+      if (!this.routeClear(path, tg.kind === 'chain')) continue;
       const sim = this.simulate(path, tg.grow);
       const after = this.staticBlocked(false);
       if (!this.tailReachable(sim.body, sim.growth, after)) continue;
@@ -257,6 +324,10 @@ export class GhostBot {
       if (!rush && this.rushCovers(d)) rush = true;
       const first = path[0];
       this.goal = tg;
+      this.route = path.slice(1);
+      this.route.from = this.idx(first.x, first.z, first.y);
+      this.route.rush = rush;
+      this.route.chain = tg.kind === 'chain';
       return { dir: { x: first.x - this.head.x, z: first.z - this.head.z, y: first.y - Y(this.head) }, rush };
     }
     this.goal = null;
@@ -282,13 +353,14 @@ export class GhostBot {
       const k = this.idx(nx, nz, ny);
       if (blocked[k] || free[k] > 1) continue;
       const sim = this.simulate([{ x: nx, z: nz, y: ny }], 0);
-      const safe = this.tailReachable(sim.body, sim.growth, blocked);
+      const strict = this.tailReachable(sim.body, sim.growth, blocked);
+      const safe = strict || this.tailReachable(sim.body, sim.growth, blocked, false);
       const { dist } = this.bfs(sim.body, sim.growth, blocked);
       let area = 0;
       const tail = sim.body[sim.body.length - 1];
       for (let i = 0; i < dist.length; i++) if (dist[i] > 0) area++;
       const tailD = Math.max(0, dist[this.idx(tail.x, tail.z, Y(tail))]);
-      const score = (safe ? 10000 : 0) + (safe ? tailD * 10 : 0) + area;
+      const score = (strict ? 20000 : 0) + (safe ? 10000 : 0) + (safe ? tailD * 10 : 0) + area;
       if (!best || score > best.score) best = { score, dir: nb };
     }
     return best ? { ...best.dir } : null;

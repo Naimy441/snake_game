@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 
 import { GhostBot } from './game/GhostBot.js';
-import { SnakeGame, BOARD_SIZES, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, LEVEL_AT, SKY_H, zoneForLevel } from './game/SnakeGame.js';
+import { SnakeGame, BOARD_SIZES, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, LEVEL_AT, SKY_H, SPACE_ZONE, zoneForLevel } from './game/SnakeGame.js';
+import { GalaxyDirector } from './GalaxyDirector.js';
+import { fallPath } from './render/Space.js';
 import { SKINS, ACCESSORIES, skinById, accessoryById, isUnlocked, unlockProgress } from './skins.js';
 import { World } from './render/World.js';
 import { SnakeView } from './render/SnakeView.js';
@@ -33,7 +35,6 @@ const OVERHEAD_ROASTS = [
   'Overhead: same snake, zero adrenaline. Grandma approves.',
   'Ah yes, the view from the safety of the clouds.',
 ];
-const ZONE_COUNT = ZONE_NAMES.length;
 const mod = (a, n) => ((a % n) + n) % n;
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 // Fraction of a step after a tick during which a new turn redoes that step.
@@ -47,6 +48,12 @@ class App {
   constructor() {
     this.settings = loadSettings();
     this.stats = loadStats();
+    // Playtesting from a link: ?level=12&length=127 starts every run at that
+    // level (0-based, unlocked or not) with the snake that long. &bot=1 lets
+    // the autoplay drive the whole way; &cam=tp|fp|overhead picks the camera.
+    const qs = new URLSearchParams(location.search);
+    this.playtest = qs.has('level') ? { level: Math.max(0, Math.min(MAX_LEVEL, Math.floor(+qs.get('level') || 0))), length: Math.floor(+qs.get('length') || 0), bot: qs.get('bot') === '1' } : null;
+    this.camOverride = CAMERA_ORDER.includes(qs.get('cam')) ? qs.get('cam') : null; // this visit only, not saved
     this.canvas = $('scene');
     try {
       this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: false, stencil: false, powerPreference: 'high-performance' });
@@ -71,7 +78,8 @@ class App {
     this.game = new SnakeGame({ sizes: BOARD_SIZES, best: loadBest() });
     this.world = new World({ size: BOARD_SIZES[0], renderer: r });
     this.scene = this.world.scene;
-    // y: the cell's altitude layer in the sky (undefined on the ground)
+    // y: the cell's altitude layer in the sky (undefined on the ground); in
+    // the Galactic Core the grid is bent into a ring around the black hole
     this.toWorld = (x, z, y) => this.world.toWorld(x, z, y, this.game.yMid, this.game.size);
 
     this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 1500);
@@ -87,7 +95,7 @@ class App {
     this.scene.add(this.board.group);
 
     this.audio = new AudioEngine();
-    this.audio.setVolumes({ sfx: this.settings.sfx, muted: this.settings.muted });
+    this.audio.setVolumes({ sfx: this.settings.sfx, music: this.settings.music, muted: this.settings.muted });
 
     this.state = 'menu';
     this.t = 0;
@@ -100,7 +108,7 @@ class App {
     this.rushGlow = 0;
     this.flashAmt = 0;
     this.flashColor = new THREE.Color('#ffffff');
-    this.cameraMode = CAMERA_ORDER.includes(this.settings.camera) ? this.settings.camera : 'tp';
+    this.cameraMode = this.camOverride || (CAMERA_ORDER.includes(this.settings.camera) ? this.settings.camera : 'tp');
     this.fpsFrames = 0;
     this.fpsTime = 0;
     this.lastHud = {};
@@ -118,6 +126,7 @@ class App {
       confirm: (k) => this.onConfirm(k),
       camera: () => this.cycleCamera(),
       ghost: () => this.toggleGhost(),
+      timer: () => this.toggleTimer(),
       pause: (k) => this.onPause(k),
       restart: () => this.onRestart(),
       mute: () => this.toggleMute(),
@@ -140,12 +149,21 @@ class App {
     this.ghostView.makeGhost();
     this.ghostView.group.visible = false;
     this.scene.add(this.ghostView.group);
+    singlePassGlows(this.scene);
     this.ghostFade = 0;
     this.ghostWait = 0;
     // attract mode: on the title screen the real snake plays itself, steered
     // by the same perfect-play brain as the ghost
     this.demoBot = new GhostBot(this.game);
     this.demoZone = null;
+    this.galaxy = new GalaxyDirector(this);
+    // speedrun timer: real time for the run (pauses don't count)
+    this.run = { t: 0, running: false, done: false, full: false, record: false };
+    this.whiteout = 0;
+    this.speedFxOverride = null;
+    this.world.space.setWon(this.stats.wins > 0);
+    this.world.space.setSnakeColor(this.snake.trailColor);
+    this.updateWinBadge();
 
     // the title screen tours the maps in order, starting from the chosen one
     this.tourOffset = zoneForLevel(this.startLevel());
@@ -155,6 +173,9 @@ class App {
     this.syncFood();
     this.precompile();
     this.last = performance.now();
+    this.awake = 3;
+    const wakeRender = () => (this.awake = 3);
+    for (const ev of ['pointerdown', 'pointermove', 'keydown', 'input', 'change', 'resize', 'wheel']) window.addEventListener(ev, wakeRender, { passive: true });
     this.renderer.setAnimationLoop((now) => this.frame(now));
     this.THREE = THREE;
     window.__coil = this; // handy for debugging and automated tests
@@ -217,6 +238,7 @@ class App {
         old.dispose();
       }
       this.scene.add(this.snake.group);
+      singlePassGlows(this.snake.group);
     }
     this.dyn.scale = 1;
     this.dyn.grace = 2;
@@ -235,6 +257,7 @@ class App {
   }
 
   startLevel() {
+    if (this.playtest) return this.playtest.level;
     return Math.max(0, Math.min(this.unlockedLevel(), this.settings.startLevel || 0));
   }
 
@@ -317,7 +340,7 @@ class App {
     const want = mod(this.rig.tourSegment + this.tourOffset, n);
     if (want !== this.tourZone() && !this.world.transitioning) {
       // rising into (or sinking back out of) the heavens takes a little longer
-      const sky = want === ZONE_COUNT - 1 || this.world.zone === ZONE_COUNT - 1;
+      const sky = want >= SPACE_ZONE - 1 || this.world.zone >= SPACE_ZONE - 1;
       this.world.setZone(want, { duration: sky ? 4.4 : 3.4 });
     }
     const z = this.tourZone();
@@ -385,15 +408,22 @@ class App {
     // the map and has to start over. It plays on at the map's top speed.
     const nextStart = ZONE_STARTS[g.zone + 1];
     if (nextStart != null) g.foodEaten = Math.min(g.foodEaten, LEVEL_AT[nextStart] - 2);
-    // mirror the real snake into the bot and ask it for the perfect move
-    bot.reset(true);
-    bot.pendingGrowth = g.pendingGrowth;
-    bot.rush = g.rush;
-    bot.time = g.time;
-    const plan = bot.decide();
     g.queue.length = 0;
-    if (plan.dir) g.queueDirection(plan.dir);
-    g.wantRush = !!plan.rush;
+    if (g.space) {
+      // the Galactic Core's board collapses as it goes: its own autoplay
+      const d = g.corePlan();
+      if (d) g.queueDirection(d);
+      g.wantRush = false;
+    } else {
+      // mirror the real snake into the bot and ask it for the perfect move
+      bot.reset(true);
+      bot.pendingGrowth = g.pendingGrowth;
+      bot.rush = g.rush;
+      bot.time = g.time;
+      const plan = bot.decide();
+      if (plan.dir) g.queueDirection(plan.dir);
+      g.wantRush = !!plan.rush;
+    }
     const ev = g.step();
     const at = (c) => this.toWorld(c.x, c.z, c.y);
     const delay = this.visualDelay();
@@ -469,6 +499,54 @@ class App {
     document.querySelectorAll('.ms-tile').forEach((t) => t.classList.toggle('showing', Number(t.dataset.zone) === z));
   }
 
+  // ---------------------------------------------------------------- speedrun timer
+  toggleTimer() {
+    this.settings.timer = !this.settings.timer;
+    saveSettings(this.settings);
+    const box = $('set-timer');
+    if (box) box.checked = this.settings.timer;
+    this.audio.ui();
+    this.toast(this.settings.timer ? 'Speedrun timer on (T)' : 'Speedrun timer off');
+  }
+
+  // m:ss.cc (h:mm:ss.cc past an hour)
+  formatRunTime(sec) {
+    const cs = Math.floor(sec * 100);
+    const h = Math.floor(cs / 360000);
+    const m = Math.floor(cs / 6000) % 60;
+    const ss = String(Math.floor(cs / 100) % 60).padStart(2, '0');
+    const c = String(cs % 100).padStart(2, '0');
+    return h ? `${h}:${String(m).padStart(2, '0')}:${ss}.${c}` : `${m}:${ss}.${c}`;
+  }
+
+  updateTimer(dt) {
+    const r = this.run;
+    if (r.running && ['playing', 'countdown', 'cine'].includes(this.state)) r.t += dt;
+    const show = this.settings.timer && this.state !== 'menu';
+    this.setClass($('speedrun'), 'hidden', !show);
+    if (!show) return;
+    this.setText('sr-time', this.formatRunTime(r.t));
+    this.setClass($('speedrun'), 'stopped', r.done && !r.record);
+    this.setClass($('speedrun'), 'record', r.record);
+    const pb = this.stats.bestWinTime;
+    this.setClass($('sr-pb'), 'hidden', !pb);
+    if (pb) this.setText('sr-pb', `${r.record ? 'New ' : ''}100% best ${this.formatRunTime(pb)}`);
+  }
+
+  // The run is over: stop the clock. A full run (from level 1) that wins
+  // the game can set a new best 100% time.
+  stopTimer(won) {
+    const r = this.run;
+    if (r.done) return;
+    r.running = false;
+    r.done = true;
+    if (won && r.full && (!this.stats.bestWinTime || r.t < this.stats.bestWinTime)) {
+      this.stats.bestWinTime = r.t;
+      saveStats(this.stats);
+      r.record = true;
+    }
+  }
+
   // ---------------------------------------------------------------- ghost
   toggleGhost() {
     this.setGhost(!this.settings.ghost);
@@ -498,7 +576,8 @@ class App {
   updateGhost(dt) {
     const v = this.ghostView;
     const inRun = ['playing', 'paused', 'countdown', 'dying', 'over'].includes(this.state);
-    const show = this.settings.ghost && inRun;
+    // the Galactic Core is a puzzle of its own: no ghost there
+    const show = this.settings.ghost && inRun && !this.game.space;
     if (!show) {
       v.group.visible = false;
       return;
@@ -590,6 +669,7 @@ class App {
     if (kind === 'skin') {
       this.preview.skin = id;
       this.snake.applySkin(id);
+      this.world.space.setSnakeColor(this.snake.trailColor);
       if (isUnlocked(skinById(id), st)) this.settings.skin = id;
     } else {
       this.preview.accessory = id;
@@ -613,6 +693,7 @@ class App {
     st.pads += g.stats.pads;
     st.maxZone = Math.max(st.maxZone, g.zone);
     st.maxLevel = Math.max(st.maxLevel || 0, g.level);
+    if (g.won && g.space) st.wins = (st.wins || 0) + 1;
     saveStats(st);
     const after = this.unlockStats();
     return [...SKINS, ...ACCESSORIES].filter((it) => it.unlock && !isUnlocked(it, before) && isUnlocked(it, after)).map((it) => it.name);
@@ -751,7 +832,7 @@ class App {
 
   onRestart() {
     if (this.openPanel || this.garageOpen) return;
-    if (['playing', 'paused', 'over', 'dying', 'countdown'].includes(this.state)) this.startGame();
+    if (['playing', 'paused', 'over', 'dying', 'countdown', 'cine'].includes(this.state)) this.startGame();
   }
 
   toggleMute() {
@@ -762,7 +843,9 @@ class App {
   }
 
   unlockAudio() {
+    const first = !this.audio.ctx;
     this.audio.unlock();
+    if (first && this.audio.ctx && this.state === 'menu') this.audio.startMusic({ menu: true });
   }
 
   cycleCamera() {
@@ -808,6 +891,13 @@ class App {
     this.unlockAudio();
     this.audio.start();
     this.timers = [];
+    this.galaxy.clear();
+    this.world.space.setWon(false);
+    this.world.space.reset();
+    this.world.space.setSnakeColor(this.snake.trailColor);
+    this.voidFall = null;
+    this.snake.group.position.set(0, 0, 0);
+    this.snake.group.scale.setScalar(1);
     this.game.reset();
     this.game.wantRush = this.input.rushKeys.size > 0;
     this.t = 0;
@@ -819,16 +909,20 @@ class App {
     this.syncFood();
     const startLevel = this.startLevel();
     this.game.startAtLevel(startLevel);
+    if (this.playtest && this.playtest.length > this.game.cells.length) this.game.coilTo(this.playtest.length);
+    this.run = { t: 0, running: false, done: false, full: startLevel === 0 && !this.playtest, record: false };
     this.ghost.reset(true);
     this.ghostFade = 0;
     const zone = this.game.zone;
     if (this.world.zone !== zone || this.world.transitioning) this.world.setZone(zone, { duration: 1.4 });
+    this.audio.setMusicState({ menu: false, zone, level: startLevel, intensity: 0.1 });
+    this.audio.startMusic({ menu: false });
     this.showScreen(null);
     $('hud').classList.remove('hidden');
     this.rig.cine = null;
     this.rig.setMode(this.cameraMode, { reduceMotion: this.settings.reduceMotion });
-    this.updateCameraUI();
     this.state = 'countdown';
+    this.updateCameraUI();
     this.protectUntil = this.simTime + 4;
     this.countdown = this.settings.reduceMotion ? 0.9 : 1.2;
     this.showCountdown('READY');
@@ -836,6 +930,7 @@ class App {
     this.saidGo = false;
     if (this.relativeSteer) this.flashHint();
     if (this.game.flying) this.toast('Fly! ↑ climb · ↓ dive · ← → turn');
+    if (this.game.space) this.toast('The black hole is eating the board! Fill every cell that\'s left');
   }
 
   pause() {
@@ -843,12 +938,14 @@ class App {
     this.prevState = this.state;
     this.state = 'paused';
     this.showScreen('screen-pause');
+    this.audio.setPaused(true);
     $('countdown').classList.add('hidden');
   }
 
   resume() {
     if (this.state !== 'paused') return;
     this.unlockAudio();
+    this.audio.setPaused(false);
     this.showScreen(null);
     this.state = 'countdown';
     this.countdown = 0.6;
@@ -858,6 +955,13 @@ class App {
 
   toMenu() {
     this.state = 'menu';
+    this.galaxy.clear();
+    this.world.space.reset();
+    this.world.space.setWon(this.stats.wins > 0);
+    this.updateWinBadge();
+    this.audio.setPaused(false);
+    this.audio.setMusicState({ menu: true, intensity: 0 }); // the tour's map picks the song each frame
+    this.audio.startMusic({ menu: true });
     this.timers = [];
     this.game.reset();
     this.t = 0;
@@ -894,8 +998,28 @@ class App {
 
   // ---------------------------------------------------------------- game events
   tick() {
-    const wasRushing = this.game.rushing;
-    this.handleStep(this.game.step(), wasRushing);
+    const g = this.game;
+    const wasRushing = g.rushing;
+    // remember the sky pose: hyperspeed charges up there before the jump
+    if (g.flying) this.preWarpSnap = { cells: g.cells.slice(), removedTail: g.removedTail, yMid: g.yMid, size: g.size, facing: { ...g.facing }, ticks: g.ticks };
+    if (this.playtest && this.playtest.bot) {
+      // playtest: the autoplay drives (the Galactic Core has its own)
+      g.queue.length = 0;
+      if (g.space) {
+        const d = g.corePlan();
+        if (d) g.queueDirection(d);
+      } else {
+        const bot = this.playBot || (this.playBot = new GhostBot(g));
+        bot.reset(true);
+        bot.pendingGrowth = g.pendingGrowth;
+        bot.rush = g.rush;
+        bot.time = g.time;
+        const plan = bot.decide();
+        if (plan.dir) g.queueDirection(plan.dir);
+        g.wantRush = !!plan.rush;
+      }
+    }
+    this.handleStep(g.step(), wasRushing);
   }
 
 
@@ -905,7 +1029,33 @@ class App {
     const rm = this.settings.reduceMotion;
     const at = (c) => this.toWorld(c.x, c.z, c.y);
 
+    if (ev.levelUp && ev.levelUp.warp) {
+      // the last Sunset apple: straight into hyperspeed
+      this.onLevelUp(ev.levelUp);
+      this.galaxy.startWarp();
+      this.syncFood();
+      return;
+    }
     if (ev.ate) this.onEat(ev.ate, ev.levelUp);
+    if (ev.doomed) {
+      this.audio.doomWarn(ev.doomed.length);
+      if (!this.collapseTold) {
+        this.collapseTold = true;
+        this.later(0.3, () => this.toast('Glowing cells are about to fall into the black hole'));
+      }
+    }
+    if (ev.fell) this.audio.suckIn(ev.fell.length);
+    if (ev.appleMoved) {
+      // an apple no one could safely reach: the black hole pulls it in as light
+      const f = ev.appleMoved.from;
+      const sp = this.world.space;
+      sp.emitStreams(sp.cellPos(f.x, f.z, new THREE.Vector3()), 40, '#ff4d6d', { spread: 0.3, over: 0.25 });
+      this.audio.suckIn(2);
+      if (!this.appleMovedTold) {
+        this.appleMovedTold = true;
+        this.later(0.2, () => this.toast('The black hole swallowed an apple you couldn\'t safely reach'));
+      }
+    }
     if (ev.bonusSpawned) this.toast('A prism appeared! Grab it fast');
     if (ev.bonusExpired) {
       const w = at(ev.bonusExpired);
@@ -1063,6 +1213,7 @@ class App {
       this.stats.maxLevel = lu.level;
       saveStats(this.stats);
     }
+    if (lu.warp) return; // the hyperspeed cinematic takes it from here
     const lv = $('hud-lvl');
     lv.classList.remove('bump');
     void lv.offsetWidth;
@@ -1111,16 +1262,26 @@ class App {
 
   onDeath(ev) {
     const g = this.game;
+    if (ev.cause === 'win' && g.space) {
+      // every cell left is snake: it all goes into the black hole, and the galaxy goes off
+      this.stopTimer(true);
+      saveBest(g.best);
+      this.galaxy.startFinale();
+      return;
+    }
     this.state = 'dying';
+    this.stopTimer(false);
     this.t = 1; // the failed move never happened: hold the last pose
     this.dyingTime = 0;
     this.audio.death();
+    this.audio.stopMusic({ fade: 1.0 });
     saveBest(g.best);
     const hp = this.snake.headPos;
     const won = ev.cause === 'win';
     // A crash: the head lunges into what it hit, bounces off and sees stars,
     // and the cell it hit is marked so you can see what happened.
-    this.crash = ev.hit && !won ? { hit: ev.hit, cause: ev.cause } : null;
+    // (off the edge of the Galactic Core there's nothing to bump into: it falls)
+    this.crash = ev.hit && !won && ev.cause !== 'void' ? { hit: ev.hit, cause: ev.cause } : null;
     if (this.crash) {
       const w = this.toWorld(ev.hit.x, ev.hit.z, ev.hit.y);
       const hy = (w.y || 0) + 0.3;
@@ -1134,7 +1295,19 @@ class App {
       // once the camera has pulled back, point at the crash again
       this.later(0.9, () => this.effects.shockwave(w.x, w.z, '#ff3b5c', { max: 2.2, dur: 0.7, y: hy }));
     }
+    if (ev.cause === 'void') {
+      // over the edge: the snake slides off and the black hole pulls it
+      // down, spiralling, shedding light as it goes
+      const w = this.toWorld(ev.hit.x, ev.hit.z, 0);
+      this.voidFall = { p0: new THREE.Vector3(w.x, 0.3, w.z), emitted: 0 };
+      this.audio.suckIn(3);
+    }
     this.later(this.crash ? 0.16 : 0.08, () => {
+      if (ev.cause === 'void') {
+        // no impact to show: just a cold flash as it goes over
+        if (!this.settings.reduceMotion) this.flash(0.2, '#9fd0ff');
+        return;
+      }
       const hd = this.snake.headDir;
       this.effects.emit(hp.x + hd.x * 0.4, hp.y + hd.y * 0.4 + 0.4, hp.z + hd.z * 0.4, {
         count: 60,
@@ -1152,7 +1325,7 @@ class App {
     });
     // Pull back to the overhead view so the player can see what happened.
     if (this.cameraMode !== 'overhead') this.later(0.55, () => this.rig.setMode('overhead', { reduceMotion: this.settings.reduceMotion }));
-    this.later(1.25, () => this.showGameOver(ev.cause));
+    this.later(ev.cause === 'void' ? 1.7 : 1.25, () => this.showGameOver(ev.cause));
   }
 
   // Death lunge for a crash, in cells past the last pose: a fast shove into
@@ -1179,24 +1352,37 @@ class App {
       this.audio.chainComplete();
     }
     this.audio.gameOver();
-    $('over-title').textContent = cause === 'win' ? 'Perfect board!' : 'Wipeout!';
-    $('over-cause').textContent = {
-      wall: 'You crashed into the wall.',
-      body: 'You ran into your own body.',
-      obstacle: 'You smashed into a pillar.',
-      laser: 'You flew into the laser fence.',
-      win: 'You filled the entire board!',
-    }[cause];
-    const rank = this.rank(g.score);
+    const galaxyWon = cause === 'win' && g.space;
+    $('over-title').textContent = galaxyWon ? 'Galaxy complete!' : cause === 'win' ? 'Perfect board!' : 'Wipeout!';
+    $('over-cause').textContent = galaxyWon
+      ? 'You filled every cell the black hole left, then it swallowed you whole, and the whole galaxy went supernova. You beat Snake Rush: 100%.'
+      : {
+        wall: 'You crashed into the wall.',
+        void: 'You slid off the edge and fell into the black hole.',
+        body: 'You ran into your own body.',
+        obstacle: 'You smashed into a pillar.',
+        laser: 'You flew into the laser fence.',
+        win: 'You filled the entire board!',
+      }[cause];
+    if (galaxyWon) {
+      const r = this.run;
+      const time = this.formatRunTime(r.t);
+      $('over-cause').textContent += r.full ? ` Run time ${time}${r.record ? ': a new 100% record!' : '.'}` : ` Run time ${time} (from level ${this.startLevel() + 1}; start at level 1 to set a 100% record).`;
+    }
+    $('screen-over').classList.toggle('won', galaxyWon);
+    $('over-stamp').classList.toggle('hidden', !galaxyWon);
+    if (galaxyWon) this.updateWinBadge();
+    // beating the game outranks any score
+    const rank = galaxyWon ? 'S' : this.rank(g.score);
     const rk = $('over-rank');
-    rk.textContent = rank;
+    rk.textContent = galaxyWon ? '★' : rank;
     rk.className = `rank ${rank}`;
     $('over-score').textContent = g.score.toLocaleString();
     $('over-best').textContent = g.best.toLocaleString();
     $('over-length').textContent = g.cells.length;
     $('over-combo').textContent = `x${g.maxCombo}`;
     $('over-time').textContent = this.formatTime(g.time);
-    $('over-zone').textContent = String(g.zone + 1);
+    $('over-zone').textContent = g.space ? `${g.zone + 1} · ${Math.floor(g.fill * 100)}%` : String(g.zone + 1);
     $('over-chains').textContent = String(g.stats.chains);
     $('over-prey').textContent = String(g.stats.prey);
     $('over-pads').textContent = String(g.stats.pads);
@@ -1261,6 +1447,7 @@ class App {
     bindCheck('set-guide', 'guide');
     bindCheck('set-minimap', 'minimap');
     bindCheck('set-fps', 'showFps', () => $('fps').classList.toggle('hidden', !s.showFps));
+    bindCheck('set-timer', 'timer');
     $('set-ghost').checked = !!s.ghost;
     $('set-ghost').addEventListener('change', () => this.setGhost($('set-ghost').checked));
     $('btn-ghost').addEventListener('click', () => this.toggleGhost());
@@ -1277,7 +1464,7 @@ class App {
       el.value = s[key];
       el.addEventListener('input', () => {
         s[key] = Number(el.value);
-        this.audio.setVolumes({ sfx: s.sfx });
+        this.audio.setVolumes({ sfx: s.sfx, music: s.music });
         saveSettings(s);
       });
       el.addEventListener('change', () => {
@@ -1286,10 +1473,11 @@ class App {
       });
     };
     bindRange('set-sfx', 'sfx');
+    bindRange('set-music', 'music');
     $('fps').classList.toggle('hidden', !s.showFps);
     this.applyMotion();
 
-    // first interaction anywhere unlocks audio
+    // first interaction anywhere unlocks audio (and starts the menu music)
     const unlock = () => this.unlockAudio();
     window.addEventListener('pointerdown', unlock, { once: true });
     window.addEventListener('keydown', unlock, { once: true });
@@ -1338,6 +1526,15 @@ class App {
       b.classList.toggle('active', on);
       b.setAttribute('aria-checked', on);
     });
+  }
+
+  // A gold "100%" next to Best once the galaxy has been finished.
+  updateWinBadge() {
+    const el = $('win-badge');
+    if (!el) return;
+    const n = this.stats.wins || 0;
+    el.classList.toggle('hidden', n < 1);
+    el.title = n > 1 ? `Galaxy finished ${n} times` : 'You finished the galaxy';
   }
 
   toast(text) {
@@ -1438,7 +1635,13 @@ class App {
     const g = this.game;
     this.setText('hud-score', g.score.toLocaleString());
     this.setText('hud-best', g.best.toLocaleString());
-    this.setText('hud-length', String(g.cells.length));
+    // through hyperspeed it's still the full snake; then it counts down as
+    // the torn-off tail goes into the black hole
+    let shownLen = g.cells.length;
+    const pre = this.galaxy.pre;
+    if (this.galaxy.kind === 'warp' && !this.galaxy.dropped && pre) shownLen = pre.cells.length;
+    else if (this.rip) shownLen += Math.round(this.rip.lost * (1 - this.rip.k));
+    this.setText('hud-length', String(shownLen));
     this.setText('hud-time', this.formatTime(g.time));
     if (this.settings.ghost) this.setText('hud-ghost', this.ghost.score.toLocaleString());
     this.setText('hud-level', String(g.level + 1));
@@ -1448,15 +1651,18 @@ class App {
     const prog = g.levelProgress();
     const maxed = prog.max;
     const left = prog.need - prog.into;
-    this.setText('hud-lvl-next', maxed ? 'Max speed!' : `${left} apple${left === 1 ? '' : 's'} to Lv ${lvl + 2}`);
-    this.setStyle('hud-lvl-fill', 'transform', `scaleX(${(prog.into / prog.need).toFixed(2)})`);
-    if (this.lastHud.segs !== prog.need) {
-      this.lastHud.segs = prog.need;
-      $('hud-lvl-bar').style.setProperty('--segs', String(prog.need));
+    // in the Galactic Core the bar is the board filling up, in tenths
+    const segs = prog.core ? 10 : prog.need;
+    this.setText('hud-lvl-next', prog.core ? `${Math.floor((prog.into / prog.need) * 100)}% filled` : maxed ? 'Max speed!' : `${left} apple${left === 1 ? '' : 's'} to Lv ${lvl + 2}`);
+    this.setStyle('hud-lvl-fill', 'transform', `scaleX(${(prog.into / prog.need).toFixed(3)})`);
+    if (this.lastHud.segs !== segs) {
+      this.lastHud.segs = segs;
+      $('hud-lvl-bar').style.setProperty('--segs', String(segs));
     }
     this.setClass($('hud-lvl'), 'max', maxed);
+    this.setClass($('hud-lvl'), 'orbit', !!prog.core);
     const nz = ZONE_STARTS.findIndex((z) => z > lvl);
-    this.setText('hud-zone-next', nz < 0 ? 'Final zone' : `Next zone: ${ZONE_NAMES[nz]} at Lv ${ZONE_STARTS[nz] + 1}`);
+    this.setText('hud-zone-next', g.space ? `${Math.max(0, g.coreFree())} empty cells left · fill them all` : nz < 0 ? 'Final zone' : `Next zone: ${ZONE_NAMES[nz]} at Lv ${ZONE_STARTS[nz] + 1}`);
     this.setStyle('hud-rush', 'transform', `scaleX(${(g.rush / 100).toFixed(3)})`);
     const rushEl = $('hud-rush-wrap');
     this.setClass(rushEl, 'active', g.rushing);
@@ -1505,6 +1711,21 @@ class App {
       this.setClass($('alt-food'), 'hidden', !g.food);
       if (g.food) this.setStyle('alt-food', 'top', pct(g.food.y));
       this.setText('alt-text', String(g.head.y + 1));
+      // layers to climb (+) or dive (-) to reach the apple; a check once level
+      const dy = g.food ? g.food.y - g.head.y : null;
+      const key = dy == null ? 'none' : dy > 0 ? 'up' : dy < 0 ? 'down' : 'level';
+      this.setText('alt-delta-n', dy == null ? '–' : dy === 0 ? '✓' : dy > 0 ? `+${dy}` : `−${-dy}`);
+      this.setText('alt-delta-l', dy == null ? 'no apple' : dy > 0 ? `climb ▲` : dy < 0 ? `dive ▼` : 'apple level');
+      const el = $('alt-delta');
+      for (const c of ['up', 'down', 'level']) this.setClass(el, c, key === c);
+      this.setClass($('alt'), 'level', key === 'level');
+      if (key !== this.lastAltKey) {
+        if (key === 'level' && this.lastAltKey && this.state === 'playing') this.audio.altLevel();
+        el.classList.remove('pop');
+        void el.offsetWidth;
+        el.classList.add('pop');
+        this.lastAltKey = key;
+      }
       // the gauge's end lights up when the ceiling or the floor is close
       this.setClass($('alt'), 'near-top', g.head.y >= SKY_H - 2);
       this.setClass($('alt'), 'near-bottom', g.head.y <= 1);
@@ -1559,8 +1780,20 @@ class App {
     c.fillStyle = 'rgba(120, 210, 120, 0.22)';
     c.strokeStyle = 'rgba(56, 246, 255, 0.9)';
     c.lineWidth = 2;
-    c.fillRect((-N / 2) * cell, (-N / 2) * cell, N * cell, N * cell);
-    c.strokeRect((-N / 2) * cell, (-N / 2) * cell, N * cell, N * cell);
+    if (g.space && g.land) {
+      // the Galactic Core: only the cells still there, doomed ones pulsing
+      const pulse = 0.45 + 0.35 * Math.sin(this.simTime * 14);
+      for (let x = 0; x < N; x++) {
+        for (let z = 0; z < N; z++) {
+          if (!g.land[x * N + z]) continue;
+          c.fillStyle = g.doomAt(x, z) ? `rgba(255, 170, 90, ${pulse})` : 'rgba(95, 214, 255, 0.28)';
+          c.fillRect((x - o - 0.5) * cell, (z - o - 0.5) * cell, cell, cell);
+        }
+      }
+    } else {
+      c.fillRect((-N / 2) * cell, (-N / 2) * cell, N * cell, N * cell);
+      c.strokeRect((-N / 2) * cell, (-N / 2) * cell, N * cell, N * cell);
+    }
     const dot = (x, z, color, r = 0.5) => {
       c.fillStyle = color;
       c.beginPath();
@@ -1589,18 +1822,156 @@ class App {
     c.fill();
   }
 
+  // Falling off the Galactic Core's board: the whole snake is pulled after
+  // its head along the path into the black hole, shrinking as it goes.
+  updateVoidFall() {
+    const f = this.voidFall;
+    const grp = this.snake.group;
+    if (!f || (this.state !== 'dying' && this.state !== 'over')) {
+      if (f) this.voidFall = null;
+      if (grp.scale.x !== 1 || grp.position.lengthSq() > 0) {
+        grp.position.set(0, 0, 0);
+        grp.scale.setScalar(1);
+      }
+      return;
+    }
+    const T = this.settings.reduceMotion ? 1.0 : 1.5;
+    const u = clamp01((this.dyingTime - 0.12) / T);
+    const p = fallPath(f.p0, u, 0.5, this.tmpFall || (this.tmpFall = new THREE.Vector3()));
+    const sc = Math.max(0.02, 1 - u * u * 0.95);
+    grp.scale.setScalar(sc);
+    grp.position.set(p.x - f.p0.x * sc, p.y - f.p0.y * sc, p.z - f.p0.z * sc);
+    grp.visible = u < 0.98;
+    // shed light along the way
+    if (u > 0 && f.emitted < 6 && u >= f.emitted / 6) {
+      f.emitted++;
+      this.world.space.emitStreams(p, 18, this.snake.trailColor || '#38f6ff', { spread: 0.3, y: 0, over: 0.15, dur: 1.6 * (1 - u * 0.7) });
+    }
+  }
+
+  // Hyperspeed drops the snake onto the Galactic Core's board as four
+  // segments. The rest of its body hangs off the back of the board and down
+  // the black hole's spiral; a moment later it tears off and is reeled down
+  // into the horizon, pouring in as light. (Drawn by a second, headless
+  // snake whose cells are spaced a cell apart along the fall path.)
+  startTailRip() {
+    const g = this.game;
+    const pre = this.galaxy.pre;
+    const lost = pre ? pre.cells.length - g.cells.length : 0;
+    this.tailLost = Math.max(0, lost);
+    if (lost < 2) return;
+    const n = g.cells.length;
+    const t = g.cells[n - 1];
+    const b = g.cells[n - 2];
+    const w = this.toWorld(t.x + (t.x - b.x), t.z + (t.z - b.z), 0);
+    const p0 = new THREE.Vector3(w.x, w.y || 0, w.z);
+    // the fall path, by distance along it
+    const pts = [];
+    const cum = [];
+    let len = 0;
+    const P = new THREE.Vector3();
+    for (let i = 0; i <= 900; i++) {
+      fallPath(p0, i / 900, 0.35, P);
+      if (i) len += P.distanceTo(pts[i - 1]);
+      pts.push(P.clone());
+      cum.push(len);
+    }
+    const at = (d) => {
+      d = Math.max(0, Math.min(len, d));
+      let lo = 0;
+      let hi = cum.length - 1;
+      while (hi - lo > 1) {
+        const m = (lo + hi) >> 1;
+        if (cum[m] <= d) lo = m;
+        else hi = m;
+      }
+      const f = (d - cum[lo]) / Math.max(1e-6, cum[hi] - cum[lo]);
+      return { x: pts[lo].x + (pts[hi].x - pts[lo].x) * f, y: pts[lo].y + (pts[hi].y - pts[lo].y) * f, z: pts[lo].z + (pts[hi].z - pts[lo].z) * f };
+    };
+    if (!this.ripView) {
+      this.ripView = new SnakeView({ maxCells: MAX_SNAKE, radial: this.q.radial, scaleMap: this.scaleMap, skin: this.snake.skin.id, accessory: 'none' });
+      this.ripView.head.visible = false;
+      this.scene.add(this.ripView.group);
+      singlePassGlows(this.ripView.group);
+    }
+    const v = this.ripView;
+    if (v.skin.id !== this.snake.skin.id) v.applySkin(this.snake.skin.id);
+    v.group.visible = true;
+    const count = Math.min(lost, Math.floor(len) - 1);
+    const rm = this.settings.reduceMotion;
+    this.rip = {
+      t: 0, at, len, p0, count, lost, extra: lost - count, shown: count, ripped: false,
+      delay: rm ? 0.7 : 1.0, dur: rm ? 1.3 : 2.0, k: 0,
+      game: { cells: [], removedTail: null, facing: { x: 0, z: -1 }, flying: false, space: false, ticks: 0 },
+    };
+  }
+
+  endTailRip() {
+    this.rip = null;
+    if (this.ripView) this.ripView.group.visible = false;
+  }
+
+  updateTailRip(dt) {
+    const r = this.rip;
+    if (!r) return;
+    r.t += dt;
+    const sp = this.world.space;
+    const color = this.snake.trailColor || '#38f6ff';
+    const k = clamp01((r.t - r.delay) / r.dur);
+    r.k = k;
+    if (!r.ripped && r.t >= r.delay) {
+      // it tears off at the back of the board
+      r.ripped = true;
+      if (!this.settings.reduceMotion) this.flash(0.35, color);
+      this.effects.emit(r.p0.x, r.p0.y + 0.3, r.p0.z, { count: 50, color, speed: 2.4, up: 1.2, size: 0.22, life: 0.7, gravity: 0, spread: 0.6 });
+      sp.emitStreams(r.p0, 40, color, { spread: 0.4, over: 0.2 });
+      this.audio.suckIn(5);
+      if (!this.settings.reduceMotion) this.rig.shake += 0.25;
+    }
+    // reeled in, faster and faster: its front slides down the spiral
+    const off = r.len * k * k;
+    const g = r.game;
+    let n = 0;
+    while (n < r.count && n + off <= r.len - 0.5) n++;
+    if (n < r.shown) {
+      // what goes over the horizon flares the core
+      const gone = r.shown - n;
+      const end = r.at(r.len);
+      sp.emitStreams(new THREE.Vector3(end.x, end.y, end.z), Math.min(60, gone * 4), color, { spread: 0.6, over: 0.1, dur: 0.8 });
+      sp.feed = Math.min(1.6, sp.feed + gone * 0.05);
+      r.shown = n;
+    }
+    // the part too long to draw pours in as light all the way down
+    if (r.ripped && r.extra > 0 && k < 1) {
+      const p = r.at(off);
+      sp.emitStreams(new THREE.Vector3(p.x, p.y, p.z), Math.min(8, 1 + Math.ceil(r.extra / 40)), color, { spread: 0.5, over: 0.05 });
+    }
+    if (n < 2 || k >= 1) {
+      this.endTailRip();
+      return;
+    }
+    while (g.cells.length < n) g.cells.push({ x: 0, z: 0, y: 0 });
+    g.cells.length = n;
+    for (let i = 0; i < n; i++) g.cells[i].x = i;
+    const at = r.at;
+    this.ripView.update(g, 1, this.simTime, (x) => at(x + off), { dt, wiggle: 0 });
+  }
+
   // Jetpack flames shed sparks behind the snake while it flies.
   jetExhaust(g) {
     const s = this.snake;
     if (!s.jetpack || !s.jetpack.visible || this.state === 'menu') return;
     const back = s.jetBack;
     const hot = this.rushGlow;
-    const n = this.state === 'playing' ? (Math.random() < 0.6 + hot * 0.4 ? 1 : 0) : 0;
+    // in hyperspeed the exhaust tears past the camera, so the snake reads as racing ahead
+    const warp = this.galaxy.kind === 'warp' && !this.galaxy.dropped;
+    const n = warp ? 1 : this.state === 'playing' ? (Math.random() < 0.6 + hot * 0.4 ? 1 : 0) : 0;
+    const v = warp ? 11 : 2.5 + hot * 2;
     for (let i = 0; i < n; i++) {
       for (const p of s.nozzleWorld) {
         this.effects.emit(p.x, p.y, p.z, {
-          count: 1, color: Math.random() < 0.5 ? '#ffb347' : '#ff6aa8', speed: 0.5, up: 0.2, size: 0.13 + hot * 0.06,
-          life: 0.35, gravity: 0.6, spread: 0.06, vel: { x: back.x * (2.5 + hot * 2), y: back.y * (2.5 + hot * 2), z: back.z * (2.5 + hot * 2) },
+          count: 1, color: Math.random() < 0.5 ? '#ffb347' : warp ? '#9fd0ff' : '#ff6aa8', speed: warp ? 0.8 : 0.5, up: 0.2, size: warp ? 0.08 : 0.13 + hot * 0.06,
+          life: warp ? 0.2 : 0.35, gravity: warp ? 0 : 0.6, spread: warp ? 0.15 : 0.06, vel: { x: back.x * v, y: back.y * v, z: back.z * v },
         });
       }
     }
@@ -1615,6 +1986,17 @@ class App {
   }
 
   frame(now) {
+    // Paused, the picture behind the pause card holds still and the canvas
+    // keeps showing the last frame drawn, so stop redrawing the whole 3D
+    // scene every frame. Any input, settings change or resize wakes it for a
+    // few frames (see wakeRender).
+    if (this.state === 'paused' && this.awake <= 0) {
+      this.last = now;
+      this.input.pollGamepad();
+      return;
+    }
+    if (this.state === 'paused') this.awake--;
+    else this.awake = 3;
     const rawDt = Math.max(0, (now - this.last) / 1000);
     const dt = Math.min(0.1, rawDt);
     const slowing = this.state === 'playing' && now / 1000 < (this.slowUntil || 0);
@@ -1632,6 +2014,7 @@ class App {
     this.timeScale = (this.timeScale ?? 1) + (tsTarget - (this.timeScale ?? 1)) * Math.min(1, dt * ease);
     // gameplay time: snake, game clock, ghost, pickups and particles
     const gdt = dt * this.timeScale;
+    this.audio.setSlow(slowing && this.timeScale < 0.8); // level-up slow-mo only, not Rush bullet time
     this.last = now;
     this.renderer.info.reset();
     this.input.pollGamepad();
@@ -1657,6 +2040,7 @@ class App {
       }
       if (this.countdown <= 0) {
         this.state = 'playing';
+        if (!this.run.done) this.run.running = true;
         setTimeout(() => {
           if (this.state === 'playing') $('countdown').classList.add('hidden');
         }, 350);
@@ -1683,12 +2067,25 @@ class App {
     this.deathFlash = Math.max(0, this.deathFlash - dt * 1.2);
 
     const fast = g.rushing || g.boosting;
-    const targetFx = this.state === 'playing' ? g.intensity() : 0;
+    this.galaxy.update(dt);
+    const targetFx = this.speedFxOverride ?? (this.state === 'playing' ? g.intensity() : 0);
     this.speedFx += (targetFx - this.speedFx) * Math.min(1, dt * 3);
-    this.rushGlow += ((fast && this.state === 'playing' ? 1 : 0) - this.rushGlow) * Math.min(1, dt * 8);
+    const glowOn = (fast && this.state === 'playing') || this.galaxy.glow > 0;
+    this.rushGlow += ((glowOn ? 1 : 0) - this.rushGlow) * Math.min(1, dt * 8);
 
+    // hyperspeed: the game holds still, but the snake swims flat out
+    const warping = this.galaxy.kind === 'warp' && !this.galaxy.dropped;
+    if (warping) this.warpTravel = (this.warpTravel || 0) + dt * (5 + 6 * Math.min(1, this.galaxy.t / this.galaxy.dropAt));
+    else this.warpTravel = 0;
+    // the next apple waits in the Galactic Core; keep it out of the tunnel
+    this.food.group.visible = !warping;
     const ct = this.crash && this.dyingTime >= CRASH_HIT ? this.dyingTime - CRASH_HIT : -1;
-    this.snake.update(g, clamp01(this.t), this.simTime, this.toWorld, {
+    // through hyperspeed the snake is still the one from the sky, full length,
+    // jetpack and all; it only becomes the short one on the board at the drop
+    const pre = this.galaxy.kind === 'warp' && !this.galaxy.dropped ? this.galaxy.pre : null;
+    const snakeGame = pre || g;
+    const snakeWorld = pre ? (x, z, y) => this.world.toWorld(x, z, y, pre.yMid, pre.size) : this.toWorld;
+    this.snake.update(snakeGame, pre ? 1 : clamp01(this.t), this.simTime, snakeWorld, {
       lunge: this.lunge,
       rushGlow: this.rushGlow,
       deathFlash: this.deathFlash,
@@ -1696,7 +2093,11 @@ class App {
       // the head squashes on impact and springs back; then it sees stars
       squash: ct >= 0 ? Math.exp(-ct * 7) * Math.cos(ct * 22) : 0,
       dizzy: ct >= 0.12 ? ct - 0.12 : -1,
+      travel: this.warpTravel,
+      wiggle: warping && !rm ? 2.6 : 1,
     });
+    this.updateVoidFall();
+    this.updateTailRip(dt);
     this.jetExhaust(g);
     this.snake.setRim(this.world.p.rimColor, 0.35 + this.world.p.rimIntensity * 0.25);
     this.updateGhost(gdt);
@@ -1711,7 +2112,7 @@ class App {
     const view = this.rig.mode === 'fp' || this.rig.mode === 'tp' || this.rig.highChase;
     const arena = this.world.skyArena;
     const sky = g.flying ? { floorY: arena.floorY, ceilY: arena.ceilY } : null;
-    this.effects.floorY = g.flying ? -1e9 : 0.03;
+    this.effects.floorY = g.flying || g.space ? -1e9 : 0.03;
     this.food.update(gdt, this.simTime, { reduceMotion: rm, beam: view, floorY: sky ? sky.floorY : null });
     this.syncFood();
     const f = g.lastFacing();
@@ -1724,9 +2125,9 @@ class App {
     const rs = this.post.renderSize;
     const pxScale = rs.y / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
     // the arena grows with the zones; under the sky box it stays the full board
-    const ground = g.flying ? g.boardSize : g.size;
+    const ground = g.flying || g.space ? g.boardSize : g.size;
     if (this.world.setBoardSize(ground, { instant: rm })) this.onBoardResized(ground);
-    this.rig.setBoardSize(ground, rm);
+    this.rig.setBoardSize(g.space ? g.size : ground, rm);
     this.world.update(dt, { level: this.state === 'menu' ? 0 : g.level, reduceMotion: rm, pxScale });
     this.world.updateWalls(g, dt, this.state === 'playing');
     const food = g.food ? this.toWorld(g.food.x, g.food.z, g.food.y) : null;
@@ -1742,16 +2143,25 @@ class App {
     this.rig.bodyLift = this.snake.block ? Math.max(0, this.snake.blockH - 1) : 0;
     this.rig.update(dt, this.snake, {
       speedFx: this.speedFx, reduceMotion: rm, aim: steering || g.flying ? aim : null,
-      flying: g.flying && this.state !== 'menu', pitch: steering ? next.y || 0 : 0, box: sky, sky: this.world.skyAmount,
+      flying: g.flying && this.state !== 'menu', pitch: steering ? next.y || 0 : 0, box: sky, sky: this.world.skyAmount, space: this.world.spaceAmount,
     });
     // The first-person camera sits inside the head; hide it once we're there.
     this.snake.head.visible = !(this.rig.mode === 'fp' && this.rig.blend > 0.85);
     this.effects.uniforms.scale.value = pxScale;
+    this.world.space.syncBoard(g.space ? g : null, clamp01(this.t));
+    this.world.updateSpace(dt, this.camera, { pxScale, dpr: this.renderer.getPixelRatio() * this.post.scale, reduceMotion: rm });
 
     this.updateLens(dt);
+
+    // music follows the action; on the title screen it plays the song of the map the tour is showing
+    const inGame = this.state === 'playing' || this.state === 'countdown' || this.state === 'paused';
+    const intensity = clamp01(0.12 + (g.level / MAX_LEVEL) * 0.6 + ((g.combo - 1) / 7) * 0.2 + (fast ? 0.15 : 0));
+    this.audio.setMusicState({ menu: !inGame && this.state !== 'dying' && this.state !== 'over', intensity, rush: fast && this.state === 'playing', zone: this.state === 'menu' ? this.tourZone() : g.zone, level: g.level });
+
     this.renderFrame(dt, view, rm);
     if (this.state !== 'menu') this.updateHud();
     else this.updateTour();
+    this.updateTimer(Math.min(rawDt, 1));
     this.measure(rawDt);
   }
 
@@ -1761,7 +2171,7 @@ class App {
     this.flashAmt = Math.max(0, this.flashAmt - dt * 2.6);
     let danger = 0;
     const g = this.game;
-    if (view && this.state === 'playing') {
+    if ((view || g.space) && this.state === 'playing') {
       const look = g.lookAhead(3);
       if (look.blocked && look.free === 0) danger = 0.42 + 0.2 * Math.sin(this.simTime * 18);
       else if (look.blocked && look.free === 1) danger = 0.16;
@@ -1775,12 +2185,12 @@ class App {
     P.uContrast.value = pp.contrast;
     P.uTint.value.copy(pp.tint);
     P.uLift.value.copy(pp.lift);
-    P.uVignette.value = pp.vignette + this.rushGlow * 0.1 + slow * 0.35;
+    P.uVignette.value = pp.vignette + this.rushGlow * 0.1 + slow * 0.35 + (this.cineVignette || 0);
     P.uSpeed.value = speed;
     P.uLines.value = rm ? 0 : Math.max(0, this.speedFx - 0.2) * (view ? 1.2 : 0.5) + this.rushGlow * 0.6;
-    P.uChroma.value = rm ? 0 : this.rushGlow * 0.7 + trans + slow * 0.6;
+    P.uChroma.value = rm ? 0 : this.rushGlow * 0.7 + trans + slow * 0.6 + (this.cineChroma || 0);
     P.uDanger.value = danger;
-    P.uFlash.value = Math.min(0.6, this.flashAmt);
+    P.uFlash.value = Math.max(Math.min(0.6, this.flashAmt), this.whiteout || 0);
     P.uFlashColor.value.copy(this.flashColor);
     P.uTime.value = this.simTime;
     P.uCenter.value.set(0.5, view ? 0.56 : 0.5);
@@ -1844,6 +2254,19 @@ class App {
       }
     }
   }
+}
+
+// three.js draws every transparent double-sided material twice a frame (back
+// faces, then front), flipping its side in between, which also makes it
+// re-check which shader to use, both times. For additive glows the order
+// makes no difference to the picture, so draw them in one pass.
+function singlePassGlows(root) {
+  root.traverse((o) => {
+    if (!o.material) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (m.transparent && m.side === THREE.DoubleSide && m.blending === THREE.AdditiveBlending) m.forceSinglePass = true;
+    }
+  });
 }
 
 // Boot after the loading screen has painted; if anything fails, say so on

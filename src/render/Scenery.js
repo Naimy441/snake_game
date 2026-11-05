@@ -629,7 +629,8 @@ function buildHeavens(b, rng, falls) {
 export class Scenery {
   constructor({ islandChecker, windowTex, waterfallMaterial }) {
     this.zones = [];
-    const builders = [buildCoast, buildCanyon, buildNeon, buildCyber, buildHeavens];
+    // the Galactic Core has no props: its set pieces live in Space.js
+    const builders = [buildCoast, buildCanyon, buildNeon, buildCyber, buildHeavens, () => {}];
     builders.forEach((build, i) => {
       const rng = mulberry32(100 + i * 31);
       const uniforms = makeRevealUniforms();

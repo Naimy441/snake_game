@@ -18,7 +18,9 @@ export const DEFAULTS = {
   guide: true,
   minimap: true,
   showFps: false,
+  timer: false, // speedrun timer (T)
   sfx: 0.8,
+  music: 0.45,
   muted: false,
   camera: 'tp', // chase
   skin: 'viper',
@@ -72,7 +74,7 @@ export function saveBest(v) {
 }
 
 // Lifetime totals used to unlock skins and accessories.
-export const STAT_DEFAULTS = { games: 0, apples: 0, mice: 0, chains: 0, pads: 0, maxZone: 0, maxLevel: 0 };
+export const STAT_DEFAULTS = { games: 0, apples: 0, mice: 0, chains: 0, pads: 0, maxZone: 0, maxLevel: 0, wins: 0, bestWinTime: 0 };
 
 export function loadStats() {
   try {
