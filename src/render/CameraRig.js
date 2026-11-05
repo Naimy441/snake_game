@@ -60,6 +60,7 @@ function wrapAngle(a) {
 // previous view to it, so switching is seamless mid-game.
 export class CameraRig {
   constructor(camera, size) {
+    this.bodyLift = 0; // how much taller than normal the snake is (tall block skins)
     this.camera = camera;
     this.size = size;
     this.mode = 'orbit';
@@ -315,7 +316,9 @@ export class CameraRig {
     const p = this.pitch * (high ? 0.5 : 0.75);
     const ap = Math.abs(p);
     const back = dist * (1 - 0.3 * ap);
-    out.pos.set(hp.x - fwd.x * back, hp.y + height * (1 - 1.15 * p), hp.z - fwd.z * back);
+    // a tall snake (bodyLift) lifts the camera over its own body, so the view
+    // looks down on the board more steeply
+    out.pos.set(hp.x - fwd.x * back, hp.y + height * (1 - 1.15 * p) + this.bodyLift * 1.3, hp.z - fwd.z * back);
     // stay inside the flight box: near the ceiling or floor, slide back instead
     if (this.flying && this.box) {
       const top = this.box.ceilY - 0.7;
@@ -358,10 +361,12 @@ export class CameraRig {
     // flight: tilt to look up a climb or down a dive (never quite vertical)
     const p = this.pitch * 0.8;
     const ap = Math.abs(p);
-    out.pos.set(hp.x + fwd.x * 0.3 * (1 - ap), hp.y + 0.66 + p * 0.3, hp.z + fwd.z * 0.3 * (1 - ap));
+    // eyes on top of a tall snake (bodyLift) peer down at the board at an angle
+    const eye = 0.66 + this.bodyLift;
+    out.pos.set(hp.x + fwd.x * 0.3 * (1 - ap), hp.y + eye + p * 0.3, hp.z + fwd.z * 0.3 * (1 - ap));
     this.tmpObj.position.copy(out.pos);
     this.tmpObj.up.set(0, 1, 0);
-    this.tmpObj.lookAt(out.pos.x + fwd.x * 8 * (1 - ap), out.pos.y - 0.66 * (1 - ap) + p * 8, out.pos.z + fwd.z * 8 * (1 - ap));
+    this.tmpObj.lookAt(out.pos.x + fwd.x * 8 * (1 - ap), out.pos.y - eye * (1 - ap) + p * 8, out.pos.z + fwd.z * 8 * (1 - ap));
     this.tmpObj.rotateZ(this.fpRoll);
     out.quat.copy(this.tmpObj.quaternion);
     out.fov = 74 + (reduceMotion ? 0 : speedFx * 10);

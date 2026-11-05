@@ -18,7 +18,8 @@ import { Input } from './Input.js';
 import { loadSettings, saveSettings, loadBest, saveBest, loadStats, saveStats, QUALITY } from './settings.js';
 
 const $ = (id) => document.getElementById(id);
-const BOARD = 21; // the biggest board (it starts at BOARD_SIZES[0] and grows)
+const BOARD = 19;
+const CRASH_HIT = 0.09; // seconds from a crash to the head striking // the biggest board (it starts at BOARD_SIZES[0] and grows)
 // Longest snake the renderer draws: apples grow it more on every map, and the
 // sky box holds far more cells than the board.
 const MAX_SNAKE = 1600;
@@ -94,6 +95,7 @@ class App {
     this.timers = [];
     this.lunge = 0;
     this.deathFlash = 0;
+    this.crash = null;
     this.speedFx = 0;
     this.rushGlow = 0;
     this.flashAmt = 0;
@@ -710,6 +712,8 @@ class App {
     if (g.queueDirection(d)) this.audio.turn();
   }
 
+
+
   onTap(side) {
     if (this.relativeSteer) this.onTurn(side === 'left' ? -1 : 1);
   }
@@ -809,6 +813,7 @@ class App {
     this.t = 0;
     this.lunge = 0;
     this.deathFlash = 0;
+    this.crash = null;
     this.food.hideAll();
     this.board.clear();
     this.syncFood();
@@ -858,6 +863,7 @@ class App {
     this.t = 0;
     this.lunge = 0;
     this.deathFlash = 0;
+    this.crash = null;
     this.food.hideAll();
     this.board.clear();
     this.syncFood();
@@ -891,6 +897,7 @@ class App {
     const wasRushing = this.game.rushing;
     this.handleStep(this.game.step(), wasRushing);
   }
+
 
   handleStep(ev, wasRushing) {
     const g = this.game;
@@ -1111,7 +1118,23 @@ class App {
     saveBest(g.best);
     const hp = this.snake.headPos;
     const won = ev.cause === 'win';
-    this.later(0.08, () => {
+    // A crash: the head lunges into what it hit, bounces off and sees stars,
+    // and the cell it hit is marked so you can see what happened.
+    this.crash = ev.hit && !won ? { hit: ev.hit, cause: ev.cause } : null;
+    if (this.crash) {
+      const w = this.toWorld(ev.hit.x, ev.hit.z, ev.hit.y);
+      const hy = (w.y || 0) + 0.3;
+      this.later(CRASH_HIT, () => {
+        const hd = this.snake.headDir;
+        const front = this.snake.headPos.clone().addScaledVector(hd, 0.55);
+        this.effects.emit(front.x, front.y + 0.4, front.z, { count: 26, color: '#ffffff', speed: 3.2, up: 1.5, size: 0.16, life: 0.4, gravity: 2 });
+        this.popup(front, 'BONK!', 'bonk');
+        if (ev.cause !== 'wall' && ev.cause !== 'laser') this.effects.shockwave(w.x, w.z, '#ffd23f', { max: 1.4, dur: 0.45, y: hy });
+      });
+      // once the camera has pulled back, point at the crash again
+      this.later(0.9, () => this.effects.shockwave(w.x, w.z, '#ff3b5c', { max: 2.2, dur: 0.7, y: hy }));
+    }
+    this.later(this.crash ? 0.16 : 0.08, () => {
       const hd = this.snake.headDir;
       this.effects.emit(hp.x + hd.x * 0.4, hp.y + hd.y * 0.4 + 0.4, hp.z + hd.z * 0.4, {
         count: 60,
@@ -1130,6 +1153,16 @@ class App {
     // Pull back to the overhead view so the player can see what happened.
     if (this.cameraMode !== 'overhead') this.later(0.55, () => this.rig.setMode('overhead', { reduceMotion: this.settings.reduceMotion }));
     this.later(1.25, () => this.showGameOver(ev.cause));
+  }
+
+  // Death lunge for a crash, in cells past the last pose: a fast shove into
+  // the obstacle, then a bounce back that settles a little short of it.
+  crashLunge(t) {
+    // block skins already fill their cell, so they only nudge in before bouncing
+    const into = this.snake.block ? 0.12 : this.crash.cause === 'wall' || this.crash.cause === 'laser' ? 0.16 : 0.32;
+    if (t < CRASH_HIT) return into * Math.pow(t / CRASH_HIT, 2);
+    const k = t - CRASH_HIT;
+    return 0.04 + (into - 0.04) * Math.exp(-k * 9) * Math.cos(k * 14);
   }
 
   rank(score) {
@@ -1645,7 +1678,7 @@ class App {
 
     if (this.state === 'dying' || this.state === 'over') {
       this.dyingTime = (this.dyingTime || 0) + dt;
-      this.lunge = Math.min(CORNER + 0.05 - HEAD_LEAD, this.dyingTime * 4);
+      this.lunge = this.crash ? this.crashLunge(this.dyingTime) : Math.min(CORNER + 0.05 - HEAD_LEAD, this.dyingTime * 4);
     }
     this.deathFlash = Math.max(0, this.deathFlash - dt * 1.2);
 
@@ -1654,11 +1687,15 @@ class App {
     this.speedFx += (targetFx - this.speedFx) * Math.min(1, dt * 3);
     this.rushGlow += ((fast && this.state === 'playing' ? 1 : 0) - this.rushGlow) * Math.min(1, dt * 8);
 
+    const ct = this.crash && this.dyingTime >= CRASH_HIT ? this.dyingTime - CRASH_HIT : -1;
     this.snake.update(g, clamp01(this.t), this.simTime, this.toWorld, {
       lunge: this.lunge,
       rushGlow: this.rushGlow,
       deathFlash: this.deathFlash,
       dt,
+      // the head squashes on impact and springs back; then it sees stars
+      squash: ct >= 0 ? Math.exp(-ct * 7) * Math.cos(ct * 22) : 0,
+      dizzy: ct >= 0.12 ? ct - 0.12 : -1,
     });
     this.jetExhaust(g);
     this.snake.setRim(this.world.p.rimColor, 0.35 + this.world.p.rimIntensity * 0.25);
@@ -1701,6 +1738,8 @@ class App {
     // flight: yaw follows the horizontal facing, pitch the next climb or dive
     const next = g.queue[0] || g.dir;
     const aim = g.flying ? (next.y ? g.facing : next) : next;
+    // tall block skins lift the chase and first-person cameras over the body
+    this.rig.bodyLift = this.snake.block ? Math.max(0, this.snake.blockH - 1) : 0;
     this.rig.update(dt, this.snake, {
       speedFx: this.speedFx, reduceMotion: rm, aim: steering || g.flying ? aim : null,
       flying: g.flying && this.state !== 'menu', pitch: steering ? next.y || 0 : 0, box: sky, sky: this.world.skyAmount,

@@ -71,7 +71,7 @@ export class Island {
     this.rimMats = [0, 1, 2, 3].map(() => new THREE.MeshStandardMaterial({ color: '#0b1630', emissive: '#38f6ff', emissiveIntensity: 1.1, roughness: 0.3 }));
   }
 
-  // Resize the board (17 -> 19 -> 21 as the zones change). The floor takes
+  // Resize the board (15 -> 17 -> 19 as the zones change). The floor takes
   // the new size at once; the walls, rails and platform are rebuilt at the
   // new size and slide outward from where they were, uncovering the new ring
   // of cells. instant skips the slide.
@@ -199,7 +199,7 @@ export class Island {
 
     // grass top: rings from just outside the platform to the rim
     const rings = 7;
-    const inner = 8.6; // inside the smallest (17) board's platform
+    const inner = 8.6; // inside the smallest (15) board's platform
     const pos = [];
     const col = [];
     const idx = [];
@@ -265,7 +265,7 @@ export class Island {
       const rad = 10.4 + rng() * (R - 10.8);
       const x = Math.cos(th) * rad;
       const z = Math.sin(th) * rad;
-      if (Math.abs(x) < 12 && Math.abs(z) < 12) continue; // clear of the biggest (21) platform
+      if (Math.abs(x) < 12 && Math.abs(z) < 12) continue; // clear of the biggest (19) platform
       const n = 3;
       for (let b = 0; b < n; b++) {
         const blade = new THREE.ConeGeometry(0.06, 0.35 + rng() * 0.35, 3, 1);
