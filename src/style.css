@@ -177,6 +177,7 @@ kbd {
 .popup.big { font-size: 40px; color: var(--yellow); }
 .popup.prey { color: #fff2b0; font-size: 36px; }
 .popup.boost { color: #ffe0b0; text-shadow: 0 0 12px rgba(255, 138, 42, 1), var(--outline); }
+.popup.bonk { color: #ffffff; font-size: 38px; text-shadow: 0 0 14px rgba(255, 59, 92, 1), var(--outline); }
 @keyframes rise { 0% { opacity: 0; margin-top: 10px; } 15% { opacity: 1; } 100% { opacity: 0; margin-top: -70px; } }
 .reduce-motion .popup { animation: fade 0.9s forwards; }
 @keyframes fade { 0% { opacity: 1; } 100% { opacity: 0; } }
