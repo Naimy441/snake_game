@@ -718,6 +718,8 @@ const BUILDERS = [
       updaters: [w],
     };
   },
+  // Galactic Core: its spectacle is the galaxy itself (see Space.js)
+  () => ({ objects: [], updaters: [] }),
 ];
 
 export function buildSpectacle(zone) {

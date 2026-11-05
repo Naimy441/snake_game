@@ -127,6 +127,7 @@ test('best score tracks the highest score', () => {
 
 // ---------------------------------------------------------------- new mechanics
 import {
+  SPACE_START, SPACE_ZONE, CORE_SIZE, COLLAPSE_PER_APPLE, DOOM_MS,
   LEVEL_AT, zoneForLevel, MAX_LEVEL, ZONE_STARTS, SKY_ZONE, SKY_H, SKY_LIFT, SKY_CENTER, SKY_PAD, SKY_SIZE, SKY_CLIMB, OBSTACLE_WARN_MS, BOOST_TICKS, CHAIN_BONUS_PER_LINK, PREY_LIFETIME_MS, MAX_OBSTACLES,
 } from '../src/game/SnakeGame.js';
 
@@ -143,7 +144,8 @@ test('zones change every few speed levels', () => {
   assert.equal(zoneForLevel(9), 3);
   assert.equal(zoneForLevel(11), 3);
   assert.equal(zoneForLevel(12), 4);
-  assert.equal(zoneForLevel(15), 4);
+  assert.equal(zoneForLevel(13), 4);
+  assert.equal(zoneForLevel(14), 5);
 });
 
 test('levelling up reports the level and zone change', () => {
@@ -502,17 +504,20 @@ test('the first zone eases in: short levels, slower moves, no pillars', () => {
 test('level thresholds and the speed curve stay consistent', () => {
   const g = new SnakeGame();
   let prev = Infinity;
-  for (let l = 0; l <= MAX_LEVEL; l++) {
+  for (let l = 0; l <= SPACE_START; l++) {
     g.foodEaten = LEVEL_AT[l];
     assert.equal(g.level, l);
     // the sky starts slower (flying is a new skill), then speeds up again
-    if (l === ZONE_STARTS[SKY_ZONE]) assert.ok(g.baseInterval() > prev, 'lift-off slows down');
+    if (l === ZONE_STARTS[SKY_ZONE] || l === SPACE_START) assert.ok(g.baseInterval() > prev, 'lift-off and the Galactic Core slow down');
     else assert.ok(g.baseInterval() <= prev, 'never slows down within a zone');
     prev = g.baseInterval();
   }
   g.foodEaten = 9999;
-  assert.equal(g.level, MAX_LEVEL);
+  assert.equal(g.level, SPACE_START, 'apples alone lead to the Galactic Core');
   assert.equal(g.levelProgress().max, true);
+  // the Galactic Core is the last level
+  g.enterSpace();
+  assert.equal(g.level, MAX_LEVEL);
 });
 
 // ---------------------------------------------------------------- ghost bot
@@ -638,7 +643,7 @@ test('starting at a later level sets speed, zone, board size and pads', () => {
   const top = new SnakeGame();
   top.startAtLevel(99);
   assert.equal(top.level, MAX_LEVEL);
-  assert.ok(top.flying, 'the last zone is flown');
+  assert.ok(top.space, 'the last zone is the Galactic Core');
   assert.ok(top.obstacles.length <= MAX_OBSTACLES);
 });
 
@@ -883,7 +888,7 @@ test('apples grow the snake by 1, 2, then 3 from the third map on', () => {
     g.food = { x: g.head.x + d.x, z: g.head.z + d.z, y: g.head.y || 0, type: 'orb', id: 7000 };
     const len = g.cells.length;
     g.step();
-    assert.equal(g.pendingGrowth + (g.cells.length - len), Math.min(3, zone + 1), `map ${zone + 1}`);
+    assert.equal(g.pendingGrowth + (g.cells.length - len), zone === SPACE_ZONE ? 1 : Math.min(3, zone + 1), `map ${zone + 1}`);
   }
   // the apple that opens the next map still grows by the map it was eaten on
   const g = new SnakeGame({ rng: seq([0.5]) });
@@ -921,4 +926,249 @@ test('a crash reports the cell the head hit', () => {
   const wev = w.step();
   assert.equal(wev.cause, 'wall');
   assert.deepEqual(wev.hit, { x: 15, z: 7, y: 0 });
+});
+
+// ---------------------------------------------------------------- Galactic Core (collapse)
+function mulberry(seed) {
+  return () => {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function coreGame(rng = seq([0.5])) {
+  const g = new SnakeGame({ sizes: BOARD_SIZES, rng });
+  g.startAtLevel(SPACE_START);
+  return g;
+}
+
+// Let the autoplay play; check(g, ev) after every move.
+function autoplay(g, check = () => {}, max = 20000) {
+  let ev;
+  for (let i = 0; i < max && g.alive; i++) {
+    g.queue.length = 0;
+    const d = g.corePlan();
+    if (d) g.queueDirection(d);
+    ev = g.step();
+    check(g, ev);
+  }
+  return ev;
+}
+
+const eatAhead = (g) => {
+  const h = g.head;
+  g.food = { x: h.x + g.dir.x, z: h.z + g.dir.z, y: 0, type: 'orb', id: 900 + g.ticks };
+  return g.step();
+};
+
+test('clearing Sunset Heavens jumps to hyperspeed and onto the Galactic Core board', () => {
+  const g = new SnakeGame({ sizes: BOARD_SIZES, rng: seq([0.5]) });
+  g.startAtLevel(SPACE_START - 1);
+  assert.ok(g.flying);
+  g.foodEaten = LEVEL_AT[SPACE_START] - 1;
+  g.food = { x: g.head.x + g.dir.x, z: g.head.z + g.dir.z, y: g.head.y + (g.dir.y || 0), type: 'orb', id: 99 };
+  const ev = g.step();
+  assert.equal(ev.levelUp.warp, true);
+  assert.equal(ev.levelUp.zone, SPACE_ZONE);
+  assert.ok(g.space && !g.flying);
+  assert.equal(g.level, SPACE_START);
+  assert.equal(g.size, CORE_SIZE);
+  assert.equal(g.cells.length, 4);
+  assert.equal(g.capacity, CORE_SIZE * CORE_SIZE);
+  assert.ok(g.food && g.inBounds(g.food.x, g.food.z));
+});
+
+test('off the edge of the board is the void', () => {
+  const g = coreGame();
+  let ev;
+  for (let i = 0; i < CORE_SIZE && g.alive; i++) ev = g.step();
+  assert.equal(ev.cause, 'void');
+});
+
+test('every apple dooms cells from the outer edge; they fall once their time is up', () => {
+  const g = coreGame();
+  const ev = eatAhead(g);
+  assert.ok(ev.ate);
+  assert.equal(g.pendingGrowth, 0, 'an apple grows the snake by one');
+  assert.equal(g.cells.length, 5);
+  assert.equal(ev.doomed.length, COLLAPSE_PER_APPLE);
+  const S = CORE_SIZE;
+  for (const d of ev.doomed) assert.ok(d.x === 0 || d.z === 0 || d.x === S - 1 || d.z === S - 1, 'the outer ring goes first');
+  assert.equal(g.capacity, S * S, 'nothing falls straight away');
+  // play on (safely) until well past their time
+  const end = g.time + DOOM_MS + ev.doomed.length * 400 + 1000;
+  autoplay(g, () => {}, 0);
+  while (g.alive && g.time < end) autoplay(g, () => {}, 1);
+  assert.ok(g.alive);
+  for (const d of ev.doomed) assert.equal(g.isLand(d.x, d.z), false, 'fell in');
+  assert.equal(g.bonus, null);
+  assert.equal(g.chain, null);
+  assert.equal(g.prey, null);
+  assert.equal(g.pads.length, 0);
+});
+
+test('a doomed cell under the snake waits until the snake is off it', () => {
+  const g = coreGame();
+  const t = g.cells[g.cells.length - 1];
+  g.doomed.push({ x: t.x, z: t.z, doomAt: g.time, fallAt: g.time + 1, id: 777 });
+  g.cells.push({ x: t.x, z: t.z + 1, y: 0 }); // the tail now ends one cell further
+  const tail = g.cells[g.cells.length - 1];
+  g.doomed[0] = { x: tail.x, z: tail.z, doomAt: g.time, fallAt: g.time + 1, id: 777 };
+  // a fresh snake of 5: the old tail cell is under the body for a while
+  const mid = g.cells[2];
+  g.doomed.push({ x: mid.x, z: mid.z, doomAt: g.time, fallAt: g.time + 1, id: 778 });
+  let fellMid = false;
+  for (let i = 0; i < 2 && g.alive; i++) {
+    const ev = g.step();
+    if (ev.fell && ev.fell.some((f) => f.id === 778)) fellMid = true;
+  }
+  assert.equal(fellMid, false, 'still under the body');
+  assert.ok(g.isLand(mid.x, mid.z));
+  for (let i = 0; i < 4 && g.alive; i++) g.step();
+  assert.equal(g.isLand(mid.x, mid.z), false, 'falls once the tail has passed');
+});
+
+test('dead-end nubs are eaten for free, and the head and its tail are spared', () => {
+  const g = coreGame();
+  const S = CORE_SIZE;
+  g.land[1 * S + 0] = 0; // (0, 0) is left with one neighbour
+  const ev = {};
+  g.collapse(ev);
+  assert.ok(ev.doomed.some((d) => d.x === 0 && d.z === 0), 'the nub goes');
+  assert.equal(ev.doomed.length, COLLAPSE_PER_APPLE + 1, 'on top of the usual cells');
+  const h = g.head;
+  for (const d of ev.doomed) assert.ok(Math.abs(d.x - h.x) + Math.abs(d.z - h.z) > 1);
+  assert.ok(g.tailInReach(g.doomed), 'the tail is still in reach');
+});
+
+test('the board never splits in two, and it speeds up as it fills', () => {
+  for (let s = 1; s <= 6; s++) {
+    const g = coreGame(mulberry(s));
+    let prev = Infinity;
+    let faster = true;
+    autoplay(g, (g) => {
+      if (!g.alive) return;
+      assert.ok(g.landConnected([], false), 'one piece');
+      if (g.baseInterval() > prev + 1e-9) faster = false;
+      prev = g.baseInterval();
+    });
+    assert.ok(faster, 'never slows down');
+  }
+});
+
+test('filling every cell that is left wins the game: 100%', () => {
+  const g = coreGame(mulberry(2));
+  const ev = autoplay(g);
+  assert.equal(ev.cause, 'win');
+  assert.ok(g.won);
+  assert.equal(g.fill, 1);
+  assert.equal(g.levelProgress().into, g.levelProgress().need);
+  assert.ok(g.fallen > CORE_SIZE * CORE_SIZE / 2, 'most of the board went into the black hole');
+});
+
+test('a new run does not inherit the last run\'s apple timers (Play Again)', () => {
+  const g = coreGame(mulberry(4));
+  // a long run that last had to wait for a fair place for the apple
+  g.spawnTryAt = 1e9;
+  g.appleCheckAt = 1e9;
+  g.reset();
+  g.startAtLevel(SPACE_START);
+  assert.equal(g.spawnTryAt, 0);
+  assert.equal(g.appleCheckAt, 0);
+  eatAhead(g);
+  assert.ok(g.food, 'the next apple appears straight away');
+});
+
+test('the autoplay wins every time', () => {
+  const lost = [];
+  for (let s = 1; s <= 30; s++) {
+    const g = coreGame(mulberry(s));
+    autoplay(g);
+    if (!g.won) lost.push(`${s}: ${g.deathCause || 'stuck'}`);
+  }
+  assert.deepEqual(lost, []);
+});
+
+test('apples go somewhere fair: never on a dead end, and the collapse never leaves one there', () => {
+  for (let s = 1; s <= 8; s++) {
+    const g = coreGame(mulberry(s));
+    autoplay(g, (g, ev) => {
+      if (!g.alive || !g.food || g.coreFree() <= 2) return;
+      if (ev.ate) assert.ok(!g.leavesDeadEnd(g.food, []), 'a new apple is not on a dead end');
+      if (ev.doomed) assert.ok(!g.leavesDeadEnd(g.food, []), 'the collapse leaves the apple a way in and out');
+    });
+  }
+});
+
+test('an apple that cannot be eaten safely is swallowed after a while, and the board shrinks', () => {
+  const g = coreGame(mulberry(3));
+  g.planApple = () => null; // pretend it can never be eaten safely
+  // the snake chases its tail round a 2 x 2 loop in the middle; the apple is far off
+  g.cells = [{ x: 6, z: 6, y: 0 }, { x: 6, z: 7, y: 0 }, { x: 7, z: 7, y: 0 }, { x: 7, z: 6, y: 0 }];
+  g.dir = { x: 0, z: -1, y: 0 };
+  g.food = { x: 2, z: 2, y: 0, type: 'orb', id: 4242, spawnedAt: g.time };
+  const first = g.food;
+  const land = g.capacity;
+  const loop = [{ x: 1, z: 0, y: 0 }, { x: 0, z: 1, y: 0 }, { x: -1, z: 0, y: 0 }, { x: 0, z: -1, y: 0 }];
+  let moved = null;
+  let k = 0;
+  for (; k < 120 && g.alive && !moved; k++) {
+    g.queue = [loop[k % 4]];
+    const ev = g.step();
+    if (ev.appleMoved) moved = { ev, time: g.time };
+  }
+  assert.ok(g.alive);
+  assert.ok(moved, 'it moved');
+  assert.ok(moved.time - first.spawnedAt >= 8000, 'only after it had sat a while');
+  assert.ok(moved.ev.doomed && moved.ev.doomed.length >= COLLAPSE_PER_APPLE, 'and the black hole took a bite');
+  assert.ok(!g.food || g.food.id !== first.id, 'the apple is a new one');
+  for (const end = k + 30; k < end && g.alive; k++) {
+    g.queue = [loop[k % 4]];
+    g.step();
+  }
+  assert.ok(g.alive, 'still circling safely');
+  assert.ok(g.capacity < land, 'the bite fell in');
+});
+
+test('lift-off climbs even if something clears the move queue (autoplay)', () => {
+  const g = new SnakeGame({ sizes: BOARD_SIZES, rng: mulberry(7) });
+  g.startAtLevel(ZONE_STARTS[SKY_ZONE] - 1);
+  g.foodEaten = LEVEL_AT[ZONE_STARTS[SKY_ZONE]] - 1;
+  g.food = { x: g.head.x + g.dir.x, z: g.head.z + g.dir.z, y: 0, type: 'orb', id: 77 };
+  const ev = g.step();
+  assert.ok(ev.levelUp && ev.levelUp.liftoff);
+  const y0 = g.head.y;
+  for (let i = 0; i < SKY_CLIMB; i++) {
+    g.queue.length = 0; // what every autoplay does before choosing a move
+    g.step();
+  }
+  assert.equal(g.head.y, y0 + SKY_CLIMB, 'it climbed');
+  assert.equal(g.launch, 0, 'and steering is back');
+  assert.ok(g.queueDirection(DIRS.left) || g.queueDirection(DIRS.right), 'turns are accepted again');
+});
+
+test('the autoplay beats the whole game from map 1', () => {
+  for (const s of [3, 11, 29]) {
+    const g = new SnakeGame({ sizes: BOARD_SIZES, rng: mulberry(s) });
+    const bot = new GhostBot(g);
+    for (let i = 0; i < 60000 && g.alive; i++) {
+      g.queue.length = 0;
+      if (g.space) {
+        const d = g.corePlan();
+        if (d) g.queueDirection(d);
+      } else {
+        bot.reset(true);
+        bot.pendingGrowth = g.pendingGrowth;
+        bot.rush = g.rush;
+        bot.time = g.time;
+        const plan = bot.decide();
+        if (plan.dir) g.queueDirection(plan.dir);
+      }
+      g.step();
+    }
+    assert.ok(g.won, `seed ${s}: ${g.deathCause} in zone ${g.zone}`);
+  }
 });

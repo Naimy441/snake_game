@@ -82,7 +82,7 @@ export class Heavens {
 
   // p: blended palette, sunDir: its sun direction.
   apply(p, sunDir) {
-    const a = p.heaven;
+    const a = p.heaven * (1 - (p.space || 0)); // gone again in deep space
     this.amount = a;
     this.group.visible = a > 0.002;
     if (!this.group.visible) return;

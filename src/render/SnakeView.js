@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { SnakePath, CORNER } from './SnakePath.js';
 import { skinById } from '../skins.js';
-import { buildAccessory, disposeAccessory } from './accessories.js';
+import { buildAccessory, disposeAccessory, poseAccessory } from './accessories.js';
 
 const STEP = 0.2; // ring spacing along the body, in cells
 const BLOCK_R = 0.5; // half width of a block skin's body: a block fills its whole cell
@@ -269,6 +269,7 @@ export class SnakeView {
     this.tmpA = new THREE.Vector3();
     this.tmpB = new THREE.Vector3();
     this.tmpBM = new THREE.Matrix4();
+    this.tmpA2 = new THREE.Vector3();
 
     // Boost aura: the same tube drawn again, pushed out along its normals,
     // as an additive fresnel glow. Shares the geometry and its draw range.
@@ -378,7 +379,7 @@ export class SnakeView {
     this.nostrils.forEach((n) => (n.visible = !block));
     if (block) this.tongue.position.set(0, -faceH * 0.25, 0.5);
     else this.tongue.position.set(0, -0.02, 0.38);
-    this.accHolder.position.y = block ? faceH / 2 - 0.28 : 0;
+    this.poseAccessory();
     // where the dizzy stars circle (head-local y above the top)
     this.headTop = block ? ground + baseH + faceH + 0.25 : 0.45;
     this.eyeMat.color.set(h.eye);
@@ -507,7 +508,7 @@ export class SnakeView {
   }
 
   updateJetpack(game, time, dt, rushGlow) {
-    const target = game.flying ? 1 : 0;
+    const target = game.flying || game.space ? 1 : 0;
     this.jetAmt += (target - this.jetAmt) * Math.min(1, dt * 4);
     const jp = this.jetpack;
     jp.visible = this.jetAmt > 0.01;
@@ -538,6 +539,14 @@ export class SnakeView {
       this.accHolder.add(a);
     }
     this.accessoryId = id;
+    this.poseAccessory();
+  }
+
+  // Sit the accessory on whichever head this skin has (see poseAccessory).
+  poseAccessory() {
+    if (!this.accessory || !this.skin) return;
+    const face = this.block ? { h: this.faceH, eyeY: this.faceH * 0.2, eyeFront: 0.5 + 0.085 * (this.skin.head.eyeScale || 1) } : null;
+    poseAccessory(this.accessory, this.accHolder, face);
   }
 
   cellWorld(c, toWorld, out) {
@@ -554,7 +563,8 @@ export class SnakeView {
     const max = this.blocks.instanceMatrix.count;
     let k = 0;
     const put = (p, s, h) => {
-      m.makeScale(s, h, s).setPosition(p.x, p.y + 0.002, p.z);
+      m.makeScale(s, h, s);
+      m.setPosition(p.x, p.y + 0.002, p.z);
       this.blocks.setMatrixAt(k++, m);
     };
     for (let i = 1; i < cells.length && k < max - 1; i++) put(this.cellWorld(cells[i], toWorld, this.tmpA), 1, H);
@@ -736,7 +746,9 @@ export class SnakeView {
   // which bends the frame smoothly through every corner without twisting.
   // squash: 0..1 head squash from a crash. dizzy: seconds since the crash
   // (stars circle the head while it is >= 0).
-  update(game, t, time, toWorld, { lunge = 0, rushGlow = 0, deathFlash = 0, dt = 1 / 60, squash = 0, dizzy = -1 } = {}) {
+  // travel: extra slither phase (hyperspeed keeps the body swimming while the
+  // game holds still); wiggle: how strongly it swims (1 is normal).
+  update(game, t, time, toWorld, { lunge = 0, rushGlow = 0, deathFlash = 0, dt = 1 / 60, squash = 0, dizzy = -1, travel = 0, wiggle = 1 } = {}) {
     const path = this.path;
     path.setFromCells(game.cells, game.removedTail, toWorld);
     const L = path.length;
@@ -744,7 +756,8 @@ export class SnakeView {
     const sHead = CORNER + 1 - t - lunge - HEAD_LEAD;
     const sTail = Math.min(n - t, L);
     const total = Math.max(0.5, sTail - sHead);
-    this.travel = game.ticks + t;
+    this.travel = game.ticks + t + travel;
+    this.wiggle += (wiggle - this.wiggle) * Math.min(1, dt * 4);
 
     const s = this.sample;
     const R = this.radial;
