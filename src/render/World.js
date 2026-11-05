@@ -291,7 +291,7 @@ export class World {
     this.heavens.update(this.time);
   }
 
-  // The arena under the snake grows with the zones (17 -> 19 -> 21).
+  // The arena under the snake grows with the zones (15 -> 17 -> 19).
   setBoardSize(size, opts) {
     if (!this.island.setSize(size, opts)) return false;
     this.size = size;

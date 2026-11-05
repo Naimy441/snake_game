@@ -48,13 +48,12 @@ export const ZONE_NAMES = ['Emerald Coast', 'Golden Canyon', 'Neon Night', 'Cybe
 // straight up on its own (to SKY_CENTER) before the player takes over.
 export const SKY_ZONE = 4;
 export const SKY_PAD = 2;
-export const SKY_SIZE = 21 + SKY_PAD * 2;
-
-// The board grows as the zones change: 17 x 17 in Emerald Coast, 19 x 19 in
-// Golden Canyon, then 21 x 21 for the rest of the ground (the sky box is
-// built around the 21 board). It grows by a ring of cells on every side, so
+// The board grows as the zones change: 15 x 15 in Emerald Coast, 17 x 17 in
+// Golden Canyon, then 19 x 19 for the rest of the ground (the sky box is
+// built around the 19 board). It grows by a ring of cells on every side, so
 // everything on it keeps its place on screen.
-export const BOARD_SIZES = [17, 19, 21];
+export const BOARD_SIZES = [15, 17, 19];
+export const SKY_SIZE = BOARD_SIZES[BOARD_SIZES.length - 1] + SKY_PAD * 2;
 export const SKY_H = 13;
 export const SKY_LIFT = 3;
 export const SKY_CLIMB = 3;
@@ -108,7 +107,7 @@ export function zoneForLevel(level) {
 export class SnakeGame {
   // sizes: board width per zone (the last one repeats). Without it the
   // board stays `size` wide.
-  constructor({ size = 21, sizes = null, rng = Math.random, best = 0 } = {}) {
+  constructor({ size = 19, sizes = null, rng = Math.random, best = 0 } = {}) {
     this.sizes = sizes && sizes.length ? sizes.slice() : [size];
     this.boardSize = this.sizes[this.sizes.length - 1];
     this.size = this.sizes[0];
@@ -817,6 +816,7 @@ export class SnakeGame {
       this.die(cause);
       ev.died = true;
       ev.cause = cause;
+      ev.hit = { x: nx, z: nz, y: ny }; // where the head crashed
       return ev;
     }
     if (this.obstacleAt(nx, nz)) {
@@ -824,6 +824,7 @@ export class SnakeGame {
       this.die(cause);
       ev.died = true;
       ev.cause = cause;
+      ev.hit = { x: nx, z: nz, y: ny }; // where the head crashed
       return ev;
     }
 
@@ -837,6 +838,7 @@ export class SnakeGame {
       this.die('body');
       ev.died = true;
       ev.cause = 'body';
+      ev.hit = { x: nx, z: nz, y: ny };
       return ev;
     }
 

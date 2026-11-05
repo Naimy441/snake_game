@@ -624,7 +624,7 @@ test('starting at a later level sets speed, zone, board size and pads', () => {
   g.startAtLevel(5);
   assert.equal(g.level, 5);
   assert.equal(g.zone, 1);
-  assert.equal(g.size, 19, 'Golden Canyon is played on the 19 board');
+  assert.equal(g.size, 17, 'Golden Canyon is played on the 17 board');
   assert.deepEqual(g.levelProgress(), { into: 0, need: 4, max: false });
   assert.equal(g.obstacles.length, 0, 'no pillars');
   assert.ok(g.cells.every((c) => g.inBounds(c.x, c.z)));
@@ -661,7 +661,7 @@ test('reaching Sunset Heavens lifts the snake off into a box of air', () => {
   assert.ok(ev.levelUp.liftoff);
   assert.ok(g.flying);
   assert.equal(g.height, SKY_H);
-  assert.equal(g.size, 21 + 2 * SKY_PAD, 'the box is bigger than the board on every side');
+  assert.equal(g.size, 19 + 2 * SKY_PAD, 'the box is bigger than the board on every side');
   // the board sits in the middle of the box, so the snake hasn't moved
   assert.deepEqual(g.head, { x: h0.x + SKY_PAD, z: h0.z - 1 + SKY_PAD, y: SKY_LIFT });
   assert.ok(g.cells.every((c) => c.y === SKY_LIFT), 'the snake keeps its shape, level with the board');
@@ -687,7 +687,7 @@ test('reaching Sunset Heavens lifts the snake off into a box of air', () => {
   assert.ok(g.alive);
   // a new run is back on the normal board
   g.reset();
-  assert.equal(g.size, 21);
+  assert.equal(g.size, 19);
   assert.equal(g.flying, false);
 });
 
@@ -842,9 +842,9 @@ test('no level ever raises pillars', () => {
   }
 });
 
-test('the board grows 17 -> 19 -> 21 with the zones and stays 21', () => {
+test('the board grows 15 -> 17 -> 19 with the zones and stays 19', () => {
   const g = new SnakeGame({ sizes: BOARD_SIZES, rng: seq([0.5]) });
-  assert.equal(g.size, 17);
+  assert.equal(g.size, 15);
   const seen = [];
   for (let i = 0; i < 80 && g.alive && !g.flying; i++) {
     const before = g.head;
@@ -866,11 +866,11 @@ test('the board grows 17 -> 19 -> 21 with the zones and stays 21', () => {
       assert.ok(g.cells.every((c) => g.inBounds(c.x, c.z)));
     }
   }
-  assert.deepEqual(seen, [17, 19, 21]);
+  assert.deepEqual(seen, [15, 17, 19]);
   assert.ok(g.flying, 'reached the sky');
-  assert.equal(g.size, SKY_W, 'the sky box is still built around the 21 board');
+  assert.equal(g.size, SKY_W, 'the sky box is still built around the 19 board');
   g.reset();
-  assert.equal(g.size, 17, 'a new run starts small again');
+  assert.equal(g.size, 15, 'a new run starts small again');
 });
 
 // ---------------------------------------------------------------- growth and combos
@@ -904,4 +904,21 @@ test('the combo has no cap', () => {
   }
   assert.equal(g.combo, 12);
   assert.equal(g.maxCombo, 12);
+});
+
+test('a crash reports the cell the head hit', () => {
+  const g = new SnakeGame({ size: 15, rng: seq([0.5]) });
+  // a U shape: turning right twice runs the head into its own body
+  g.cells = [{ x: 5, z: 5, y: 0 }, { x: 5, z: 6, y: 0 }, { x: 6, z: 6, y: 0 }, { x: 6, z: 5, y: 0 }, { x: 6, z: 4, y: 0 }];
+  g.dir = { ...DIRS.right };
+  g.food = { x: 0, z: 0, type: 'orb', id: 1 };
+  const ev = g.step();
+  assert.equal(ev.cause, 'body');
+  assert.deepEqual(ev.hit, { x: 6, z: 5, y: 0 });
+  const w = new SnakeGame({ size: 15, rng: seq([0.5]) });
+  w.cells = [{ x: 14, z: 7, y: 0 }, { x: 13, z: 7, y: 0 }];
+  w.dir = { ...DIRS.right };
+  const wev = w.step();
+  assert.equal(wev.cause, 'wall');
+  assert.deepEqual(wev.hit, { x: 15, z: 7, y: 0 });
 });
