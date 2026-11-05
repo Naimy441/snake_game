@@ -43,26 +43,84 @@ void main(){
   gl_FragColor = vec4(uColor * (0.85 + 1.4 * f), a);
 }`;
 
-// Standard material plus: a fresnel rim light, per-vertex glow (aGlow, in the
-// surface colour) and skin animations (rainbow hue cycling, pulsing or
-// flowing glow) driven by the distance along the body (uv.x).
-function withSkin(mat, uniforms) {
+// The body's skin is baked into a texture, sampled in the fragment shader:
+// TEX_D cells of body along v at TEX_PER_CELL rows per cell, the angle round
+// the body along u. Painting per vertex (rings 0.2 cells apart, 10-14 round)
+// smeared fine detail like bands, diamonds and circuit traces into blobs.
+// RGB is the colour, A the glow (scaled by GLOW_SCALE). Past TEX_D the last
+// half of the texture repeats, so long tails keep their pattern.
+const TEX_D = 64;
+const TEX_PER_CELL = 24;
+const TEX_ROUND = 48;
+const GLOW_SCALE = 2.5;
+const SKIN_CACHE = new Map(); // skin id -> baked texture data, shared by every view
+
+// Bake a skin: each texel averages 2 x 2 samples so pattern edges come out
+// anti-aliased instead of stair-stepped.
+function bakeSkin(skin) {
+  const hit = SKIN_CACHE.get(skin.id);
+  if (hit) return hit;
+  const rows = TEX_D * TEX_PER_CELL;
+  const img = new Uint8Array(TEX_ROUND * rows * 4);
+  const col = new THREE.Color();
+  const sub = [0.25, 0.75];
+  for (let i = 0; i < rows; i++) {
+    for (let j = 0; j < TEX_ROUND; j++) {
+      let r = 0, g = 0, b = 0, gl = 0;
+      for (const si of sub) {
+        const d = (i + si) / TEX_PER_CELL;
+        for (const sj of sub) {
+          const theta = ((j + sj) / TEX_ROUND) * Math.PI * 2;
+          skin.color(d, theta, col);
+          r += col.r;
+          g += col.g;
+          b += col.b;
+          if (skin.glow) gl += skin.glow(d, theta);
+        }
+      }
+      col.setRGB(r / 4, g / 4, b / 4).convertLinearToSRGB();
+      const k = (i * TEX_ROUND + j) * 4;
+      img[k] = Math.round(Math.min(1, col.r) * 255);
+      img[k + 1] = Math.round(Math.min(1, col.g) * 255);
+      img[k + 2] = Math.round(Math.min(1, col.b) * 255);
+      img[k + 3] = Math.round(Math.min(1, gl / 4 / GLOW_SCALE) * 255);
+    }
+  }
+  SKIN_CACHE.set(skin.id, img);
+  return img;
+}
+
+// Standard material plus: a fresnel rim light, glow (in the surface colour)
+// and skin animations (rainbow hue cycling, pulsing or flowing glow) driven by
+// the distance along the body (uv.x). With a skin map (the body) colour and
+// glow come from the texture; without one (the head) from per-vertex colour
+// and the aGlow attribute.
+function withSkin(mat, uniforms, skinMap = null) {
+  const tex = !!skinMap;
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
+    if (tex) shader.uniforms.uSkinMap = skinMap;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aGlow; varying float vGlow; varying float vBodyD;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow; vBodyD = uv.x / 2.2;');
+      .replace('#include <common>', '#include <common>\nattribute float aGlow; varying float vGlow; varying float vBodyD; varying float vRound;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow; vBodyD = uv.x / 2.2; vRound = uv.y / 4.0;');
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
         `#include <common>
         uniform vec3 uRimColor; uniform float uRim; uniform float uAnim; uniform float uTime; uniform float uGlowAmt;
-        varying float vGlow; varying float vBodyD;
+        ${tex ? 'uniform sampler2D uSkinMap;' : ''}
+        varying float vGlow; varying float vBodyD; varying float vRound;
         vec3 skinHue(float h){ vec3 k = clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); return k * k * (3.0 - 2.0 * k); }`
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
+        float skinGlow = vGlow;
+        ${tex ? `float half_ = ${(TEX_D / 2).toFixed(1)};
+        float bd = vBodyD < ${TEX_D.toFixed(1)} ? vBodyD : half_ + mod(vBodyD - half_, half_);
+        vec4 skinTex = texture2D(uSkinMap, vec2(vRound, bd / ${TEX_D.toFixed(1)}));
+        diffuseColor.rgb *= skinTex.rgb;
+        skinGlow = skinTex.a * ${GLOW_SCALE.toFixed(1)};` : ''}
         if (uAnim > 0.5 && uAnim < 1.5) diffuseColor.rgb *= mix(vec3(1.0), skinHue(fract(vBodyD * 0.32 - uTime * 0.35)), 0.92);`
       )
       .replace(
@@ -73,10 +131,10 @@ function withSkin(mat, uniforms) {
         float gp = 1.0;
         if (uAnim > 1.5 && uAnim < 2.5) gp = 0.55 + 0.45 * sin(uTime * 3.0 - vBodyD * 1.4);
         if (uAnim > 2.5) gp = 0.3 + 0.9 * pow(0.5 + 0.5 * sin(vBodyD * 2.2 - uTime * 7.0), 3.0);
-        totalEmissiveRadiance += diffuseColor.rgb * vGlow * uGlowAmt * gp;`
+        totalEmissiveRadiance += diffuseColor.rgb * skinGlow * uGlowAmt * gp;`
       );
   };
-  mat.customProgramCacheKey = () => 'snake-skin';
+  mat.customProgramCacheKey = () => (tex ? 'snake-skin-tex' : 'snake-skin');
   return mat;
 }
 
@@ -104,7 +162,6 @@ export class SnakeView {
     const geo = new THREE.BufferGeometry();
     this.positions = new Float32Array(vCount * 3);
     this.normals = new Float32Array(vCount * 3);
-    const colors = new Float32Array(vCount * 3);
     const uvs = new Float32Array(vCount * 2);
     for (let i = 0; i < this.maxRings; i++) {
       for (let j = 0; j <= R; j++) {
@@ -132,7 +189,6 @@ export class SnakeView {
     this.normAttr = new THREE.BufferAttribute(this.normals, 3).setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute('position', this.posAttr);
     geo.setAttribute('normal', this.normAttr);
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.setAttribute('aGlow', new THREE.BufferAttribute(new Float32Array(vCount), 1));
     geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e4);
@@ -145,9 +201,17 @@ export class SnakeView {
       uTime: { value: 0 },
       uGlowAmt: { value: 1 },
     };
+    const texData = new Uint8Array(TEX_ROUND * TEX_D * TEX_PER_CELL * 4);
+    this.skinTex = new THREE.DataTexture(texData, TEX_ROUND, TEX_D * TEX_PER_CELL, THREE.RGBAFormat);
+    this.skinTex.colorSpace = THREE.SRGBColorSpace;
+    this.skinTex.wrapS = THREE.RepeatWrapping;
+    this.skinTex.wrapT = THREE.ClampToEdgeWrapping;
+    this.skinTex.magFilter = THREE.LinearFilter;
+    this.skinTex.minFilter = THREE.LinearMipmapLinearFilter;
+    this.skinTex.generateMipmaps = true;
+    this.skinTex.anisotropy = 4;
     this.bodyMat = withSkin(
       new THREE.MeshStandardMaterial({
-        vertexColors: true,
         roughness: 0.34,
         metalness: 0.08,
         normalMap: scaleMap,
@@ -156,7 +220,8 @@ export class SnakeView {
         emissive: new THREE.Color('#00ffd0'),
         emissiveIntensity: 0,
       }),
-      this.rimUniforms
+      this.rimUniforms,
+      { value: this.skinTex }
     );
     this.body = new THREE.Mesh(geo, this.bodyMat);
     this.body.castShadow = true;
@@ -190,24 +255,9 @@ export class SnakeView {
   applySkin(id) {
     const skin = skinById(id);
     this.skin = skin;
-    const R = this.radial;
     const col = new THREE.Color();
-    const colors = this.geo.attributes.color;
-    const glow = this.geo.attributes.aGlow;
-    for (let i = 0; i < this.maxRings; i++) {
-      const d = i * STEP;
-      for (let j = 0; j <= R; j++) {
-        const theta = (j / R) * Math.PI * 2;
-        const k = i * (R + 1) + j;
-        skin.color(d, theta, col);
-        colors.array[k * 3] = col.r;
-        colors.array[k * 3 + 1] = col.g;
-        colors.array[k * 3 + 2] = col.b;
-        glow.array[k] = skin.glow ? skin.glow(d, theta) : 0;
-      }
-    }
-    colors.needsUpdate = true;
-    glow.needsUpdate = true;
+    this.skinTex.image.data.set(bakeSkin(skin));
+    this.skinTex.needsUpdate = true;
     const m = skin.mat || {};
     for (const [mat, ns] of [[this.bodyMat, 0.6], [this.headMat, 0.35]]) {
       mat.roughness = m.roughness ?? 0.34;
@@ -626,9 +676,11 @@ export class SnakeView {
     this.headAura.visible = this.aura.visible && this.head.visible;
   }
 
+  // The zone's rim light. Kept at 60%: at full strength the blue-white rim
+  // washed every skin out to a milky pastel.
   setRim(color, amount) {
     this.rimUniforms.uRimColor.value.copy(color);
-    this.rimUniforms.uRim.value = amount;
+    this.rimUniforms.uRim.value = amount * 0.6;
   }
 
   dispose() {
@@ -637,6 +689,7 @@ export class SnakeView {
     this.geo.dispose();
     this.bodyMat.dispose();
     this.headMat.dispose();
+    this.skinTex.dispose();
     this.auraMat.dispose();
     if (this.jetMats) this.jetMats.forEach((m) => m.dispose());
   }

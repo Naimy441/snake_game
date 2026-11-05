@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 import { GhostBot } from './game/GhostBot.js';
-import { SnakeGame, BOARD_SIZES, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, SKY_H, zoneForLevel } from './game/SnakeGame.js';
+import { SnakeGame, BOARD_SIZES, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, LEVEL_AT, SKY_H, zoneForLevel } from './game/SnakeGame.js';
 import { SKINS, ACCESSORIES, skinById, accessoryById, isUnlocked, unlockProgress } from './skins.js';
 import { World } from './render/World.js';
 import { SnakeView } from './render/SnakeView.js';
@@ -23,7 +23,17 @@ const BOARD = 21; // the biggest board (it starts at BOARD_SIZES[0] and grows)
 // sky box holds far more cells than the board.
 const MAX_SNAKE = 1600;
 const CAMERA_NAMES = { overhead: 'Overhead', tp: 'Chase', fp: 'First-person' };
-const CAMERA_ORDER = ['overhead', 'tp', 'fp'];
+const CAMERA_ORDER = ['tp', 'fp', 'overhead'];
+// Picking the overhead camera earns a (friendly) roast.
+const OVERHEAD_ROASTS = [
+  'Ah, the bird\'s-eye view. The snake respects your fear of commitment.',
+  'Your snake wanted a co-pilot. It got air traffic control.',
+  'Watching from up there? The snake says come down and fight.',
+  'Overhead: same snake, zero adrenaline. Grandma approves.',
+  'Ah yes, the view from the safety of the clouds.',
+];
+const ZONE_COUNT = ZONE_NAMES.length;
+const mod = (a, n) => ((a % n) + n) % n;
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 // Fraction of a step after a tick during which a new turn redoes that step.
 // Together with the drawn head's lead this ends just past the turning cell's
@@ -88,7 +98,7 @@ class App {
     this.rushGlow = 0;
     this.flashAmt = 0;
     this.flashColor = new THREE.Color('#ffffff');
-    this.cameraMode = CAMERA_ORDER.includes(this.settings.camera) ? this.settings.camera : 'overhead';
+    this.cameraMode = CAMERA_ORDER.includes(this.settings.camera) ? this.settings.camera : 'tp';
     this.fpsFrames = 0;
     this.fpsTime = 0;
     this.lastHud = {};
@@ -130,8 +140,15 @@ class App {
     this.scene.add(this.ghostView.group);
     this.ghostFade = 0;
     this.ghostWait = 0;
+    // attract mode: on the title screen the real snake plays itself, steered
+    // by the same perfect-play brain as the ghost
+    this.demoBot = new GhostBot(this.game);
+    this.demoZone = null;
 
-    this.rig.setMode('orbit', { instant: true });
+    // the title screen tours the maps in order, starting from the chosen one
+    this.tourOffset = zoneForLevel(this.startLevel());
+    this.world.setZone(this.tourOffset, { instant: true });
+    this.rig.setMode('tour', { instant: true });
     this.updateCameraUI();
     this.syncFood();
     this.precompile();
@@ -220,26 +237,234 @@ class App {
   }
 
   stepStartLevel(delta) {
-    const next = Math.max(0, Math.min(this.unlockedLevel(), this.startLevel() + delta));
+    this.setStartLevel(this.startLevel() + delta);
+  }
+
+  setStartLevel(L) {
+    const next = Math.max(0, Math.min(this.unlockedLevel(), L));
     if (next === this.startLevel()) return;
+    const zoneBefore = zoneForLevel(this.startLevel());
     this.settings.startLevel = next;
     saveSettings(this.settings);
     this.audio.ui();
     this.renderLevelSelect();
+    // picking another map brings it into the tour right away
+    const zone = zoneForLevel(next);
+    if (zone !== zoneBefore && this.state === 'menu') this.showZoneInTour(zone);
+  }
+
+  // Map tiles: start at the first level of that map (or keep the level if
+  // it's already on it).
+  pickMap(zone) {
+    if (ZONE_STARTS[zone] > this.unlockedLevel()) {
+      this.toast(`Reach level ${ZONE_STARTS[zone] + 1} to unlock this map`);
+      return;
+    }
+    if (zoneForLevel(this.startLevel()) === zone) {
+      this.showZoneInTour(zone);
+      return;
+    }
+    this.setStartLevel(ZONE_STARTS[zone]);
   }
 
   renderLevelSelect() {
     const L = this.startLevel();
     const max = this.unlockedLevel();
     const zone = zoneForLevel(L);
-    const speed = (1000 / LEVEL_SPEEDS[L]).toFixed(1);
     $('lvl-sel-name').textContent = `Level ${L + 1}`;
-    $('lvl-sel-zone').textContent = `${ZONE_NAMES[zone]} · ${speed} moves/s`;
+    $('lvl-sel-zone').textContent = ZONE_NAMES[zone];
+    $('lvl-sel-speed').textContent = `${(1000 / LEVEL_SPEEDS[L]).toFixed(1)} moves/s`;
     $('lvl-prev').disabled = L <= 0;
     $('lvl-next').disabled = L >= max;
-    const box = $('lvl-select');
-    box.className = `lvl-select z${zone}`;
-    $('lvl-sel-hint').textContent = max === 0 ? 'Reach new levels to start from them here.' : max >= MAX_LEVEL ? 'Every level unlocked.' : `Unlocked up to level ${max + 1}. Reach further to unlock more.`;
+    $('ms-tiles').innerHTML = ZONE_NAMES.map((name, z) => {
+      const locked = ZONE_STARTS[z] > max;
+      const on = z === zone;
+      // a locked map keeps its look and name secret until it's reached
+      if (locked) return `<button class="ms-tile locked" data-zone="${z}" role="radio" aria-checked="false" aria-label="Locked map" title="Locked · reach level ${ZONE_STARTS[z] + 1}"><b>${z + 1}</b></button>`;
+      return `<button class="ms-tile zg${z}${on ? ' active' : ''}" data-zone="${z}" role="radio" aria-checked="${on}" aria-label="${name}" title="${name}"><b>${z + 1}</b></button>`;
+    }).join('');
+    const from = ZONE_STARTS[zone];
+    const to = (ZONE_STARTS[zone + 1] ?? MAX_LEVEL + 1) - 1;
+    let pips = '';
+    for (let l = from; l <= to; l++) pips += `<i class="${l === L ? 'on' : l <= max ? 'open' : ''}"></i>`;
+    $('ms-pips').innerHTML = pips;
+    $('lvl-sel-hint').textContent = max === 0 ? 'Reach new levels to start from them here.' : max >= MAX_LEVEL ? 'Every level unlocked.' : `Unlocked up to level ${max + 1}.`;
+    this.markShowing();
+  }
+
+  // ---------------------------------------------------------------- title tour
+  // The map the tour is showing (or sweeping in).
+  tourZone() {
+    return this.world.trans ? this.world.trans.to : this.world.zone;
+  }
+
+  // How many maps the tour may show: only the ones the player has reached
+  // (maps unlock in order), so it never spoils one that's still locked.
+  tourCount() {
+    return Math.max(1, ZONE_STARTS.filter((s) => s <= this.unlockedLevel()).length);
+  }
+
+  // Make the tour's current segment show this map (it moves on in order).
+  showZoneInTour(zone) {
+    this.tourOffset = mod(zone - this.rig.tourSegment, this.tourCount());
+  }
+
+  updateTour() {
+    if (this.state !== 'menu' || this.garageOpen || this.rig.mode !== 'tour') return;
+    const n = this.tourCount();
+    const want = mod(this.rig.tourSegment + this.tourOffset, n);
+    if (want !== this.tourZone() && !this.world.transitioning) {
+      // rising into (or sinking back out of) the heavens takes a little longer
+      const sky = want === ZONE_COUNT - 1 || this.world.zone === ZONE_COUNT - 1;
+      this.world.setZone(want, { duration: sky ? 4.4 : 3.4 });
+    }
+    const z = this.tourZone();
+    if (`${z}:${n}` !== this.nsKey) {
+      this.nsKey = `${z}:${n}`;
+      const name = $('ns-name');
+      name.textContent = ZONE_NAMES[z];
+      name.classList.remove('swap');
+      void name.offsetWidth;
+      name.classList.add('swap');
+      $('ns-num').textContent = `Map ${z + 1}`;
+      $('ns-dots').innerHTML = n < 2 ? '' : ZONE_NAMES.slice(0, n).map((_, i) => `<i class="${i < z ? 'past' : ''}">${i === z ? '<b id="ns-fill"></b>' : ''}</i>`).join('');
+      this.markShowing();
+    }
+    const fill = $('ns-fill');
+    if (fill) fill.style.setProperty('--p', this.rig.tourProgress.toFixed(3));
+  }
+
+  // ---------------------------------------------------------------- attract mode
+  // A fresh demo run on the map the tour is showing (it restarts whenever
+  // the tour moves on, while the camera is high and the new map sweeps in).
+  resetDemo(zone) {
+    const g = this.game;
+    const old = this.demoZone != null && this.snake.headPos.clone();
+    g.reset();
+    g.startAtLevel(ZONE_STARTS[zone]);
+    this.demoZone = zone;
+    this.demoDeadAt = null;
+    this.t = 0;
+    this.timers = [];
+    this.food.hideAll();
+    this.board.clear();
+    this.syncFood();
+    if (old && !this.settings.reduceMotion) this.effects.emit(old.x, old.y + 0.4, old.z, { count: 30, color: '#ffffff', speed: 2, up: 2, size: 0.2, life: 0.6 });
+  }
+
+  updateDemo(dt) {
+    const g = this.game;
+    if (this.garageOpen) return; // hold still for the showcase camera
+    const zone = this.tourZone();
+    if (zone !== this.demoZone) return this.resetDemo(zone);
+    if (!g.alive) {
+      // (very rare) a crash: hold the wreck a moment, then start over
+      if (this.simTime - this.demoDeadAt > 1.2) this.resetDemo(zone);
+      return;
+    }
+    // the demo never changes map by itself: leveling into the next map
+    // starts this one over
+    if (g.zone !== zone) return this.resetDemo(zone);
+    g.clockScale = 1;
+    this.t += (dt * 1000) / g.currentInterval();
+    let guard = 0;
+    while (this.t >= 1 && g.alive && guard++ < 4) {
+      this.t -= 1;
+      this.demoStep();
+    }
+    this.t = Math.min(this.t, 1);
+  }
+
+  demoStep() {
+    const g = this.game;
+    const bot = this.demoBot;
+    // Keep the demo on its map: hold the apple count short of the next map's
+    // first level (eating still grows the snake), so it never levels out of
+    // the map and has to start over. It plays on at the map's top speed.
+    const nextStart = ZONE_STARTS[g.zone + 1];
+    if (nextStart != null) g.foodEaten = Math.min(g.foodEaten, LEVEL_AT[nextStart] - 2);
+    // mirror the real snake into the bot and ask it for the perfect move
+    bot.reset(true);
+    bot.pendingGrowth = g.pendingGrowth;
+    bot.rush = g.rush;
+    bot.time = g.time;
+    const plan = bot.decide();
+    g.queue.length = 0;
+    if (plan.dir) g.queueDirection(plan.dir);
+    g.wantRush = !!plan.rush;
+    const ev = g.step();
+    const at = (c) => this.toWorld(c.x, c.z, c.y);
+    const delay = this.visualDelay();
+    const rm = this.settings.reduceMotion;
+    if (ev.ate) {
+      const w = at(ev.ate);
+      const prism = ev.ate.type === 'prism';
+      this.food.markEaten(ev.ate.type, new THREE.Vector3(w.x, w.y, w.z), delay);
+      this.later(delay, () => {
+        this.effects.emit(w.x, w.y + 0.45, w.z, { count: prism ? 60 : 28, color: prism ? '#e0aaff' : '#ff4d6d', speed: prism ? 4 : 3, up: 2.4, size: prism ? 0.3 : 0.22 });
+        this.effects.shockwave(w.x, w.z, prism ? '#c77dff' : '#ff5a7a', { y: w.y, max: prism ? 4 : 2.4 });
+      });
+    }
+    if (ev.chainLink) {
+      const w = at(ev.chainLink);
+      this.later(delay, () => {
+        this.effects.emit(w.x, w.y + 0.5, w.z, { count: 22, color: '#38f6ff', speed: 3, up: 2.2, size: 0.22 });
+        this.effects.shockwave(w.x, w.z, '#38f6ff', { y: w.y, max: 2.2, dur: 0.4 });
+      });
+    }
+    if (ev.chainComplete) {
+      const w = at(ev.chainComplete);
+      this.later(delay + 0.05, () => this.effects.emit(w.x, w.y + 0.6, w.z, { count: 70, color: '#7ff8ff', speed: 5, up: 3, size: 0.3 }));
+    }
+    if (ev.caught) {
+      const w = at(ev.caught);
+      this.later(delay, () => this.effects.emit(w.x, w.y + 0.4, w.z, { count: 50, color: '#ffd36a', speed: 4, up: 3, size: 0.26 }));
+    }
+    if (ev.levelUp && !rm) {
+      const hp = this.snake.headPos;
+      this.later(delay, () => this.world.pulse(hp.x, hp.z));
+    }
+    if (ev.died) {
+      this.demoDeadAt = this.simTime;
+      const hp = this.snake.headPos;
+      this.effects.emit(hp.x, hp.y + 0.4, hp.z, { count: 40, color: '#ffffff', speed: 3, up: 2.5, size: 0.24 });
+    }
+    this.syncFood();
+  }
+
+  // Lens shift: on the title screen the picture's centre moves into the space
+  // the menu leaves free (right of the column, or above the bottom sheet), so
+  // the tour frames the world there instead of behind the menu.
+  measureLens() {
+    const col = document.querySelector('.title-col');
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    if (!col || !col.offsetWidth) return;
+    const portrait = W <= 720 || W / H < 0.9;
+    this.lensTarget = portrait ? { x: 0, y: Math.min(H * 0.3, col.offsetHeight * 0.45) } : { x: Math.min(W * 0.25, col.offsetWidth * 0.5), y: 0 };
+  }
+
+  updateLens(dt) {
+    const on = this.state === 'menu' && !this.garageOpen;
+    if (on && !this.lensTarget) this.measureLens(); // first frame after the loader
+    const t =on && this.lensTarget ? this.lensTarget : { x: 0, y: 0 };
+    const l = this.lens || (this.lens = { x: 0, y: 0 });
+    const k = Math.min(1, dt * 2.5);
+    l.x += (t.x - l.x) * k;
+    l.y += (t.y - l.y) * k;
+    const cam = this.camera;
+    if (Math.abs(l.x) < 0.5 && Math.abs(l.y) < 0.5) {
+      if (cam.view && cam.view.enabled) cam.clearViewOffset();
+      return;
+    }
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    cam.setViewOffset(W, H, -l.x, l.y, W, H);
+  }
+
+  markShowing() {
+    const z = this.tourZone();
+    document.querySelectorAll('.ms-tile').forEach((t) => t.classList.toggle('showing', Number(t.dataset.zone) === z));
   }
 
   // ---------------------------------------------------------------- ghost
@@ -330,7 +555,7 @@ class App {
     if (this.snake.skin.id !== this.equippedSkin()) this.snake.applySkin(this.equippedSkin());
     if (this.snake.accessoryId !== this.equippedAccessory()) this.snake.setAccessory(this.equippedAccessory());
     this.showScreen('screen-start');
-    this.rig.setMode('orbit', { reduceMotion: this.settings.reduceMotion });
+    this.rig.setMode('tour', { reduceMotion: this.settings.reduceMotion });
     $('btn-garage').focus({ preventScroll: true });
   }
 
@@ -416,6 +641,7 @@ class App {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.rig.fitOverhead(w / h);
+    this.measureLens();
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     this.post.scale = this.dyn.scale;
     this.post.setSize(size.x, size.y);
@@ -542,7 +768,15 @@ class App {
   }
 
   setCamera(mode) {
+    const roast = mode === 'overhead' && this.cameraMode !== 'overhead';
     this.cameraMode = mode;
+    if (roast) {
+      // a new line each time, never the same one twice in a row
+      let i = Math.floor(Math.random() * (OVERHEAD_ROASTS.length - 1));
+      if (i >= (this.roastIndex ?? -1)) i++;
+      this.roastIndex = i % OVERHEAD_ROASTS.length;
+      if (this.state !== 'menu') this.toast(OVERHEAD_ROASTS[this.roastIndex]);
+    }
     this.settings.camera = mode;
     saveSettings(this.settings);
     if (['playing', 'paused', 'countdown'].includes(this.state)) {
@@ -627,9 +861,11 @@ class App {
     this.food.hideAll();
     this.board.clear();
     this.syncFood();
-    if (this.world.zone !== 0 || this.world.transitioning) this.world.setZone(0, { duration: 1.4 });
+    // the tour carries on from the map the run ended on
+    this.showZoneInTour(this.tourZone());
+    this.demoZone = null;
     $('hud').classList.add('hidden');
-    this.rig.setMode('orbit', { reduceMotion: this.settings.reduceMotion });
+    this.rig.setMode('tour', { reduceMotion: this.settings.reduceMotion });
     this.showScreen('screen-start');
     this.updateCameraUI();
     this.renderLevelSelect();
@@ -997,6 +1233,10 @@ class App {
     $('btn-ghost').addEventListener('click', () => this.toggleGhost());
     $('lvl-prev').addEventListener('click', () => this.stepStartLevel(-1));
     $('lvl-next').addEventListener('click', () => this.stepStartLevel(1));
+    $('ms-tiles').addEventListener('click', (e) => {
+      const t = e.target.closest('.ms-tile');
+      if (t) this.pickMap(Number(t.dataset.zone));
+    });
     this.renderLevelSelect();
     this.updateGhostUI();
     const bindRange = (id, key) => {
@@ -1043,10 +1283,23 @@ class App {
   showScreen(id) {
     for (const s of ['screen-start', 'screen-pause', 'screen-over']) $(s).classList.toggle('hidden', s !== id);
     this.closePanel();
+    if (id === 'screen-start') this.measureLens();
   }
 
   updateCameraUI() {
     $('hud-cam').textContent = CAMERA_NAMES[this.cameraMode];
+    const roast = $('cam-roast');
+    const overhead = this.cameraMode === 'overhead';
+    roast.classList.toggle('hidden', !overhead);
+    if (overhead) {
+      if (this.roastIndex == null) this.roastIndex = Math.floor(Math.random() * OVERHEAD_ROASTS.length);
+      if (roast.textContent !== OVERHEAD_ROASTS[this.roastIndex]) {
+        roast.textContent = OVERHEAD_ROASTS[this.roastIndex];
+        roast.classList.remove('pop');
+        void roast.offsetWidth;
+        roast.classList.add('pop');
+      }
+    }
     document.querySelectorAll('.cam-select .seg').forEach((b) => {
       const on = b.dataset.cam === this.cameraMode;
       b.classList.toggle('active', on);
@@ -1388,6 +1641,8 @@ class App {
       if (this.state === 'playing') this.t = Math.min(this.t, 1);
     }
 
+    if (this.state === 'menu') this.updateDemo(gdt);
+
     if (this.state === 'dying' || this.state === 'over') {
       this.dyingTime = (this.dyingTime || 0) + dt;
       this.lunge = Math.min(CORNER + 0.05 - HEAD_LEAD, this.dyingTime * 4);
@@ -1448,14 +1703,16 @@ class App {
     const aim = g.flying ? (next.y ? g.facing : next) : next;
     this.rig.update(dt, this.snake, {
       speedFx: this.speedFx, reduceMotion: rm, aim: steering || g.flying ? aim : null,
-      flying: g.flying && this.state !== 'menu', pitch: steering ? next.y || 0 : 0, box: sky,
+      flying: g.flying && this.state !== 'menu', pitch: steering ? next.y || 0 : 0, box: sky, sky: this.world.skyAmount,
     });
     // The first-person camera sits inside the head; hide it once we're there.
     this.snake.head.visible = !(this.rig.mode === 'fp' && this.rig.blend > 0.85);
     this.effects.uniforms.scale.value = pxScale;
 
+    this.updateLens(dt);
     this.renderFrame(dt, view, rm);
     if (this.state !== 'menu') this.updateHud();
+    else this.updateTour();
     this.measure(rawDt);
   }
 

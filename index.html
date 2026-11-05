@@ -88,42 +88,51 @@
         <div class="tc-text"><span id="tc-zone">Zone 2</span><span id="tc-name">Golden Canyon</span></div>
       </div>
 
-      <!-- Start screen -->
-      <section id="screen-start" class="screen">
-        <div class="card hero">
-          <h1 class="logo"><span>SNAKE</span><span class="accent">RUSH</span></h1>
-          <p class="tagline">Classic Snake at full speed.</p>
-          <div class="cam-select" role="radiogroup" aria-label="Camera">
-            <button data-cam="overhead" class="seg active" role="radio" aria-checked="true">Overhead</button>
-            <button data-cam="tp" class="seg" role="radio" aria-checked="false">Chase</button>
-            <button data-cam="fp" class="seg" role="radio" aria-checked="false">First-person</button>
+      <!-- Start screen: the menu sits in a column on the left so the world tour stays in view -->
+      <section id="screen-start" class="screen title-screen">
+        <div class="card title-col">
+          <div class="brand">
+            <h1 class="logo"><span>SNAKE</span><span class="accent">RUSH</span></h1>
+            <p class="tagline">Classic Snake at full speed.</p>
           </div>
-          <div class="lvl-select" id="lvl-select" aria-label="Starting level">
-            <button id="lvl-prev" class="lvl-arrow" aria-label="Previous level">‹</button>
-            <div class="lvl-sel-info">
-              <span class="lvl-sel-label">Start at</span>
-              <b id="lvl-sel-name">Level 1</b>
-              <span id="lvl-sel-zone">Emerald Coast</span>
+          <div class="map-select" id="lvl-select" aria-label="Starting map and level">
+            <div class="ms-head"><span class="eyebrow">Start map</span><span class="ms-speed" id="lvl-sel-speed">5.7 moves/s</span></div>
+            <div class="ms-tiles" id="ms-tiles" role="radiogroup" aria-label="Map"></div>
+            <div class="ms-level">
+              <button id="lvl-prev" class="lvl-arrow" aria-label="Previous level">‹</button>
+              <div class="ms-info"><b id="lvl-sel-name">Level 1</b><span id="lvl-sel-zone">Emerald Coast</span></div>
+              <div class="ms-pips" id="ms-pips" aria-hidden="true"></div>
+              <button id="lvl-next" class="lvl-arrow" aria-label="Next level">›</button>
             </div>
-            <button id="lvl-next" class="lvl-arrow" aria-label="Next level">›</button>
+            <p class="ms-hint" id="lvl-sel-hint">Reach new levels to start from them here.</p>
           </div>
-          <p class="muted small lvl-sel-hint" id="lvl-sel-hint">Reach new levels to start from them here.</p>
-          <button id="btn-play" class="primary big">Play <kbd>Enter</kbd></button>
-          <button id="btn-ghost" class="secondary wide ghost-btn" title="Toggle the ghost guide (G)">Ghost guide: <b id="btn-ghost-state">Off</b> <span class="muted small">race a perfect bot</span> <kbd>G</kbd></button>
-          <button id="btn-garage" class="secondary wide garage-btn">Garage <span class="muted small">skins &amp; accessories</span></button>
-          <div class="row">
-            <button class="secondary" data-open="help">How to play</button>
-            <button class="secondary" data-open="settings">Settings</button>
+          <button id="btn-play" class="play-btn"><span>Play</span><kbd>Enter</kbd></button>
+          <div class="cam-select" role="radiogroup" aria-label="Camera">
+            <button data-cam="tp" class="seg active" role="radio" aria-checked="true">Chase</button>
+            <button data-cam="fp" class="seg" role="radio" aria-checked="false">First-person</button>
+            <button data-cam="overhead" class="seg" role="radio" aria-checked="false">Overhead</button>
           </div>
-          <p class="best-line">Best score: <b id="start-best">0</b></p>
+          <p id="cam-roast" class="cam-roast hidden" aria-live="polite"></p>
+          <div class="title-menu">
+            <button id="btn-ghost" class="menu-item ghost-btn" title="Toggle the ghost guide (G)"><span class="mi-label">Ghost guide</span><span class="mi-val"><b id="btn-ghost-state">Off</b><kbd>G</kbd></span></button>
+            <button id="btn-garage" class="menu-item garage-btn"><span class="mi-label">Garage</span><span class="mi-val">Skins</span></button>
+            <button class="menu-item" data-open="help"><span class="mi-label">How to play</span></button>
+            <button class="menu-item" data-open="settings"><span class="mi-label">Settings</span></button>
+          </div>
         </div>
+        <div class="now-showing" aria-hidden="true">
+          <span class="ns-eyebrow"><span id="ns-num">Map 1</span> · Now showing</span>
+          <b id="ns-name">Emerald Coast</b>
+          <div class="ns-dots" id="ns-dots"></div>
+        </div>
+        <div class="title-best"><span>Best</span><b id="start-best">0</b></div>
       </section>
 
       <!-- Pause -->
       <section id="screen-pause" class="screen hidden">
         <div class="card">
           <h2>Paused</h2>
-          <button id="btn-resume" class="primary big">Resume <kbd>P</kbd></button>
+          <button id="btn-resume" class="play-btn"><span>Resume</span><kbd>P</kbd></button>
           <button id="btn-restart-p" class="secondary wide">Restart <kbd>R</kbd></button>
           <div class="row">
             <button class="secondary" data-open="help">Controls</button>
@@ -134,7 +143,7 @@
       </section>
 
       <!-- Game over -->
-      <section id="screen-over" class="screen hidden">
+      <section id="screen-over" class="screen side-screen hidden">
         <div class="card results">
           <div class="rank-wrap"><span class="rank-label">Rank</span><span id="over-rank" class="rank">A</span></div>
           <h2 id="over-title">Wipeout!</h2>
@@ -152,7 +161,7 @@
             <div><span>Boosts</span><b id="over-pads">0</b></div>
           </div>
           <div id="over-unlocks" class="unlocks hidden"></div>
-          <button id="btn-again" class="primary big">Play again <kbd>Enter</kbd></button>
+          <button id="btn-again" class="play-btn"><span>Play again</span><kbd>Enter</kbd></button>
           <button id="btn-garage-o" class="secondary wide">Garage</button>
           <button id="btn-menu-o" class="ghost">Main menu</button>
         </div>
@@ -198,7 +207,7 @@
               <ul class="keys">
                 <li><kbd>Q</kbd><kbd>E</kbd> <span>turn left / right relative to the snake</span></li>
                 <li><kbd>Space</kbd> hold <span>Rush: faster, double points, uses the meter</span></li>
-                <li><kbd>C</kbd> <span>cycle camera: overhead, chase, first-person</span></li>
+                <li><kbd>C</kbd> <span>cycle camera: chase, first-person, overhead</span></li>
                 <li><kbd>G</kbd> <span>ghost guide: race a perfect bot</span></li>
                 <li><kbd>P</kbd> / <kbd>Esc</kbd> <span>pause</span> · <kbd>R</kbd> <span>restart</span> · <kbd>M</kbd> <span>mute</span></li>
                 <li>Gamepad <span>D-pad / stick to steer, A rush, Y camera, Start pause</span></li>
