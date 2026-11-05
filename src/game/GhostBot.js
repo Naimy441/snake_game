@@ -11,7 +11,7 @@
 // itself in; with no safe target it follows its tail to buy time.
 
 import {
-  DIRS, NEIGHBOURS, NEIGHBOURS_3D, SKY_PAD, SKY_LIFT, SKY_CENTER, FOOD_TYPES, COMBO_WINDOW_MS, MAX_COMBO, RUSH_DRAIN_PER_SEC, CHAIN_LINK_POINTS, CHAIN_LINK_RUSH,
+  DIRS, NEIGHBOURS, NEIGHBOURS_3D, SKY_LIFT, SKY_CENTER, FOOD_TYPES, COMBO_WINDOW_MS, MAX_COMBO, appleGrowth, zoneForLevel, RUSH_DRAIN_PER_SEC, CHAIN_LINK_POINTS, CHAIN_LINK_RUSH,
   CHAIN_BONUS_PER_LINK, LEVEL_AT, LEVEL_SPEEDS, MIN_INTERVAL, MIN_FAST_INTERVAL, MAX_LEVEL,
 } from './SnakeGame.js';
 
@@ -28,6 +28,7 @@ export class GhostBot {
   reset(fromPlayer = false) {
     const g = this.game;
     const s = g.size;
+    this.gridSize = s;
     if (fromPlayer) {
       this.cells = g.cells.map((c) => ({ x: c.x, z: c.z, y: Y(c) }));
       this.dir = { ...g.dir };
@@ -92,13 +93,17 @@ export class GhostBot {
     return this.game.flying ? NEIGHBOURS_3D : NEIGHBOURS;
   }
 
-  // Follow the player into the sky: same shift into the bigger box, at the
-  // layer level with the board.
-  liftOff() {
-    this.flying = true;
-    const move = (c) => ({ ...c, x: c.x + SKY_PAD, z: c.z + SKY_PAD, y: SKY_LIFT });
+  // Follow the player's grid when it grows (a bigger board between zones, or
+  // the sky box at lift-off, at the layer level with the board).
+  followGrid() {
+    const g = this.game;
+    const pad = Math.floor((g.size - this.gridSize) / 2);
+    const lift = g.flying && !this.flying;
+    const move = (c) => ({ ...c, x: c.x + pad, z: c.z + pad, y: lift ? SKY_LIFT : Y(c) });
     this.cells = this.cells.map(move);
     if (this.removedTail) this.removedTail = move(this.removedTail);
+    this.gridSize = g.size;
+    if (lift) this.flying = true;
   }
 
   get level() {
@@ -128,7 +133,7 @@ export class GhostBot {
       if (next < g.chain.links.length) out.push({ kind: 'chain', cell: g.chain.links[next], expires: g.chain.expires, index: next, grow: 0 });
     }
     if (g.bonus && this.atePrism !== g.bonus.id) out.push({ kind: 'prism', cell: g.bonus, expires: g.bonus.expires, grow: FOOD_TYPES.prism.grow });
-    if (g.food && this.ateFood !== g.food.id) out.push({ kind: 'apple', cell: g.food, expires: Infinity, grow: FOOD_TYPES.orb.grow });
+    if (g.food && this.ateFood !== g.food.id) out.push({ kind: 'apple', cell: g.food, expires: Infinity, grow: appleGrowth(zoneForLevel(this.level)) });
     return out;
   }
 
@@ -349,10 +354,10 @@ export class GhostBot {
     const mult = this.rushing ? 2 : 1;
     if (g.food && at(g.food, nx, nz, ny) && this.ateFood !== g.food.id) {
       this.ateFood = g.food.id;
+      this.pendingGrowth += appleGrowth(zoneForLevel(this.level)); // the map it was eaten on
       this.apples++;
       this.registerEat();
       this.score += FOOD_TYPES.orb.points * this.combo * mult;
-      this.pendingGrowth += FOOD_TYPES.orb.grow;
       this.rush = Math.min(100, this.rush + FOOD_TYPES.orb.rush);
       ev.ate = 'apple';
     }
@@ -397,7 +402,7 @@ export class GhostBot {
 
   // Advance by real time. Waits (paused) when nothing is left to collect.
   update(dtMs) {
-    if (this.game.flying && !this.flying) this.liftOff();
+    if (this.game.size !== this.gridSize || (this.game.flying && !this.flying)) this.followGrid();
     const wanted = this.targets().length > 0;
     if (!wanted) {
       // finish gliding into the last cell, then hold still

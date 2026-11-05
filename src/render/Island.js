@@ -32,6 +32,7 @@ export class Island {
       uPulse: { value: 0 },
       uPulseAt: { value: new THREE.Vector2() },
       uDetail: { value: 1 },
+      uSize: { value: size },
     };
     this.checker = {
       uA: { value: new THREE.Color() },
@@ -46,26 +47,87 @@ export class Island {
       uEdgeColor: { value: new THREE.Color() },
     };
     detailTex.anisotropy = Math.min(8, maxAnisotropy);
-    this.buildArena(detailTex);
-    this.buildIsland();
-  }
-
-  buildArena(detailTex) {
-    const s = this.size;
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(s, s), makeBoardMaterial(s, detailTex, this.boardUniforms));
+    // the play surface: a unit plane scaled to the board, so it can resize
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), makeBoardMaterial(size, detailTex, this.boardUniforms));
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     this.group.add(floor);
     this.floor = floor;
+    this.makeArenaMaterials();
+    this.frame = null;
+    this.grow = null; // board resize animation
+    this.buildArena();
+    this.buildIsland();
+  }
+
+  makeArenaMaterials() {
+    this.platformMat = new THREE.MeshStandardMaterial({ color: '#e8e2d4', roughness: 0.55, metalness: 0.05 });
+    this.trimMat = new THREE.MeshStandardMaterial({ color: '#ffcf3f', roughness: 0.25, metalness: 0.9 });
+    this.wallMat = makeCheckerMaterial(this.wallChecker, { scale: new THREE.Vector2(80, 2) });
+    this.wallMat.roughness = 0.4;
+    this.wallMat.metalness = 0.1;
+    this.railMat = new THREE.MeshStandardMaterial({ color: '#f2f6ff', roughness: 0.12, metalness: 1 });
+    this.capMat = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#ffd86b', emissiveIntensity: 2.2 });
+    this.rimMats = [0, 1, 2, 3].map(() => new THREE.MeshStandardMaterial({ color: '#0b1630', emissive: '#38f6ff', emissiveIntensity: 1.1, roughness: 0.3 }));
+  }
+
+  // Resize the board (17 -> 19 -> 21 as the zones change). The floor takes
+  // the new size at once; the walls, rails and platform are rebuilt at the
+  // new size and slide outward from where they were, uncovering the new ring
+  // of cells. instant skips the slide.
+  setSize(size, { instant = false } = {}) {
+    if (size === this.size) return false;
+    const from = this.frameScale();
+    const old = this.size;
+    this.size = size;
+    this.half = size / 2;
+    this.buildArena();
+    this.grow = instant ? null : { t: 0, dur: 0.85, from: (old / size) * from };
+    this.applyFrameScale();
+    return true;
+  }
+
+  frameScale() {
+    if (!this.grow) return 1;
+    const k = Math.min(1, this.grow.t / this.grow.dur);
+    const e = 1 - Math.pow(1 - k, 3) + Math.sin(k * Math.PI) * 0.04; // ease out with a tiny overshoot
+    return this.grow.from + (1 - this.grow.from) * e;
+  }
+
+  applyFrameScale() {
+    const f = this.frameScale();
+    this.frame.scale.set(f, 1, f);
+  }
+
+  // 0..1 while the walls are still sliding out (World uses it for effects).
+  get growing() {
+    return this.grow ? 1 - Math.min(1, this.grow.t / this.grow.dur) : 0;
+  }
+
+  update(dt) {
+    if (!this.grow) return;
+    this.grow.t += dt;
+    if (this.grow.t >= this.grow.dur) this.grow = null;
+    this.applyFrameScale();
+  }
+
+  buildArena() {
+    if (this.frame) {
+      this.group.remove(this.frame);
+      this.frame.traverse((o) => o.geometry && o.geometry.dispose());
+    }
+    this.frame = new THREE.Group();
+    this.group.add(this.frame);
+    const s = this.size;
+    this.floor.scale.set(s, s, 1);
+    this.boardUniforms.uSize.value = s;
 
     // platform slab with a bevelled trim
     const pw = s + 2.6;
-    this.platformMat = new THREE.MeshStandardMaterial({ color: '#e8e2d4', roughness: 0.55, metalness: 0.05 });
     const slab = new THREE.Mesh(new THREE.BoxGeometry(pw, 0.7, pw), this.platformMat);
     slab.position.y = -0.37;
     slab.receiveShadow = true;
-    this.group.add(slab);
-    this.trimMat = new THREE.MeshStandardMaterial({ color: '#ffcf3f', roughness: 0.25, metalness: 0.9 });
+    this.frame.add(slab);
     const trimParts = [];
     for (const [x, z, rot] of [[0, -pw / 2, 0], [0, pw / 2, 0], [-pw / 2, 0, Math.PI / 2], [pw / 2, 0, Math.PI / 2]]) {
       const t = new THREE.BoxGeometry(pw + 0.12, 0.12, 0.12);
@@ -77,9 +139,7 @@ export class Island {
     const h = 0.55;
     const th = 0.4;
     const len = s + th * 2;
-    const wallMat = makeCheckerMaterial(this.wallChecker, { scale: new THREE.Vector2(80, 2) });
-    wallMat.roughness = 0.4;
-    wallMat.metalness = 0.1;
+    const wallMat = this.wallMat;
     const sides = [
       { x: 0, z: -(this.half + th / 2), rot: 0 },
       { x: 0, z: this.half + th / 2, rot: 0 },
@@ -89,15 +149,15 @@ export class Island {
     const wallParts = [];
     const railParts = [];
     this.rims = [];
-    for (const sd of sides) {
+    sides.forEach((sd, i) => {
       const wg = new THREE.BoxGeometry(len, h, th);
       xform(wg, { x: sd.x, y: h / 2, z: sd.z, ry: sd.rot });
       wallParts.push(wg);
-      const rimMat = new THREE.MeshStandardMaterial({ color: '#0b1630', emissive: '#38f6ff', emissiveIntensity: 1.1, roughness: 0.3 });
+      const rimMat = this.rimMats[i];
       const rim = new THREE.Mesh(new THREE.BoxGeometry(len, 0.07, th + 0.05), rimMat);
       rim.position.set(sd.x, h + 0.035, sd.z);
       rim.rotation.y = sd.rot;
-      this.group.add(rim);
+      this.frame.add(rim);
       this.rims.push({ mesh: rim, mat: rimMat, danger: 0 });
       // chrome rail along the inner top edge
       const inward = new THREE.Vector3(-sd.x, 0, -sd.z).normalize().multiplyScalar(th / 2 + 0.06);
@@ -105,16 +165,15 @@ export class Island {
       rail.rotateZ(Math.PI / 2);
       xform(rail, { x: sd.x + inward.x, y: h + 0.12, z: sd.z + inward.z, ry: sd.rot });
       railParts.push(rail);
-    }
+    });
     const walls = new THREE.Mesh(mergeGeometries(wallParts), wallMat);
     walls.castShadow = true;
     walls.receiveShadow = true;
-    this.group.add(walls);
-    this.railMat = new THREE.MeshStandardMaterial({ color: '#f2f6ff', roughness: 0.12, metalness: 1 });
+    this.frame.add(walls);
     const rails = new THREE.Mesh(mergeGeometries(railParts), this.railMat);
-    this.group.add(rails);
+    this.frame.add(rails);
     const trims = new THREE.Mesh(mergeGeometries(trimParts), this.trimMat);
-    this.group.add(trims);
+    this.frame.add(trims);
 
     // golden corner posts with glowing caps
     const postParts = [];
@@ -130,9 +189,8 @@ export class Island {
     }
     const posts = new THREE.Mesh(mergeGeometries(postParts), this.trimMat);
     posts.castShadow = true;
-    this.group.add(posts);
-    this.capMat = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#ffd86b', emissiveIntensity: 2.2 });
-    this.group.add(new THREE.Mesh(mergeGeometries(capParts), this.capMat));
+    this.frame.add(posts);
+    this.frame.add(new THREE.Mesh(mergeGeometries(capParts), this.capMat));
   }
 
   buildIsland() {
@@ -141,7 +199,7 @@ export class Island {
 
     // grass top: rings from just outside the platform to the rim
     const rings = 7;
-    const inner = 11;
+    const inner = 8.6; // inside the smallest (17) board's platform
     const pos = [];
     const col = [];
     const idx = [];
@@ -204,10 +262,10 @@ export class Island {
     for (let i = 0; i < 520; i++) {
       const th = rng() * Math.PI * 2;
       const R = islandRadius(th);
-      const rad = 12.2 + rng() * (R - 12.6);
+      const rad = 10.4 + rng() * (R - 10.8);
       const x = Math.cos(th) * rad;
       const z = Math.sin(th) * rad;
-      if (Math.abs(x) < this.half + 1.5 && Math.abs(z) < this.half + 1.5) continue;
+      if (Math.abs(x) < 12 && Math.abs(z) < 12) continue; // clear of the biggest (21) platform
       const n = 3;
       for (let b = 0; b < n; b++) {
         const blade = new THREE.ConeGeometry(0.06, 0.35 + rng() * 0.35, 3, 1);

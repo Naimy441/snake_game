@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 import { GhostBot } from './game/GhostBot.js';
-import { SnakeGame, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, SKY_H, zoneForLevel } from './game/SnakeGame.js';
+import { SnakeGame, BOARD_SIZES, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, SKY_H, zoneForLevel } from './game/SnakeGame.js';
 import { SKINS, ACCESSORIES, skinById, accessoryById, isUnlocked, unlockProgress } from './skins.js';
 import { World } from './render/World.js';
 import { SnakeView } from './render/SnakeView.js';
@@ -18,7 +18,10 @@ import { Input } from './Input.js';
 import { loadSettings, saveSettings, loadBest, saveBest, loadStats, saveStats, QUALITY } from './settings.js';
 
 const $ = (id) => document.getElementById(id);
-const BOARD = 21;
+const BOARD = 21; // the biggest board (it starts at BOARD_SIZES[0] and grows)
+// Longest snake the renderer draws: apples grow it more on every map, and the
+// sky box holds far more cells than the board.
+const MAX_SNAKE = 1600;
 const CAMERA_NAMES = { overhead: 'Overhead', tp: 'Chase', fp: 'First-person' };
 const CAMERA_ORDER = ['overhead', 'tp', 'fp'];
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
@@ -54,14 +57,14 @@ class App {
     if (this.isTouch) document.body.classList.add('touch-device');
 
     this.post = new PostFX(r);
-    this.game = new SnakeGame({ size: BOARD, best: loadBest() });
-    this.world = new World({ size: BOARD, renderer: r });
+    this.game = new SnakeGame({ sizes: BOARD_SIZES, best: loadBest() });
+    this.world = new World({ size: BOARD_SIZES[0], renderer: r });
     this.scene = this.world.scene;
     // y: the cell's altitude layer in the sky (undefined on the ground)
     this.toWorld = (x, z, y) => this.world.toWorld(x, z, y, this.game.yMid, this.game.size);
 
     this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 1500);
-    this.rig = new CameraRig(this.camera, BOARD);
+    this.rig = new CameraRig(this.camera, BOARD_SIZES[0]);
 
     this.glowTex = makeGlowTexture();
     this.scaleMap = makeScaleNormalMap();
@@ -121,7 +124,7 @@ class App {
     });
 
     this.ghost = new GhostBot(this.game);
-    this.ghostView = new SnakeView({ maxCells: BOARD * BOARD, radial: 10, scaleMap: this.scaleMap });
+    this.ghostView = new SnakeView({ maxCells: MAX_SNAKE, radial: 10, scaleMap: this.scaleMap });
     this.ghostView.makeGhost();
     this.ghostView.group.visible = false;
     this.scene.add(this.ghostView.group);
@@ -186,7 +189,7 @@ class App {
     this.post.configure({ samples: q.samples, bloomLevels: q.bloomLevels, taps: q.taps });
     if (!this.snake || this.snake.radial !== q.radial) {
       const old = this.snake;
-      this.snake = new SnakeView({ maxCells: BOARD * BOARD, radial: q.radial, scaleMap: this.scaleMap, skin: this.equippedSkin(), accessory: this.equippedAccessory() });
+      this.snake = new SnakeView({ maxCells: MAX_SNAKE, radial: q.radial, scaleMap: this.scaleMap, skin: this.equippedSkin(), accessory: this.equippedAccessory() });
       if (old) {
         this.snake.headPos.copy(old.headPos);
         this.snake.headDir.copy(old.headDir);
@@ -386,6 +389,21 @@ class App {
     saveStats(st);
     const after = this.unlockStats();
     return [...SKINS, ...ACCESSORIES].filter((it) => it.unlock && !isUnlocked(it, before) && isUnlocked(it, after)).map((it) => it.name);
+  }
+
+  // A ring of sparks runs along the new walls as the board widens.
+  onBoardResized(size) {
+    if (this.state === 'menu' || this.settings.reduceMotion) return;
+    const h = size / 2 + 0.2;
+    const col = '#' + this.world.p.strip.getHexString();
+    for (let i = 0; i < 28; i++) {
+      const t = (i / 28) * 4;
+      const side = Math.floor(t);
+      const u = (t - side) * 2 - 1;
+      const x = side === 0 ? u * h : side === 1 ? h : side === 2 ? -u * h : -h;
+      const z = side === 0 ? -h : side === 1 ? u * h : side === 2 ? h : -u * h;
+      this.effects.emit(x, 0.6, z, { count: 3, color: col, speed: 1.4, up: 2.4, size: 0.2, life: 0.7 });
+    }
   }
 
   resize() {
@@ -1413,6 +1431,10 @@ class App {
     this.effects.update(gdt);
     const rs = this.post.renderSize;
     const pxScale = rs.y / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
+    // the arena grows with the zones; under the sky box it stays the full board
+    const ground = g.flying ? g.boardSize : g.size;
+    if (this.world.setBoardSize(ground, { instant: rm })) this.onBoardResized(ground);
+    this.rig.setBoardSize(ground, rm);
     this.world.update(dt, { level: this.state === 'menu' ? 0 : g.level, reduceMotion: rm, pxScale });
     this.world.updateWalls(g, dt, this.state === 'playing');
     const food = g.food ? this.toWorld(g.food.x, g.food.z, g.food.y) : null;

@@ -14,7 +14,9 @@ export class SnakePath {
 
   setFromCells(cells, removedTail, toWorld) {
     let n = 0;
+    const max = this.v.length / 3;
     const push = (c) => {
+      if (n >= max) return; // longer than the renderer draws: the tail end is left off
       const w = toWorld(c.x, c.z, c.y);
       this.v[n * 3] = w.x;
       this.v[n * 3 + 1] = w.y || 0;

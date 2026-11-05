@@ -43,6 +43,22 @@ export class CameraRig {
     this.fitOverhead(camera.aspect);
   }
 
+  // The board grows between zones: ease the overhead framing out to fit.
+  setBoardSize(size, instant = false) {
+    this.sizeTarget = size;
+    if (instant) {
+      this.size = size;
+      this.fitOverhead(this.camera.aspect);
+    }
+  }
+
+  easeBoardSize(dt) {
+    if (this.sizeTarget == null || this.size === this.sizeTarget) return;
+    const d = this.sizeTarget - this.size;
+    this.size = Math.abs(d) < 0.01 ? this.sizeTarget : this.size + d * Math.min(1, dt * 4);
+    this.fitOverhead(this.camera.aspect);
+  }
+
   setMode(mode, { instant = false, reduceMotion = false } = {}) {
     if (mode !== this.mode && (mode === 'orbit' || mode === 'showcase')) this.cine = null;
     if (mode === this.mode && !instant) return;
@@ -268,6 +284,7 @@ export class CameraRig {
   // aim: horizontal heading to face; pitch: +1 climbing, -1 diving, 0 level.
   // box: { floorY, ceilY } of the sky's flight box (chase cameras stay inside it)
   update(dt, snake, { speedFx = 0, reduceMotion = false, aim = null, flying = false, pitch = 0, box = null } = {}) {
+    this.easeBoardSize(dt);
     this.aim = aim;
     this.box = box;
     if (flying !== this.flying) {
