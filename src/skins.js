@@ -242,6 +242,31 @@ export const SKINS = [
     head: { top: '#cfe0ff', side: '#e8f4ff', belly: '#ffffff', accent: '#9ab8e8', eye: '#2a2a5a' },
     aura: '#cfe6ff', trail: '#ffffff',
   },
+  {
+    id: 'block', name: 'Blue Block', desc: 'Solid blue blocks, a full square wide and two thirds tall.',
+    swatch: '#2a6aff',
+    // shape 'block': one cube per cell and a cube head; blockH is the height
+    // in cells (a full square base, 2/3 of a square tall)
+    shape: 'block', blockH: 2 / 3,
+    color(d, t, c) {
+      return c.set('#2a6aff');
+    },
+    mat: { roughness: 0.55, metalness: 0, normal: 0, env: 0.8 },
+    head: { top: '#2a6aff', side: '#2a6aff', belly: '#2a6aff', accent: '#2a6aff', eye: '#ffffff', eyeGlow: 0.3 },
+    aura: '#5a9aff', trail: '#8ab8ff',
+  },
+  {
+    id: 'cursed', name: 'Cursed Tower', desc: 'Three blocks tall. Leans over and stares down at the world. Nobody asked for this.',
+    swatch: 'linear-gradient(180deg, #8a6ad8 0 33%, #5a3a9a 33% 34%, #7a5ac8 34% 66%, #5a3a9a 66% 67%, #6a4ab8 67%)',
+    // a block snake stacked blockH blocks high, its face tilted down by tilt radians
+    shape: 'block', blockH: 3, tilt: 0.6,
+    color(d, t, c) {
+      return c.set('#7a5ac8');
+    },
+    mat: { roughness: 0.6, metalness: 0, normal: 0, env: 0.7 },
+    head: { top: '#8a6ad8', side: '#8a6ad8', belly: '#8a6ad8', accent: '#8a6ad8', eye: '#ff2a3a', eyeGlow: 2.6, eyeScale: 1.7 },
+    aura: '#b08aff', trail: '#ff4a6a',
+  },
   // ------------------------------------------------------------ silly skins
   {
     id: 'hotdog', name: 'Hot Dog', desc: 'A grilled sausage in a toasty bun, mustard on top.',

@@ -4,6 +4,7 @@ import { skinById } from '../skins.js';
 import { buildAccessory, disposeAccessory } from './accessories.js';
 
 const STEP = 0.2; // ring spacing along the body, in cells
+const BLOCK_R = 0.5; // half width of a block skin's body: a block fills its whole cell
 // How far ahead of the old lag the drawn head runs, in cells. The game logic
 // is always up to a cell ahead of what is drawn; trimming the lag makes turns
 // show sooner, while staying small enough that a turn never visibly snaps.
@@ -138,6 +139,30 @@ function withSkin(mat, uniforms, skinMap = null) {
   return mat;
 }
 
+// Ring layout for a square body: R + 1 vertices around a square with flat
+// faces and hard edges. Each face gets its own run of vertices (from corner to
+// corner), so every corner appears twice with the two faces' normals. Per
+// vertex: [side, up, normal side, normal up], in -1..1 units of the half width.
+// Faces go round the same way as the round tube (side -> up -> -side -> -up).
+function squareRing(R) {
+  const corners = [[1, -1], [1, 1], [-1, 1], [-1, -1], [1, -1]];
+  const normals = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+  const out = new Float32Array((R + 1) * 4);
+  // split the R + 1 vertices into 4 runs of at least 2
+  const n = R + 1;
+  const runs = [0, 1, 2, 3].map((f) => Math.floor((n * (f + 1)) / 4) - Math.floor((n * f) / 4));
+  let j = 0;
+  runs.forEach((len, f) => {
+    const [ax, ay] = corners[f];
+    const [bx, by] = corners[f + 1];
+    for (let q = 0; q < len; q++, j++) {
+      const t = len > 1 ? q / (len - 1) : 0;
+      out.set([ax + (bx - ax) * t, ay + (by - ay) * t, normals[f][0], normals[f][1]], j * 4);
+    }
+  });
+  return out;
+}
+
 export class SnakeView {
   constructor({ maxCells, radial = 14, scaleMap, skin = 'viper', accessory = 'none' }) {
     this.group = new THREE.Group();
@@ -158,6 +183,7 @@ export class SnakeView {
     this.wiggle = 1;
 
     const R = radial;
+    this.blockRing = squareRing(R);
     const vCount = this.maxRings * (R + 1);
     const geo = new THREE.BufferGeometry();
     this.positions = new Float32Array(vCount * 3);
@@ -229,6 +255,21 @@ export class SnakeView {
     this.body.frustumCulled = false;
     this.group.add(this.body);
 
+    // Block skins: one cube per grid cell, so the body fills every square it
+    // is on, corners included. The head cube slides into the next cell and
+    // the tail cube slides out of the one it is leaving.
+    this.blockMat = new THREE.MeshStandardMaterial({ color: '#2a6aff', roughness: 0.55, metalness: 0 });
+    this.blocks = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), this.blockMat, maxCells + 2);
+    this.blocks.castShadow = true;
+    this.blocks.receiveShadow = true;
+    this.blocks.frustumCulled = false;
+    this.blocks.visible = false;
+    this.blocks.count = 0;
+    this.group.add(this.blocks);
+    this.tmpA = new THREE.Vector3();
+    this.tmpB = new THREE.Vector3();
+    this.tmpBM = new THREE.Matrix4();
+
     // Boost aura: the same tube drawn again, pushed out along its normals,
     // as an additive fresnel glow. Shares the geometry and its draw range.
     this.auraUniforms = { uPush: { value: 0.07 }, uColor: { value: new THREE.Color('#38c8ff') }, uAmount: { value: 0 }, uTime: { value: 0 } };
@@ -295,6 +336,51 @@ export class SnakeView {
     }
     hc.needsUpdate = true;
     hg.needsUpdate = true;
+    // Block skins swap the round head for a cube with the eyes on its front.
+    // blockH stacks the body that many blocks high; the face cube sits on top
+    // and tilts forward by `tilt` radians, peering down at the board.
+    const block = skin.shape === 'block';
+    this.block = block;
+    this.blockH = block ? skin.blockH || 1 : 1;
+    this.skull.visible = !block;
+    this.blockHead.visible = block;
+    const bc = this.blockHeadGeo.attributes.color;
+    col.set(h.top);
+    for (let i = 0; i < bc.count; i++) bc.setXYZ(i, col.r, col.g, col.b);
+    bc.needsUpdate = true;
+    this.blockHeadGeo.attributes.aGlow.array.fill(headGlow);
+    this.blockHeadGeo.attributes.aGlow.needsUpdate = true;
+    // head-local y of the ground (the head rides 0.25 above the path)
+    const ground = -0.25;
+    // each block is a full cell (1 x 1 x 1); the head is a hair bigger so it
+    // never z-fights with the body cube it is sliding out of
+    // blockH under 1 makes a flat block (a full square base, less tall)
+    const faceH = Math.min(1, this.blockH);
+    const baseH = this.blockH - faceH;
+    this.faceH = faceH;
+    this.faceCube.scale.set(1.02, faceH + 0.02, 1.02);
+    this.blockBase.visible = baseH > 0.01;
+    this.blockBase.scale.set(1.02, Math.max(0.01, baseH), 1.02);
+    this.blockBase.position.y = ground + baseH / 2;
+    this.face.position.set(0, ground + baseH + faceH / 2, 0);
+    this.body.visible = !block;
+    this.blocks.visible = block;
+    if (block) {
+      this.blockMat.color.copy(skin.color(0, Math.PI / 2, col));
+      this.blockMat.roughness = m.roughness ?? 0.55;
+      this.blockMat.metalness = m.metalness ?? 0;
+    }
+    this.face.rotation.x = block ? skin.tilt || 0 : 0;
+    const host = block ? this.face : this.head;
+    for (const o of [...this.eyes, this.tongue, this.accHolder]) host.add(o);
+    this.eyes.forEach((e, i) => (block ? e.position.set((i ? 1 : -1) * 0.25, faceH * 0.2, 0.5) : e.position.set((i ? 1 : -1) * 0.22, 0.11, 0.12)));
+    this.eyes.forEach((e) => e.scale.setScalar(h.eyeScale || 1));
+    this.nostrils.forEach((n) => (n.visible = !block));
+    if (block) this.tongue.position.set(0, -faceH * 0.25, 0.5);
+    else this.tongue.position.set(0, -0.02, 0.38);
+    this.accHolder.position.y = block ? faceH / 2 - 0.28 : 0;
+    // where the dizzy stars circle (head-local y above the top)
+    this.headTop = block ? ground + baseH + faceH + 0.25 : 0.45;
     this.eyeMat.color.set(h.eye);
     this.eyeMat.emissive.set(h.eye);
     this.eyeMat.emissiveIntensity = h.eyeGlow ?? 0.9;
@@ -442,16 +528,84 @@ export class SnakeView {
 
   setAccessory(id) {
     if (this.accessory) {
-      this.head.remove(this.accessory);
+      this.accHolder.remove(this.accessory);
       disposeAccessory(this.accessory);
       this.accessory = null;
     }
     const a = buildAccessory(id);
     if (a) {
       this.accessory = a;
-      this.head.add(a);
+      this.accHolder.add(a);
     }
     this.accessoryId = id;
+  }
+
+  cellWorld(c, toWorld, out) {
+    const w = toWorld(c.x, c.z, c.y);
+    return out.set(w.x, w.y || 0, w.z);
+  }
+
+  // One cube per body cell (the head cube is part of the head). The tail
+  // cube slides from the cell it just left onto the last body cell.
+  updateBlocks(game, t, toWorld) {
+    const cells = game.cells;
+    const m = this.tmpBM;
+    const H = this.blockH;
+    const max = this.blocks.instanceMatrix.count;
+    let k = 0;
+    const put = (p, s, h) => {
+      m.makeScale(s, h, s).setPosition(p.x, p.y + 0.002, p.z);
+      this.blocks.setMatrixAt(k++, m);
+    };
+    for (let i = 1; i < cells.length && k < max - 1; i++) put(this.cellWorld(cells[i], toWorld, this.tmpA), 1, H);
+    if (game.removedTail && cells.length > 1) {
+      const a = this.cellWorld(game.removedTail, toWorld, this.tmpA);
+      const b = this.cellWorld(cells[cells.length - 1], toWorld, this.tmpB);
+      // a touch smaller, so its faces never fight with the cube it slides onto
+      put(a.lerp(b, t), 0.99, H * 0.99);
+    }
+    this.blocks.count = k;
+    this.blocks.instanceMatrix.needsUpdate = true;
+  }
+
+  // Cartoon "seeing stars" after a crash: three little stars circling above
+  // the head.
+  buildDizzy() {
+    const shape = new THREE.Shape();
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 + Math.PI / 2;
+      const r = i % 2 ? 0.065 : 0.16;
+      if (i) shape.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      else shape.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.03, bevelEnabled: false }).center();
+    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffe14a').multiplyScalar(1.6), transparent: true });
+    this.dizzy = new THREE.Group();
+    this.dizzyStars = [0, 1, 2].map(() => {
+      const m = new THREE.Mesh(geo, mat);
+      this.dizzy.add(m);
+      return m;
+    });
+    this.dizzyMat = mat;
+    this.dizzy.visible = false;
+    this.group.add(this.dizzy);
+  }
+
+  updateDizzy(t) {
+    const on = t >= 0 && !this.isGhost;
+    this.dizzy.visible = on;
+    if (!on) return;
+    const grow = Math.min(1, t / 0.25);
+    this.dizzy.position.copy(this.head.position).addScaledVector(this.headUp, this.headTop * grow);
+    this.dizzy.quaternion.copy(this.head.quaternion);
+    this.dizzyStars.forEach((m, i) => {
+      const a = t * 5 + (i / 3) * Math.PI * 2;
+      m.position.set(Math.cos(a) * 0.42, Math.sin(a * 2) * 0.05, Math.sin(a) * 0.42);
+      // tilted up so they read from overhead as well as from the side
+      m.rotation.set(-1.0, 0, t * 6);
+      m.scale.setScalar(grow);
+    });
+    this.dizzyMat.opacity = grow;
   }
 
   buildHead(scaleMap) {
@@ -492,6 +646,30 @@ export class SnakeView {
     const skull = new THREE.Mesh(g, this.headMat);
     skull.castShadow = true;
     head.add(skull);
+    this.skull = skull;
+
+    // Cube head for block skins: a face cube (eyes on its front), and for
+    // tall skins a base box under it. Both share a unit box, scaled.
+    const bg = new THREE.BoxGeometry(1, 1, 1);
+    bg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(bg.attributes.position.count * 3), 3));
+    bg.setAttribute('aGlow', new THREE.BufferAttribute(new Float32Array(bg.attributes.position.count), 1));
+    this.blockHeadGeo = bg;
+    this.blockHead = new THREE.Group();
+    this.blockHead.visible = false;
+    head.add(this.blockHead);
+    this.blockBase = new THREE.Mesh(bg, this.headMat);
+    this.blockBase.castShadow = true;
+    this.blockHead.add(this.blockBase);
+    this.face = new THREE.Group(); // pivots at the face cube's centre
+    this.blockHead.add(this.face);
+    const faceCube = new THREE.Mesh(bg, this.headMat);
+    faceCube.scale.set(1.02, 1.02, 1.02);
+    this.faceCube = faceCube;
+    faceCube.castShadow = true;
+    this.face.add(faceCube);
+    this.accHolder = new THREE.Group();
+    head.add(this.accHolder);
+    this.buildDizzy();
     const headAura = new THREE.Mesh(new THREE.SphereGeometry(0.62, 24, 16), this.auraMat);
     headAura.scale.set(0.95, 0.62, 1.15);
     this.headAura = headAura;
@@ -508,8 +686,11 @@ export class SnakeView {
     const pupilMat = new THREE.MeshBasicMaterial({ color: '#05060a' });
     const eyeGeo = new THREE.SphereGeometry(0.085, 20, 14);
     const pupilGeo = new THREE.BoxGeometry(0.02, 0.11, 0.05);
+    this.eyes = [];
+    this.nostrils = [];
     for (const s of [-1, 1]) {
       const eye = new THREE.Mesh(eyeGeo, eyeMat);
+      this.eyes.push(eye);
       eye.position.set(s * 0.22, 0.11, 0.12);
       const pupil = new THREE.Mesh(pupilGeo, pupilMat);
       pupil.position.set(s * 0.065, 0, 0.03);
@@ -518,6 +699,7 @@ export class SnakeView {
       const nostril = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), pupilMat);
       nostril.position.set(s * 0.06, 0.07, 0.43);
       head.add(nostril);
+      this.nostrils.push(nostril);
     }
 
     const tongueMat = new THREE.MeshStandardMaterial({ color: '#e0245e', roughness: 0.4 });
@@ -552,7 +734,9 @@ export class SnakeView {
   // up comes from its heading (its back faces away from where it was flying
   // when it pitched up) and is carried down the body by parallel transport,
   // which bends the frame smoothly through every corner without twisting.
-  update(game, t, time, toWorld, { lunge = 0, rushGlow = 0, deathFlash = 0, dt = 1 / 60 } = {}) {
+  // squash: 0..1 head squash from a crash. dizzy: seconds since the crash
+  // (stars circle the head while it is >= 0).
+  update(game, t, time, toWorld, { lunge = 0, rushGlow = 0, deathFlash = 0, dt = 1 / 60, squash = 0, dizzy = -1 } = {}) {
     const path = this.path;
     path.setFromCells(game.cells, game.removedTail, toWorld);
     const L = path.length;
@@ -564,6 +748,7 @@ export class SnakeView {
 
     const s = this.sample;
     const R = this.radial;
+    const block = this.block && !this.isGhost;
     const P = this.positions;
     const N = this.normals;
     let rings = Math.min(this.maxRings - 1, Math.floor(total / STEP) + 1);
@@ -598,18 +783,44 @@ export class SnakeView {
       side.crossVectors(tan, up).normalize();
       // radius profile: slim neck, full body, long taper to the tail tip
       let r = 0.34;
-      if (d < 0.5) r = 0.27 + 0.07 * (d / 0.5);
-      const u = (total - d) / tailTaper;
-      if (u < 1) r *= 0.1 + 0.9 * Math.sqrt(Math.max(0, u));
-      // gentle world-fixed slither wave, faded in behind the head
-      const amp = this.wiggle * 0.07 * Math.min(1, d / 1.4) * Math.min(1, (total - d) / 1.5 + 0.3);
-      const off = amp * Math.sin((this.travel - d) * 2.6);
-      const rh = r * 0.82;
-      const lift = rh * 0.92;
+      let rh, lift, off;
+      if (block) {
+        // a straight square bar, just closed off at the very tip
+        r = BLOCK_R * Math.min(1, 0.2 + (total - d) / 0.12);
+        rh = r * this.blockH;
+        lift = BLOCK_R * this.blockH;
+        off = 0;
+      } else {
+        if (d < 0.5) r = 0.27 + 0.07 * (d / 0.5);
+        const u = (total - d) / tailTaper;
+        if (u < 1) r *= 0.1 + 0.9 * Math.sqrt(Math.max(0, u));
+        // gentle world-fixed slither wave, faded in behind the head
+        const amp = this.wiggle * 0.07 * Math.min(1, d / 1.4) * Math.min(1, (total - d) / 1.5 + 0.3);
+        off = amp * Math.sin((this.travel - d) * 2.6);
+        rh = r * 0.82;
+        lift = rh * 0.92;
+      }
       const cx = s[0] + side.x * off + up.x * lift;
       const cy = s[1] + side.y * off + up.y * lift;
       const cz = s[2] + side.z * off + up.z * lift;
-      for (let j = 0; j <= R; j++) {
+      if (block) {
+        // four flat faces with hard edges: each face has its own vertices
+        // (corners are doubled), filled in from the precomputed layout
+        const B = this.blockRing;
+        for (let j = 0; j <= R; j++) {
+          const k = (i * (R + 1) + j) * 3;
+          const a = B[j * 4];
+          const b = B[j * 4 + 1];
+          const nx = B[j * 4 + 2];
+          const ny = B[j * 4 + 3];
+          P[k] = cx + side.x * a * r + up.x * b * rh;
+          P[k + 1] = cy + side.y * a * r + up.y * b * rh;
+          P[k + 2] = cz + side.z * a * r + up.z * b * rh;
+          N[k] = side.x * nx + up.x * ny;
+          N[k + 1] = side.y * nx + up.y * ny;
+          N[k + 2] = side.z * nx + up.z * ny;
+        }
+      } else for (let j = 0; j <= R; j++) {
         const theta = (j / R) * Math.PI * 2;
         const c = Math.cos(theta);
         const sn = Math.sin(theta);
@@ -646,10 +857,33 @@ export class SnakeView {
     // head sits slightly ahead of the first ring
     const hd = this.headDir;
     const hu = this.headUp;
-    this.head.position.copy(this.headPos).addScaledVector(hd, 0.1).addScaledVector(hu, 0.25);
-    side.crossVectors(hu, hd).normalize();
-    this.tmpM.makeBasis(side, hu, hd);
+    if (block && !this.isGhost) {
+      // the head cube sits exactly on the cell it is moving into (no corner
+      // rounding), and the body is drawn cell by cell
+      const a = this.cellWorld(game.cells[Math.min(1, n - 1)], toWorld, this.tmpA);
+      const b = this.cellWorld(game.cells[0], toWorld, this.tmpB);
+      this.head.position.lerpVectors(a, b, n > 1 ? t + lunge : 1).addScaledVector(hu, 0.25);
+      // face square along the grid, so the cube never turns diagonally
+      const f = b.sub(a);
+      if (f.lengthSq() > 1e-6) {
+        f.normalize();
+        side.crossVectors(hu, f);
+        if (side.lengthSq() > 1e-6) {
+          side.normalize();
+          this.tmpUp.crossVectors(f, side);
+          this.tmpM.makeBasis(side, this.tmpUp, f);
+        } else this.tmpM.makeBasis(side.crossVectors(hu, hd).normalize(), hu, hd);
+      } else this.tmpM.makeBasis(side.crossVectors(hu, hd).normalize(), hu, hd);
+      this.updateBlocks(game, t, toWorld);
+    } else {
+      this.head.position.copy(this.headPos).addScaledVector(hd, 0.1).addScaledVector(hu, 0.25);
+      side.crossVectors(hu, hd).normalize();
+      this.tmpM.makeBasis(side, hu, hd);
+    }
     this.head.quaternion.setFromRotationMatrix(this.tmpM);
+    // a crash flattens the head against what it hit, then it springs back
+    this.head.scale.set(1 + squash * 0.22, 1 - squash * 0.12, 1 - squash * 0.32);
+    this.updateDizzy(dizzy);
     if (this.jetpack) this.updateJetpack(game, time, dt, rushGlow);
 
     // tongue flicks every couple of seconds
@@ -661,6 +895,8 @@ export class SnakeView {
     this.bodyMat.emissive.set(deathFlash > 0 ? '#ff2a2a' : '#00ffd0');
     this.headMat.emissive.copy(this.bodyMat.emissive);
     this.bodyMat.emissiveIntensity = Math.max(pulse * 0.25, deathFlash * 0.8);
+    this.blockMat.emissive.copy(this.bodyMat.emissive);
+    this.blockMat.emissiveIntensity = this.bodyMat.emissiveIntensity;
     this.headMat.emissiveIntensity = this.bodyMat.emissiveIntensity;
     this.rimUniforms.uTime.value = time;
     if (this.isGhost) {
@@ -691,6 +927,11 @@ export class SnakeView {
     this.headMat.dispose();
     this.skinTex.dispose();
     this.auraMat.dispose();
+    this.blockHeadGeo.dispose();
+    this.blocks.geometry.dispose();
+    this.blockMat.dispose();
+    this.dizzyStars[0].geometry.dispose();
+    this.dizzyMat.dispose();
     if (this.jetMats) this.jetMats.forEach((m) => m.dispose());
   }
 }
