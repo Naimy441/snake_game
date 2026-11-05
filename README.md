@@ -201,11 +201,17 @@ Turning it on mid-run starts it from your snake's current position.
 Open the **Garage** from the main menu (or after a run) to customise your
 snake. The camera swings in close for a live preview.
 
-- **17 skins:** Viper, Coral, Python, Emerald Boa, Tiger, Candy Cane, Glacier,
+- **25 skins:** Viper, Coral, Python, Emerald Boa, Tiger, Candy Cane, Glacier,
   plus unlockables: Neon Runner and Circuit (glowing light lines), Magma
   (molten cracks that pulse), Golden King, Chrome (mirror metal), Galaxy
   (twinkling stars), Prism (an animated rainbow), Dragon, Phoenix (sunset
   feathers, from reaching Sunset Heavens) and Phantom.
+- **8 silly skins:** Hot Dog (a grilled sausage in a bun with mustard),
+  Gummy Worm, Tape Measure, Toothpaste and Pickle are free; Watermelon
+  (30 apples), Crispy Bacon (catch a golden mouse) and Disco Ball (play 5
+  runs) unlock through play.
+- Skin patterns are baked into a high-resolution texture, so fine details
+  like bands, diamonds, ticks and circuit traces stay crisp up close.
 - **9 accessories:** shades, top hat, party hat, horns, bow, flower, plus an
   unlockable crown and halo.
 - Locked items show what unlocks them, with your progress (for example
