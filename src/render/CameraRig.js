@@ -6,6 +6,49 @@ const smoothstep = (a, b, x) => {
   return t * t * (3 - 2 * t);
 };
 
+// Title screen: one unbroken drone shot that tours the world. Every map gets
+// the same beats (a high reveal while the new map sweeps in, a low glide
+// across the arena, a slow pan out over the scenery to the horizon, a climb
+// back out), while the angle around the island keeps advancing, so each map
+// is seen from a new side and the shot never cuts.
+//   u: fraction of the segment   r, y: camera radius and height
+//   w: angular speed (rad/s)     tr, ta, ty: look-at radius, angle (relative
+//   to the camera's own angle) and height   fov: field of view
+//   fs: how much the look-at leans toward the snake (it plays itself here)
+export const TOUR_SEGMENT = 15; // seconds per map
+// The low beats stay inside the ring of palms and props (radius ~12), and the
+// wider ones stay above their tops, so nothing ever brushes the lens.
+const TOUR_KEYS = [
+  { u: 0.0, r: 38, y: 22, w: 0.1, tr: 0, ta: 0, ty: -2, fov: 46, fs: 0 },
+  { u: 0.17, r: 17, y: 14, w: 0.12, tr: 0, ta: 0, ty: -1, fov: 50, fs: 0.35 },
+  { u: 0.34, r: 9.5, y: 3.2, w: 0.17, tr: 2, ta: 0, ty: 1.3, fov: 56, fs: 0.75 },
+  { u: 0.49, r: 10, y: 6.5, w: 0.13, tr: 26, ta: 1.0, ty: 4, fov: 52, fs: 0 },
+  { u: 0.67, r: 14, y: 11.5, w: 0.07, tr: 95, ta: 1.2, ty: 11, fov: 40, fs: 0 },
+  { u: 0.85, r: 30, y: 17, w: 0.07, tr: 8, ta: 0.3, ty: -1, fov: 44, fs: 0 },
+];
+const TOUR_FIELDS = ['r', 'y', 'w', 'tr', 'ta', 'ty', 'fov', 'fs'];
+
+// Catmull-Rom through the (cyclic) key table at segment fraction u.
+function tourKey(u, out) {
+  const K = TOUR_KEYS;
+  const n = K.length;
+  let i = n - 1;
+  while (i > 0 && K[i].u > u) i--;
+  const k1 = K[i];
+  const k2 = K[(i + 1) % n];
+  const u2 = i + 1 < n ? k2.u : 1;
+  const s = (u - k1.u) / (u2 - k1.u);
+  const k0 = K[(i - 1 + n) % n];
+  const k3 = K[(i + 2) % n];
+  const s2 = s * s;
+  const s3 = s2 * s;
+  for (const f of TOUR_FIELDS) {
+    const p0 = k0[f], p1 = k1[f], p2 = k2[f], p3 = k3[f];
+    out[f] = 0.5 * (2 * p1 + (-p0 + p2) * s + (2 * p0 - 5 * p1 + 4 * p2 - p3) * s2 + (-p0 + 3 * p1 - 3 * p2 + p3) * s3);
+  }
+  return out;
+}
+
 function wrapAngle(a) {
   while (a > Math.PI) a -= Math.PI * 2;
   while (a < -Math.PI) a += Math.PI * 2;
@@ -37,6 +80,8 @@ export class CameraRig {
     this.shake = 0;
     this.kick = 0;
     this.orbitAngle = 0.6;
+    this.tourT = 0;
+    this.tourAngle = 0.5;
     this.tmpObj = new THREE.PerspectiveCamera(); // camera-style lookAt (-z forward)
     this.tmpV = new THREE.Vector3();
     this.tmpCam = camera.clone();
@@ -60,14 +105,14 @@ export class CameraRig {
   }
 
   setMode(mode, { instant = false, reduceMotion = false } = {}) {
-    if (mode !== this.mode && (mode === 'orbit' || mode === 'showcase')) this.cine = null;
+    if (mode !== this.mode && (mode === 'orbit' || mode === 'showcase' || mode === 'tour')) this.cine = null;
     if (mode === this.mode && !instant) return;
     this.from.pos.copy(this.camera.position);
     this.from.quat.copy(this.camera.quaternion);
     this.from.fov = this.camera.fov;
     this.mode = mode;
     this.blend = instant ? 1 : 0;
-    this.blendDur = reduceMotion ? 0.3 : 0.75;
+    this.blendDur = reduceMotion ? 0.3 : mode === 'tour' ? 2.2 : 0.75;
     if (mode === 'fp') this.fpYaw = null;
     if (mode === 'tp') this.tpYaw = null;
   }
@@ -182,6 +227,47 @@ export class CameraRig {
     out.fov = portrait ? 55 : 42;
   }
 
+  // The title-screen tour (see TOUR_KEYS). sky: 0..1, how far the world has
+  // lifted into Sunset Heavens, where the flight box is wider than the board.
+  computeTour(dt, reduceMotion, sky, snake, out) {
+    const speed = reduceMotion ? 0.45 : 1;
+    this.tourT += dt * speed;
+    const k = tourKey((this.tourT / TOUR_SEGMENT) % 1, this.tourK || (this.tourK = {}));
+    this.tourAngle += k.w * dt * speed;
+    const a = this.tourAngle;
+    const grow = 1 + 0.45 * sky;
+    const r = k.r * grow;
+    const t = this.tourT;
+    // a drone's slow, breathing drift (never in reduce motion)
+    const d = reduceMotion ? 0 : 1;
+    out.pos.set(Math.sin(a) * r + Math.sin(t * 0.53) * 0.25 * d, k.y + (k.y < 6 ? sky * 2 : 0) + Math.sin(t * 0.71 + 1) * 0.18 * d, Math.cos(a) * r + Math.cos(t * 0.47) * 0.25 * d);
+    const ta = a + k.ta;
+    const tr = k.tr < 40 ? k.tr * grow : k.tr;
+    this.tmpObj.position.copy(out.pos);
+    this.tmpObj.up.set(0, 1, 0);
+    // lean toward the (smoothed) snake head so the demo play stays in shot
+    const hp = snake.headPos;
+    const f = this.tourFocus || (this.tourFocus = hp.clone());
+    f.lerp(hp, Math.min(1, dt * 1.5));
+    const fs = Math.max(0, Math.min(1, k.fs));
+    const lx = Math.sin(ta) * tr;
+    const lz = Math.cos(ta) * tr;
+    this.tmpObj.lookAt(lx + (f.x - lx) * fs, k.ty + (f.y + 0.4 - k.ty) * fs, lz + (f.z - lz) * fs);
+    this.tmpObj.rotateZ(Math.sin(t * 0.31) * 0.012 * d);
+    out.quat.copy(this.tmpObj.quaternion);
+    out.fov = k.fov;
+  }
+
+  // Index of the map segment the tour is in (counts up forever).
+  get tourSegment() {
+    return Math.floor(this.tourT / TOUR_SEGMENT);
+  }
+
+  // Fraction of the way through the current map's segment.
+  get tourProgress() {
+    return (this.tourT / TOUR_SEGMENT) % 1;
+  }
+
   computeOrbit(dt, reduceMotion, out) {
     this.orbitAngle += dt * (reduceMotion ? 0.03 : 0.08);
     const r = 26;
@@ -283,7 +369,7 @@ export class CameraRig {
 
   // aim: horizontal heading to face; pitch: +1 climbing, -1 diving, 0 level.
   // box: { floorY, ceilY } of the sky's flight box (chase cameras stay inside it)
-  update(dt, snake, { speedFx = 0, reduceMotion = false, aim = null, flying = false, pitch = 0, box = null } = {}) {
+  update(dt, snake, { speedFx = 0, reduceMotion = false, aim = null, flying = false, pitch = 0, box = null, sky = 0 } = {}) {
     this.easeBoardSize(dt);
     this.aim = aim;
     this.box = box;
@@ -301,7 +387,8 @@ export class CameraRig {
     }
     this.pitch += ((flying ? pitch : 0) - this.pitch) * Math.min(1, dt * 5);
     const target = this.pose;
-    if (this.mode === 'orbit') this.computeOrbit(dt, reduceMotion, target);
+    if (this.mode === 'tour') this.computeTour(dt, reduceMotion, sky, snake, target);
+    else if (this.mode === 'orbit') this.computeOrbit(dt, reduceMotion, target);
     else if (this.mode === 'showcase') this.computeShowcase(dt, snake, reduceMotion, target);
     else if (this.mode === 'fp') this.computeFP(dt, snake, speedFx, reduceMotion, target);
     else if (this.mode === 'tp') this.computeTP(dt, snake, speedFx, reduceMotion, target);
@@ -322,7 +409,7 @@ export class CameraRig {
     cam.quaternion.copy(this.from.quat).slerp(target.quat, b);
     // Lift the camera through the middle of an overhead<->FP transition so it
     // sweeps over the board instead of cutting through the walls.
-    if (b < 1 && this.mode !== 'orbit' && this.mode !== 'showcase') cam.position.y += Math.sin(b * Math.PI) * 2.5;
+    if (b < 1 && this.mode !== 'orbit' && this.mode !== 'showcase' && this.mode !== 'tour') cam.position.y += Math.sin(b * Math.PI) * 2.5;
 
     this.kick *= Math.exp(-dt * 6);
     cam.fov = this.from.fov + (target.fov - this.from.fov) * b + (reduceMotion ? 0 : this.kick);

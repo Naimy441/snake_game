@@ -78,6 +78,12 @@ check(ls.shown && Number(ls.z) >= 10 && !ls.overlap, `menu toast shows above the
 await page.keyboard.press('KeyM');
 await shot('01c-menu-toast');
 
+// --- chase is the default camera; picking overhead earns a playful note
+check(await page.evaluate(() => window.__coil.cameraMode === 'tp' && document.getElementById('cam-roast').classList.contains('hidden')), 'chase is the default camera, no note');
+await page.click('.cam-select [data-cam="overhead"]');
+const roast = await page.evaluate(() => ({ shown: !document.getElementById('cam-roast').classList.contains('hidden'), text: document.getElementById('cam-roast').textContent }));
+check(roast.shown && roast.text.length > 10, `choosing overhead shows a playful note (${roast.text})`);
+
 // --- overhead gameplay; mashing keys during the countdown keeps at most one (the latest) turn
 await page.keyboard.press('Enter');
 await page.waitForFunction(() => window.__coil.state === 'countdown');
