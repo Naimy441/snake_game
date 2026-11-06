@@ -127,7 +127,7 @@ test('best score tracks the highest score', () => {
 
 // ---------------------------------------------------------------- new mechanics
 import {
-  SPACE_START, SPACE_ZONE, CORE_SIZE, COLLAPSE_PER_APPLE, DOOM_MS,
+  SPACE_START, SPACE_ZONE, CORE_SIZE, COLLAPSE_PER_APPLE, DOOM_MS, CORE_CALM_LEN, CORE_CALM, CORE_CALM_MOVES,
   LEVEL_AT, zoneForLevel, MAX_LEVEL, ZONE_STARTS, SKY_ZONE, SKY_H, SKY_LIFT, SKY_CENTER, SKY_PAD, SKY_SIZE, SKY_CLIMB, OBSTACLE_WARN_MS, BOOST_TICKS, CHAIN_BONUS_PER_LINK, PREY_LIFETIME_MS, MAX_OBSTACLES,
 } from '../src/game/SnakeGame.js';
 
@@ -1044,19 +1044,65 @@ test('dead-end nubs are eaten for free, and the head and its tail are spared', (
   assert.ok(g.tailInReach(g.doomed), 'the tail is still in reach');
 });
 
-test('the board never splits in two, and it speeds up as it fills', () => {
+test('the board never splits in two; it speeds up as it fills, then calms down at length 35', () => {
   for (let s = 1; s <= 6; s++) {
     const g = coreGame(mulberry(s));
     let prev = Infinity;
     let faster = true;
-    autoplay(g, (g) => {
+    let calms = 0;
+    autoplay(g, (g, ev) => {
       if (!g.alive) return;
       assert.ok(g.landConnected([], false), 'one piece');
-      if (g.baseInterval() > prev + 1e-9) faster = false;
+      if (ev.calm) {
+        calms++;
+        assert.ok(g.cells.length >= CORE_CALM_LEN);
+      }
+      if (g.calm < 0 && g.baseInterval() > prev + 1e-9) faster = false;
+      // (the apple that triggers the calm still speeds it up as usual)
+      if (g.calm >= 0 && !ev.calm && g.baseInterval() < prev - 1e-9) faster = false;
       prev = g.baseInterval();
     });
-    assert.ok(faster, 'never slows down');
+    assert.ok(faster, 'speeds up until the calm, then only slows');
+    if (g.cells.length >= CORE_CALM_LEN) {
+      assert.equal(calms, 1, 'the shockwave comes once');
+      assert.ok(g.calm < CORE_CALM_MOVES || Math.abs(g.baseInterval() - CORE_CALM) < 1e-9, 'it settles at the calm speed');
+    }
   }
+});
+
+test('the black hole calms down once the snake reaches length 35', () => {
+  const g = coreGame(mulberry(5));
+  const fast = g.baseInterval();
+  g.fillTop = 1;
+  const before = g.baseInterval();
+  while (g.cells.length < CORE_CALM_LEN - 1) g.cells.push({ ...g.cells[g.cells.length - 1] });
+  g.pendingGrowth = 1;
+  g.food = null;
+  g.spawnTryAt = 1e12; // no apple in the way
+  const land = (c) => g.isLand(c.x, c.z);
+  const dirs = [DIRS.up, DIRS.left, DIRS.down, DIRS.right];
+  let ev = {};
+  // take any safe move
+  const move = () => {
+    for (const d of dirs) {
+      const h = g.head;
+      const n = { x: h.x + d.x, z: h.z + d.z };
+      if (g.inBounds(n.x, n.z) && land(n) && !g.occupied(n.x, n.z, true)) {
+        g.queue = [{ ...d, y: 0 }];
+        return g.step();
+      }
+    }
+    return g.step();
+  };
+  ev = move();
+  assert.equal(g.cells.length, CORE_CALM_LEN);
+  assert.ok(ev.calm, 'the event fires');
+  assert.ok(Math.abs(g.baseInterval() - before) < 1e-9, 'no jump on the move it fires');
+  for (let i = 0; i < CORE_CALM_MOVES; i++) assert.ok(!move().calm, 'only once');
+  assert.equal(g.baseInterval(), CORE_CALM);
+  assert.ok(CORE_CALM > fast, 'slower than the Core ever was');
+  g.startAtLevel(SPACE_START);
+  assert.equal(g.calm, -1, 'a new Core run starts fast again');
 });
 
 test('filling every cell that is left wins the game: 100%', () => {
@@ -1170,5 +1216,31 @@ test('the autoplay beats the whole game from map 1', () => {
       g.step();
     }
     assert.ok(g.won, `seed ${s}: ${g.deathCause} in zone ${g.zone}`);
+  }
+});
+
+import { TRACKS } from '../src/audio/Audio.js';
+
+test('every map has two well-formed songs', () => {
+  assert.equal(TRACKS.length, 6);
+  const names = new Set();
+  for (const pair of TRACKS) {
+    assert.equal(pair.length, 2);
+    for (const song of pair) {
+      assert.ok(!names.has(song.name), `${song.name} is unique`);
+      names.add(song.name);
+      for (const sec of ['A', 'B']) {
+        assert.equal(song[sec].chords.length, 4);
+        assert.equal(song[sec].melody.length, 8, `${song.name} ${sec}: 8 bars`);
+        for (const bar of song[sec].melody) {
+          const toks = bar.split(' ');
+          assert.equal(toks.length, 16, `${song.name} ${sec}: 16 steps in "${bar}"`);
+          for (const t of toks) assert.ok(t === '-' || t === '.' || Number(t) >= 1, `${song.name}: bad token ${t}`);
+        }
+      }
+      for (const pat of Object.values(song.bass || {})) assert.equal(pat.split(' ').length, 16, `${song.name} bass`);
+      for (const d of Object.values(song.drums || {})) for (const lane of Object.values(d)) assert.equal(lane.length, 16, `${song.name} drums`);
+      if (song.stabs) assert.equal(song.stabs.length, 16);
+    }
   }
 });

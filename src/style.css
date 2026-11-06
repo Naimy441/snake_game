@@ -446,6 +446,14 @@ button { font-family: var(--display); }
 #ns-name.swap { animation: nsIn 0.8s cubic-bezier(0.2, 0.8, 0.2, 1); }
 @keyframes nsIn { from { opacity: 0; transform: translateY(10px); letter-spacing: 0.12em; } to { opacity: 1; transform: none; } }
 .reduce-motion #ns-name.swap { animation: fade 0.6s reverse; }
+.ns-track {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+  background: rgba(6, 10, 30, 0.45); border: 1px solid var(--glass-edge);
+  font: 700 13px var(--display); letter-spacing: 0.03em; color: var(--ink); text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+.ns-track i { font-style: normal; color: var(--yellow); }
+.ns-track.swap { animation: nsIn 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.reduce-motion .ns-track.swap { animation: fade 0.5s reverse; }
 .ns-dots { display: flex; gap: 5px; margin-top: 6px; }
 .ns-dots i { position: relative; width: 26px; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.25); overflow: hidden; }
 .ns-dots i.past { background: rgba(255, 255, 255, 0.7); }

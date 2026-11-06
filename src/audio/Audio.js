@@ -9,14 +9,21 @@
 
 const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
 
-const SCALES = { major: [0, 2, 4, 5, 7, 9, 11], minor: [0, 2, 3, 5, 7, 8, 10] };
+const SCALES = {
+  major: [0, 2, 4, 5, 7, 9, 11],
+  minor: [0, 2, 3, 5, 7, 8, 10],
+  mixolydian: [0, 2, 4, 5, 7, 9, 10],
+  lydian: [0, 2, 4, 6, 7, 9, 11],
+  harmonic: [0, 2, 3, 5, 7, 8, 11],
+  phrygian: [0, 1, 3, 5, 7, 8, 10],
+};
 const QUALITY = { maj: [0, 4, 7], m: [0, 3, 7], maj7: [0, 4, 7, 11], m7: [0, 3, 7, 10], 7: [0, 4, 7, 10], 6: [0, 4, 7, 9] };
 
 // Melodies: 16 tokens per bar. Numbers are scale degrees (1 = key root,
 // 8 = an octave up), '-' holds the previous note, '.' is a rest.
 const SONGS = [
   {
-    name: 'Emerald Coast', key: 0, scale: 'major', tempo: 140, lead: 0.25,
+    name: 'Seaside Sprint', key: 0, scale: 'major', tempo: 140, lead: 0.25,
     A: {
       chords: [[5, 'maj7'], [7, '6'], [4, 'm7'], [9, 'm7']],
       melody: [
@@ -37,7 +44,7 @@ const SONGS = [
     },
   },
   {
-    name: 'Golden Canyon', key: 2, scale: 'major', tempo: 146, lead: 0.25,
+    name: 'Desert Wind', key: 2, scale: 'major', tempo: 146, lead: 0.25,
     A: {
       chords: [[9, 'm7'], [5, 'maj7'], [0, 'maj'], [7, 'maj']],
       melody: [
@@ -58,7 +65,7 @@ const SONGS = [
     },
   },
   {
-    name: 'Neon Night', key: 9, scale: 'minor', tempo: 152, lead: 0.5,
+    name: 'City Lights', key: 9, scale: 'minor', tempo: 152, lead: 0.5,
     A: {
       chords: [[0, 'm7'], [8, 'maj7'], [10, 'maj'], [7, 'm7']],
       melody: [
@@ -79,7 +86,7 @@ const SONGS = [
     },
   },
   {
-    name: 'Cyber Overdrive', key: 6, scale: 'minor', tempo: 160, lead: 0.5,
+    name: 'Data Stream', key: 6, scale: 'minor', tempo: 160, lead: 0.5,
     A: {
       chords: [[0, 'm'], [8, 'maj'], [10, 'maj'], [7, 'm']],
       melody: [
@@ -101,7 +108,7 @@ const SONGS = [
   },
   {
     // soaring synthwave in a bright major key for the flight above the clouds
-    name: 'Sunset Heavens', key: 5, scale: 'major', tempo: 150, lead: 0.5,
+    name: 'Skyward', key: 5, scale: 'major', tempo: 150, lead: 0.5,
     A: {
       chords: [[0, 'maj7'], [7, 'maj'], [9, 'm7'], [5, 'maj7']],
       melody: [
@@ -123,7 +130,7 @@ const SONGS = [
   },
   {
     // the finale: a vast, slow minor-key anthem in orbit round the black hole
-    name: 'Galactic Core', key: 2, scale: 'minor', tempo: 132, lead: 0.5,
+    name: 'Last Light', key: 2, scale: 'minor', tempo: 132, lead: 0.5,
     A: {
       chords: [[0, 'm7'], [8, 'maj7'], [3, 'maj'], [10, 'maj']],
       melody: [
@@ -144,6 +151,213 @@ const SONGS = [
     },
   },
 ];
+
+// Each map's second song. One of the two is picked at random every time a
+// map's music starts. They're written hook first: a short, catchy motif that
+// repeats and climbs through the verse, and a bigger, higher chorus where the
+// lead doubles an octave up. Optional style fields give each its own feel:
+//   bass / drums: patterns per tier (as BASS and DRUMS; drums may add a
+//     't' tom lane), arp: { order, every (in 16ths), len, oct },
+//   stabs: a 16-step pattern, swing: delay of the off 16ths (0..0.5 of a
+//   step), echo: { steps, gain } repeats held lead notes, staccato: shortens
+//   short lead notes, leadOct: semitones added to the lead,
+//   double: the chorus lead is doubled an octave up.
+const ALT_SONGS = [
+  {
+    // sunny and anthemic: a bouncing turn-and-leap hook climbing G D Em C
+    name: 'High Tide', key: 7, scale: 'major', tempo: 150, lead: 0.25, double: true,
+    A: {
+      chords: [[0, 'maj'], [7, 'maj'], [9, 'm'], [5, 'maj']],
+      melody: [
+        '8 - - 7 - - 8 - 10 - - - 9 - 8 -', '9 - - 8 - - 9 - 12 - - - - - . .',
+        '10 - - 9 - - 10 - 13 - - - 12 - 10 -', '11 - - 10 - - 8 - - - . . 5 - 6 -',
+        '8 - - 7 - - 8 - 10 - - - 9 - 8 -', '9 - - 8 - - 9 - 12 - - - 14 - 12 -',
+        '13 - - 12 - - 10 - 12 - - - 10 - 9 -', '8 - - - - - - - . . 8 . 9 . 10 .',
+      ],
+    },
+    B: {
+      chords: [[5, 'maj'], [7, 'maj'], [9, 'm'], [0, 'maj']],
+      melody: [
+        '11 - - 11 - - 10 - 11 - - - 15 - - -', '12 - - 12 - - 11 - 12 - - - 14 - - -',
+        '13 - - 13 - - 12 - 13 - - - 15 - 14 -', '15 - - - 12 - - - 10 - - - 12 - - -',
+        '11 - - 11 - - 10 - 11 - - - 15 - - -', '12 - - 12 - - 11 - 12 - - - 16 - - -',
+        '17 - - 16 - - 15 - 14 - - - 13 - 12 -', '15 - - - - - - - . . 12 . 13 . 14 .',
+      ],
+    },
+  },
+  {
+    // a galloping western: repeated-note gallops that step down, then a heroic chorus
+    name: 'Gold Rush', key: 9, scale: 'minor', tempo: 150, lead: 0.125, swing: 0.18, double: true,
+    stabs: '..x...x...x...x.',
+    bass: {
+      menu: 'R - - - - - - - 5 - - - - - - -',
+      1: 'R . . R R . 5 . R . . R R . 5 .',
+      2: 'R . R R 5 . R . R . R R 5 . 7 .',
+      3: 'R . R R 5 . O . R . R R 5 . 7 O',
+    },
+    drums: {
+      1: { k: 'x...x...x...x...', s: '....x.......x...', h: 'x.xxx.xxx.xxx.xx' },
+      2: { k: 'x..xx...x..xx...', s: '....x.......x...', h: 'x.xxx.xxx.xxx.xx', t: '..............x.' },
+      3: { k: 'x..xx..xx..xx...', s: '....x.......x.x.', h: 'xxxxxxxxxxxxxxxx', t: '...........x..xx' },
+    },
+    A: {
+      chords: [[0, 'm'], [10, 'maj'], [8, 'maj'], [7, 'm']],
+      melody: [
+        '5 . 5 5 8 - - - 7 . 7 7 5 - - -', '4 . 4 4 7 - - - 6 . 6 6 4 - - -',
+        '3 . 3 3 6 - - - 5 . 5 5 3 - - -', '2 - - 3 - - 5 - - - . . 5 . 5 5',
+        '8 . 8 8 12 - - - 10 . 10 10 8 - - -', '7 . 7 7 11 - - - 9 . 9 9 7 - - -',
+        '6 . 6 6 10 - - - 9 . 8 . 6 - 5 -', '5 - - - - - - - 12 . 12 12 12 . 12 12',
+      ],
+    },
+    B: {
+      chords: [[8, 'maj'], [10, 'maj'], [3, 'maj'], [0, 'm']],
+      melody: [
+        '10 - - 11 - - 13 - - - 12 - 10 - - -', '11 - - 12 - - 14 - - - 13 - 11 - - -',
+        '12 - - 13 - - 14 - - - 12 - 10 - - -', '8 - - - . . 5 . 8 . 8 8 10 . 12 .',
+        '10 - - 11 - - 13 - - - 12 - 10 - - -', '11 - - 12 - - 14 - - - 13 - 11 - - -',
+        '15 - - 14 - - 12 - 14 - - - 12 - 10 -', '8 - - - - - - - . . 5 . 5 5 5 .',
+      ],
+    },
+  },
+  {
+    // disco synth-pop: an octave-popping hook (E-E'... E-E'...) stepping down
+    // Em C G D, then a sing-along chorus that rings on repeated high notes
+    name: 'Midnight Drive', key: 4, scale: 'minor', tempo: 128, lead: 0.5, leadOct: -12, staccato: 0.7, double: true,
+    stabs: '..x...x...x...x.',
+    bass: {
+      menu: 'R - - - - - - - O - - - - - - -',
+      1: 'R . O . R . O . R . O . R . O .',
+      2: 'R . O . R . O . R . O . 5 . O .',
+      3: 'R O R O R O R O R O R O 5 O 7 O',
+    },
+    drums: {
+      1: { k: 'x...x...x...x...', s: '....x.......x...', h: '..x...x...x...x.' },
+      2: { k: 'x...x...x...x...', s: '....x.......x...', h: 'x.x.x.x.x.x.x.x.' },
+      3: { k: 'x...x...x...x...', s: '....x.......x..x', h: 'xxxxxxxxxxxxxxxx' },
+    },
+    A: {
+      chords: [[0, 'm'], [8, 'maj'], [3, 'maj'], [10, 'maj']],
+      melody: [
+        '8 15 . 8 15 . 14 . 12 - - . 10 - 12 -', '6 13 . 6 13 . 12 . 10 - - . 8 - 10 -',
+        '3 10 . 3 10 . 9 . 7 - - . 5 - 7 -', '9 - - 11 - - 12 - 14 - - - 16 - - -',
+        '8 15 . 8 15 . 14 . 12 - - . 10 - 12 -', '6 13 . 6 13 . 12 . 10 - - . 8 - 10 -',
+        '3 10 . 3 10 . 9 . 7 - - . 5 - 7 -', '16 - 14 - 12 - 11 - 9 - - - . . . .',
+      ],
+    },
+    B: {
+      chords: [[8, 'maj'], [10, 'maj'], [0, 'm'], [0, 'm']],
+      melody: [
+        '15 - - 15 - - 15 - 13 - 15 - 17 - - -', '16 - - 16 - - 16 - 14 - 16 - 18 - - -',
+        '19 - - 17 - - 15 - 17 - - - 19 - 22 -', '22 - - - 21 - 19 - 17 - - - . . . .',
+        '15 - - 15 - - 15 - 13 - 15 - 17 - - -', '16 - - 16 - - 16 - 14 - 16 - 18 - - -',
+        '15 - 19 - 15 - 17 - 19 - - - 22 - - -', '22 - - - - - - - . . 15 . 17 . 19 .',
+      ],
+    },
+  },
+  {
+    // a chase theme in harmonic minor: a swooping run that lands high and
+    // falls back through the leading tone, over Dm Bb Gm A; the chorus holds
+    // long notes with quick pickups between them
+    name: 'Firewall', key: 2, scale: 'harmonic', tempo: 158, lead: 0.5, leadOct: -12, double: true,
+    bass: {
+      menu: 'R - - - - - - - 5 - - - - - - -',
+      1: 'R . R . O . R . R . R . O . R .',
+      2: 'R . R O . R O . R . R O . R 5 .',
+      3: 'R R O R R O R O R R O R 5 O 7 O',
+    },
+    drums: {
+      1: { k: 'x.......x.x.....', s: '....x.......x...', h: 'x.x.x.x.x.x.x.x.' },
+      2: { k: 'x.....x.x.x.....', s: '....x.......x..x', h: 'x.x.x.x.x.x.x.x.' },
+      3: { k: 'x..x..x.x.x..x..', s: '....x..x....x...', h: 'xxxxxxxxxxxxxxxx', t: '..............xx' },
+    },
+    A: {
+      chords: [[0, 'm'], [8, 'maj'], [5, 'm'], [7, 'maj']],
+      melody: [
+        '12 - - 10 - 12 - 15 - - - 14 - 12 - 10', '13 - - 10 - 13 - 15 - - - 13 - 12 - 10',
+        '11 - - 8 - 11 - 13 - - - 12 - 11 - 10', '9 - - - 12 - - - 14 - - - 16 - 14 -',
+        '12 - - 10 - 12 - 15 - - - 14 - 12 - 10', '13 - - 10 - 13 - 15 - - - 13 - 12 - 10',
+        '18 - 17 - 15 - 13 - 15 - 17 - 18 - 15 -', '16 - - - 14 - - - 12 - - - 9 - 7 -',
+      ],
+    },
+    B: {
+      chords: [[8, 'maj'], [5, 'm'], [7, 'maj'], [0, 'm']],
+      melody: [
+        '17 - - - - - - - 15 - 17 - 18 - 17 -', '18 - - - - - - - 17 - 15 - 13 - 15 -',
+        '16 - - - - - - - 14 - 16 - 19 - 16 -', '15 - - - - - - - . . 12 . 15 . 17 .',
+        '20 - - - - - - - 17 - 18 - 19 - 20 -', '18 - - - - - - - 17 - 18 - 20 - 22 -',
+        '21 - - - 19 - - - 16 - - - 21 - - -', '22 - - - - - - - . . 19 . 20 . 21 .',
+      ],
+    },
+  },
+  {
+    // dreamy but singable: a floating hook over IV V iii vi, then a chorus
+    // that climbs in leaps to the top of the sky
+    name: 'Golden Hour', key: 2, scale: 'major', tempo: 146, lead: 0.25, leadOct: -12, double: true, echo: { steps: 3, gain: 0.3 },
+    arp: { order: [0, 1, 2, 3, 2, 1], every: 1, len: 0.9, oct: 12 },
+    drums: {
+      1: { k: 'x.......x.......', s: '....x.......x...', h: '..x...x...x...x.' },
+      2: { k: 'x.....x...x.....', s: '....x.......x...', h: 'x.x.x.x.x.x.x.x.' },
+      3: { k: 'x.....x.x.x.....', s: '....x.......x..x', h: 'x.xxx.xxx.xxx.xx' },
+    },
+    A: {
+      chords: [[5, 'maj7'], [7, 'maj'], [4, 'm7'], [9, 'm7']],
+      melody: [
+        '10 - - 11 - - 12 - - - 15 - 14 - 12 -', '12 - - - 11 - 10 - 9 - - - . . 9 10',
+        '10 - - 11 - - 12 - - - 15 - 14 - 12 -', '13 - - - 12 - - - 10 - - - 8 - 9 -',
+        '10 - - 11 - - 12 - - - 15 - 14 - 12 -', '12 - - - 14 - - - 16 - - - 17 - 16 -',
+        '17 - - 16 - - 15 - 14 - - - 12 - 10 -', '13 - - - - - - - . . 10 . 11 . 12 .',
+      ],
+    },
+    B: {
+      chords: [[5, 'maj'], [7, 'maj'], [9, 'm'], [0, 'maj']],
+      melody: [
+        '15 - - - 14 - - - 15 - - - 18 - - -', '16 - - - 15 - - - 16 - - - 19 - - -',
+        '17 - - - 16 - - - 17 - - - 20 - - -', '22 - - - - - - - 19 - - - 17 - - -',
+        '15 - - - 14 - - - 15 - - - 18 - 17 -', '16 - - - 15 - - - 16 - - - 19 - 18 -',
+        '17 - - 18 - - 19 - 20 - - - 21 - 20 -', '22 - - - - - - - . . 15 . 16 . 17 .',
+      ],
+    },
+  },
+  {
+    // wonder at the heart of the galaxy, in a major key: a rising arpeggio
+    // that cascades back down like a shooting star (vi IV I V), and a chorus
+    // whose ringing call climbs a step every bar
+    name: 'Supernova', key: 9, scale: 'major', tempo: 140, lead: 0.25, leadOct: -12, double: true, echo: { steps: 3, gain: 0.25 },
+    arp: { order: [0, 1, 2, 3, 2, 1], every: 1, len: 0.9, oct: 12 },
+    bass: {
+      menu: 'R - - - - - - - 5 - - - - - - -',
+      1: 'R - - R - - 5 - R - - R - - 5 -',
+      2: 'R - . R O . 5 . R - . R O . 7 .',
+      3: 'R . O R . O 5 . R . O R . O 7 O',
+    },
+    drums: {
+      1: { k: 'x.......x.......', s: '....x.......x...', h: '..x...x...x...x.' },
+      2: { k: 'x.....x.x.......', s: '....x.......x...', h: 'x.x.x.x.x.x.x.x.', t: '..............x.' },
+      3: { k: 'x.....x.x.x.....', s: '....x.......x..x', h: 'x.xxx.xxx.xxx.xx', t: '...........x..xx' },
+    },
+    A: {
+      chords: [[9, 'm'], [5, 'maj'], [0, 'maj'], [7, 'maj']],
+      melody: [
+        '13 - - 12 - - 10 - 13 - - 15 - - 17 -', '18 - - 17 - - 15 - 13 - - - - - . .',
+        '12 - - 10 - - 8 - 12 - - 15 - - 17 -', '16 - - - 14 - - - 12 - - - 9 - 10 -',
+        '13 - - 12 - - 10 - 13 - - 15 - - 17 -', '18 - - 17 - - 15 - 18 - - 20 - - 22 -',
+        '22 - - 21 - - 19 - 17 - - - 15 - - -', '16 - - - - - - - . . 12 . 14 . 16 .',
+      ],
+    },
+    B: {
+      chords: [[5, 'maj'], [7, 'maj'], [9, 'm'], [0, 'maj']],
+      melody: [
+        '15 - 15 - 18 - - - 17 - 15 - 13 - - -', '16 - 16 - 19 - - - 18 - 16 - 14 - - -',
+        '17 - 17 - 20 - - - 19 - 17 - 15 - - -', '22 - - - - - - - 19 - - - 17 - - -',
+        '15 - 15 - 18 - - - 17 - 15 - 13 - - -', '16 - 16 - 19 - - - 18 - 16 - 14 - - -',
+        '20 - - 19 - - 17 - 20 - - 22 - - 20 -', '22 - - - - - - - . . 17 . 19 . 20 .',
+      ],
+    },
+  },
+];
+
+// Every map's two songs: the original and its alternate.
+export const TRACKS = SONGS.map((s, i) => [s, ALT_SONGS[i]]);
 
 const SONG_STARTS = [0, 3, 6, 9, 12, 14]; // first level of each zone
 
@@ -173,7 +387,7 @@ function parseMelody(lines) {
   return notes;
 }
 
-for (const s of SONGS) {
+for (const s of [...SONGS, ...ALT_SONGS]) {
   s.A.notes = parseMelody(s.A.melody);
   s.B.notes = parseMelody(s.B.melody);
   s.root = s.key > 5 ? 48 + s.key : 60 + s.key;
@@ -204,7 +418,8 @@ export class AudioEngine {
       this.ctx = new AC();
       this.build();
     }
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    // (a resume outside a real gesture is refused: fine, the next one retries)
+    if (this.ctx.state !== 'running' && this.ctx.state !== 'closed') this.ctx.resume().catch(() => {});
   }
 
   build() {
@@ -509,24 +724,33 @@ export class AudioEngine {
 
   // Cells are doomed: a crackle and a thin, rising whine as the black hole
   // starts to pull on them (rate-limited, apples can come quickly).
+  // (kept soft and lower-pitched: it repeats all through the music)
   doomWarn(n = 3) {
     const now = this.ctx ? this.ctx.currentTime : 0;
-    if (now - (this.lastDoom || -9) < 0.25) return;
+    if (now - (this.lastDoom || -9) < 0.6) return;
     this.lastDoom = now;
-    for (let i = 0; i < Math.min(4, n); i++) this.noiseHit({ at: i * 0.06, dur: 0.05, gain: 0.05, freq: 3500 + i * 900, q: 3 });
-    this.voice(midi(81), { wave: 'sine', at: 0.05, dur: 1.2, gain: 0.02, slide: 1.35, attack: 1.0, release: 0.15, vibrato: 0.03 });
+    for (let i = 0; i < Math.min(3, n); i++) this.noiseHit({ at: i * 0.07, dur: 0.04, gain: 0.018, freq: 2400 + i * 500, q: 2.5 });
+    this.voice(midi(76), { wave: 'sine', at: 0.05, dur: 1.0, gain: 0.008, slide: 1.25, attack: 0.8, release: 0.15, vibrato: 0.03 });
   }
 
   // Tiles break off and fall in: a falling, filtered whoosh, and a soft deep
   // thud a moment later as the light hits the horizon.
   suckIn(n = 1) {
     const now = this.ctx ? this.ctx.currentTime : 0;
-    if (now - (this.lastSuck || -9) < 0.12) return;
+    // (one per collapse, soft and darker, so it sits under the music)
+    if (now - (this.lastSuck || -9) < 0.5) return;
     this.lastSuck = now;
-    const g = Math.min(1, 0.55 + n * 0.15);
-    this.noiseHit({ dur: 0.9, gain: 0.12 * g, freq: 3200, sweep: 0.08, q: 1.4 });
-    this.voice(midi(76), { wave: 'sine', dur: 0.8, gain: 0.03 * g, slide: 0.25, release: 0.3 });
-    this.voice(55, { wave: 'sine', at: 2.3, dur: 0.7, gain: 0.2 * g, slide: 0.6, attack: 0.02, release: 0.5 });
+    const g = Math.min(1, 0.6 + n * 0.1);
+    this.noiseHit({ dur: 0.8, gain: 0.035 * g, freq: 1600, sweep: 0.15, q: 1 });
+    this.voice(midi(72), { wave: 'sine', dur: 0.7, gain: 0.012 * g, slide: 0.3, release: 0.3 });
+    this.voice(55, { wave: 'sine', at: 2.3, dur: 0.7, gain: 0.08 * g, slide: 0.6, attack: 0.03, release: 0.5 });
+  }
+
+  // The black hole calms down: a deep, slow boom and a soft falling chord.
+  calm() {
+    this.voice(48, { wave: 'sine', dur: 2.6, gain: 0.55, slide: 0.5, release: 2.2 });
+    this.noiseHit({ dur: 2.2, gain: 0.22, freq: 1800, type: 'lowpass', sweep: 0.08 });
+    [62, 69, 74, 77].forEach((n, i) => this.voice(midi(n), { wave: 'sine', at: 0.15 + i * 0.09, dur: 2.4, gain: 0.04, slide: 0.94, attack: 0.08, release: 1.8, vibrato: 0.006 }));
   }
 
   // The last cell: everything goes quiet and the core draws itself in.
@@ -577,15 +801,25 @@ export class AudioEngine {
     }
     this.musicOn = true;
     this.zone = this.state.zone;
+    this.pickSong();
     this.section = 'A';
     this.bar = 0;
     this.step = 0;
-    this.tempo = menu ? 112 : SONGS[this.zone].tempo;
+    this.tempo = menu ? 112 : this.song.tempo;
     this.fill = false;
     this.pendingZone = null;
     this.nextTime = now + 0.06;
     clearInterval(this.timer);
     this.timer = setInterval(() => this.schedule(), 25);
+  }
+
+  // Each map has two songs; one is picked at random whenever its music
+  // starts (a new zone, a new run). forceTrack (0 or 1) pins one, for testing.
+  pickSong() {
+    const pair = TRACKS[this.zone];
+    const i = this.forceTrack ?? (Math.random() < 0.5 ? 0 : 1);
+    this.song = pair[i] || pair[0];
+    if (this.onTrack) this.onTrack(this.song, this.zone);
   }
 
   // Fade out instead of cutting (death, back to silence).
@@ -635,7 +869,7 @@ export class AudioEngine {
     if (zone !== undefined && zone !== s.zone) {
       s.zone = zone;
       if (this.musicOn) this.pendingZone = zone;
-      else this.zone = zone;
+      else this.zone = zone; // (its song is picked when the music starts)
     }
   }
 
@@ -690,7 +924,7 @@ export class AudioEngine {
     if (this.step < 16) return;
     this.step = 0;
     this.bar++;
-    const song = SONGS[this.zone];
+    const song = this.song;
     const target = this.state.menu ? 112 : song.tempo + Math.min(4, this.state.level - SONG_STARTS[this.zone]) * 1.5;
     this.tempo += (target - this.tempo) * 0.35;
     if (this.fill) {
@@ -698,6 +932,7 @@ export class AudioEngine {
       if (this.pendingZone !== null) {
         this.zone = this.pendingZone;
         this.pendingZone = null;
+        this.pickSong();
         this.section = 'A';
         this.bar = 0;
         this.crash = true;
@@ -706,6 +941,7 @@ export class AudioEngine {
     }
     if (this.restartAtBar) {
       this.restartAtBar = false;
+      this.pickSong();
       this.section = 'A';
       this.bar = 0;
       this.crash = !this.state.menu;
@@ -727,7 +963,7 @@ export class AudioEngine {
   }
 
   playStep(t) {
-    const song = SONGS[this.zone];
+    const song = this.song;
     const sec = song[this.section];
     const s = this.step;
     const barIdx = Math.min(7, this.bar);
@@ -737,10 +973,13 @@ export class AudioEngine {
     const spb = 60 / this.tempo / 4;
     const tier = this.tier();
     const L = this.layers;
+    // swing: the off 16ths come a little late
+    if (song.swing && s % 2) t += song.swing * spb;
 
     // bass: triangle with a thin pulse on top for presence
     if (this.active('bass')) {
-      const pat = (tier === 0 ? BASS.menu : BASS[tier]).split(' ');
+      const bass = song.bass || BASS;
+      const pat = (tier === 0 ? bass.menu : bass[tier]).split(' ');
       const tok = pat[s];
       if (tok !== '-' && tok !== '.') {
         let len = 1;
@@ -755,7 +994,7 @@ export class AudioEngine {
 
     // drums
     if (this.active('drums') && tier > 0) {
-      const d = this.fill ? FILL : DRUMS[tier];
+      const d = this.fill ? FILL : (song.drums || DRUMS)[tier];
       if (this.crash && s === 0) {
         this.noiseHit({ t, dur: 1.1, gain: 0.13, freq: 5000, type: 'highpass', dest: L.drums.gain });
         this.crash = false;
@@ -763,20 +1002,29 @@ export class AudioEngine {
       if (d.k[s] === 'x') this.kick(t, L.drums.gain);
       if (d.s[s] === 'x') this.snare(t, L.drums.gain, this.fill ? 0.06 + (s / 16) * 0.12 : 0.16);
       if (d.h[s] === 'x') this.hat(t, L.drums.gain, s % 4 === 2 ? 0.07 : 0.045, tier === 3 && s % 8 === 6);
+      if (d.t && d.t[s] === 'x') this.voice(midi(45 + (s % 4 === 3 ? -5 : 0)), { t, dur: 0.14, gain: 0.2, wave: 'triangle', slide: 0.5, dest: L.drums.gain });
       if (this.fill && s >= 8 && s % 2 === 0) this.voice(midi(50 - (s - 8)), { t, dur: 0.12, gain: 0.22, wave: 'triangle', slide: 0.5, dest: L.drums.gain });
     } else if (this.crash && s === 0) this.crash = false;
 
     // arpeggio
-    if (this.active('arp')) {
+    const arp = song.arp;
+    if (this.active('arp') && !arp) {
       const order = [0, 1, 2, 3, 2, 1, 0, 1];
       const idx = order[s % 8] % chord.length;
       const oct = s % 8 === 3 && chord.length === 3 ? 12 : 0;
       const n = 72 + ((key + cRoot) % 12) + chord[idx] + oct;
       this.voice(midi(n), { t, dur: spb * 0.8, gain: tier === 0 ? 0.05 : 0.04, wave: 0.125, dest: L.arp.gain, release: 0.05 });
+    } else if (this.active('arp') && s % arp.every === 0) {
+      const k = (s / arp.every) % arp.order.length;
+      const idx = arp.order[k] % chord.length;
+      // (the top of the pattern jumps an octave when the chord has no 4th note)
+      const oct = arp.oct && arp.order[k] >= chord.length ? arp.oct : 0;
+      const n = 72 + ((key + cRoot) % 12) + chord[idx] + oct;
+      this.voice(midi(n), { t, dur: spb * arp.every * arp.len, gain: tier === 0 ? 0.05 : 0.04, wave: 0.125, dest: L.arp.gain, release: Math.min(0.2, spb * arp.every * arp.len * 0.4) });
     }
 
     // offbeat chord stabs
-    if (this.active('stabs') && s % 4 === 2) {
+    if (this.active('stabs') && (song.stabs ? song.stabs[s] === 'x' : s % 4 === 2)) {
       for (let k = 0; k < 3; k++) {
         const n = 60 + ((key + cRoot) % 12) + chord[k];
         this.voice(midi(n), { t, dur: spb * 0.9, gain: 0.03, wave: 0.5, dest: L.stabs.gain, release: 0.04 });
@@ -786,12 +1034,22 @@ export class AudioEngine {
     // lead melody and its harmony
     const note = sec.notes[barIdx * 16 + s];
     if (note && (this.active('lead') || this.active('counter'))) {
+      const root = song.root + (song.leadOct || 0);
       const semis = degreeToSemis(song.scale, note.deg);
-      const dur = spb * note.len * 0.95;
-      if (this.active('lead')) this.voice(midi(song.root + semis), { t, dur, gain: 0.085, wave: song.lead, dest: L.lead.gain, release: Math.min(0.08, dur * 0.3), vibrato: note.len >= 3 ? 0.008 : 0 });
+      const dur = spb * note.len * 0.95 * (note.len === 1 ? song.staccato || 1 : 1);
+      if (this.active('lead')) {
+        this.voice(midi(root + semis), { t, dur, gain: 0.085, wave: song.lead, dest: L.lead.gain, release: Math.min(0.08, dur * 0.3), vibrato: note.len >= 3 ? 0.008 : 0 });
+        // the chorus soars: the lead doubled an octave up (down if that's shrill)
+        if (song.double && this.section === 'B' && tier >= 1) {
+          const up = root + semis + 12 <= 88 ? 12 : -12;
+          this.voice(midi(root + semis + up), { t, dur, gain: 0.04, wave: 0.125, dest: L.lead.gain, release: Math.min(0.08, dur * 0.3) });
+        }
+        // echo: a held note repeats softly a few steps later, like a delay pedal
+        if (song.echo && note.len >= 2) this.voice(midi(root + semis), { t: t + song.echo.steps * spb, dur: Math.min(dur, spb * 4), gain: 0.085 * song.echo.gain, wave: 0.125, dest: L.lead.gain, release: Math.min(0.12, dur * 0.4) });
+      }
       if (this.active('counter')) {
         const h = degreeToSemis(song.scale, note.deg - 2);
-        this.voice(midi(song.root + h), { t, dur, gain: 0.04, wave: 0.125, dest: L.counter.gain, release: Math.min(0.08, dur * 0.3) });
+        this.voice(midi(root + h), { t, dur, gain: 0.04, wave: 0.125, dest: L.counter.gain, release: Math.min(0.08, dur * 0.3) });
       }
     }
 
