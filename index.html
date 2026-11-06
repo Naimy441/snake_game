@@ -44,34 +44,36 @@
           <div class="hrow"><span class="hl">Length</span><span id="hud-length" class="hv">4</span></div>
           <div class="hrow ghost-row hidden" id="hud-ghost-row"><span class="hl">Ghost</span><span id="hud-ghost" class="hv">0</span></div>
           <div class="lvl" id="hud-lvl">
-            <div class="lvl-top"><span class="hl">Level</span><span id="hud-level" class="hv">1</span><span id="hud-lvl-next" class="lvl-next">3 apples to Lv 2</span></div>
+            <div class="lvl-top"><span class="hl">Level</span><span id="hud-level" class="hv">1</span><span id="hud-lvl-next" class="lvl-next">3 apples to go</span></div>
             <div class="lvl-bar" id="hud-lvl-bar"><i id="hud-lvl-fill"></i></div>
-            <div id="hud-zone-next" class="lvl-zone">Golden Canyon at Lv 4</div>
+            <div id="hud-zone-next" class="lvl-zone"></div>
           </div>
         </div>
         <div class="hud-tr">
-          <div class="zone-pill"><span id="hud-zone">Emerald Coast</span></div>
-          <div class="best-pill">Best <b id="hud-best">0</b></div>
-          <button id="btn-cam" class="chip" title="Switch camera (C)"><span id="hud-cam">Overhead</span> <kbd>C</kbd></button>
-          <button id="btn-pause" class="chip icon" title="Pause (P / Esc)" aria-label="Pause">❚❚</button>
+          <div class="hud-bar">
+            <span class="zone-pill"><span id="hud-zone">Emerald Coast</span></span>
+            <span class="best-pill"><span>Best</span><b id="hud-best">0</b></span>
+          </div>
+          <button id="btn-cam" class="chip" title="Switch camera (C)"><span class="chip-in"><span id="hud-cam">Overhead</span><kbd>C</kbd></span></button>
+          <button id="btn-pause" class="chip icon" title="Pause (P / Esc)" aria-label="Pause"><span class="chip-in"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="4" width="3.4" height="12" fill="currentColor"/><rect x="11.6" y="4" width="3.4" height="12" fill="currentColor"/></svg></span></button>
         </div>
         <div class="hud-center">
-          <div id="hud-combo" class="combo hidden"><span id="hud-combo-x">x2</span><span class="combo-label">combo</span><div class="combo-bar"><i id="hud-combo-bar"></i></div></div>
+          <div id="hud-combo" class="combo hidden"><span id="hud-combo-x">×2</span><span class="combo-label">Combo</span><div class="combo-bar"><i id="hud-combo-bar"></i></div></div>
           <div id="hud-chain" class="chain hidden"><span class="chain-label">Chain</span><span id="hud-chain-dots" class="chain-dots"></span><span id="hud-chain-time" class="chain-time"></span></div>
         </div>
         <div class="rush" id="hud-rush-wrap">
-          <div class="rush-label"><span>Rush</span> <kbd>Space</kbd><span id="hud-boost" class="boost-tag hidden">Boost!</span></div>
+          <div class="rush-label"><span>Rush</span><kbd>Space</kbd><span id="hud-boost" class="boost-tag hidden">Boost!</span></div>
           <div class="rush-bar"><i id="hud-rush"></i><div class="rush-ticks"></div></div>
         </div>
         <div id="speedrun" class="speedrun hidden" aria-label="Run timer"><span id="sr-time">0:00.00</span><span id="sr-pb" class="sr-pb hidden"></span></div>
         <div id="fps" class="fps hidden">60 fps</div>
       </div>
 
+      <!-- pointers to pickups: on the screen's edge when they're out of view, over them when they're far but visible -->
       <div id="compass" class="hidden" aria-hidden="true">
-        <div class="needle orb" id="needle-orb"><span>▲</span></div>
-        <div class="needle prism hidden" id="needle-prism"><span>▲</span></div>
-        <div class="needle prey hidden" id="needle-prey"><span>▲</span></div>
-        <div id="compass-text"></div>
+        <div class="poi prey hidden" id="poi-prey"><i class="poi-rot"><svg viewBox="-13 -13 26 26"><path d="M-8 -10 10 0-8 10-3 0Z"/></svg></i></div>
+        <div class="poi prism hidden" id="poi-prism"><i class="poi-rot"><svg viewBox="-13 -13 26 26"><path d="M-8 -10 10 0-8 10-3 0Z"/></svg></i></div>
+        <div class="poi orb hidden" id="poi-orb"><i class="poi-rot"><svg viewBox="-13 -13 26 26"><path d="M-8 -10 10 0-8 10-3 0Z"/></svg></i><b class="poi-d" id="poi-orb-d"></b></div>
       </div>
       <canvas id="minimap" class="hidden" width="160" height="160" aria-hidden="true"></canvas>
       <div id="fp-hint" class="hidden">← → turn</div>
@@ -82,9 +84,9 @@
         <div id="alt-delta" class="alt-delta"><b id="alt-delta-n">0</b><span id="alt-delta-l">apple level</span></div>
       </div>
       <div id="popups" aria-hidden="true"></div>
-      <div id="toast" role="status" aria-live="polite"></div>
+      <div id="toast" role="status" aria-live="polite"><div class="t-body"><span class="t-note" id="t-note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 17.2V5.6l11-2.4v11.6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><ellipse cx="6.2" cy="17.6" rx="3.4" ry="2.7" fill="currentColor" transform="rotate(-18 6.2 17.6)"/><ellipse cx="17.2" cy="15.2" rx="3.4" ry="2.7" fill="currentColor" transform="rotate(-18 17.2 15.2)"/></svg></span><span class="t-kicker"></span><b class="t-title"></b><span class="t-sub"></span></div></div>
       <div id="countdown" class="hidden"></div>
-      <div id="banner" class="hidden" aria-hidden="true"><span id="banner-text">Speed up!</span></div>
+      <div id="banner" class="hidden" aria-hidden="true"><div class="bn"><span id="banner-text">Speed up</span><small id="banner-sub"></small></div></div>
       <div id="titlecard" class="hidden" aria-live="polite">
         <div class="tc-band"></div>
         <div class="tc-text"><span id="tc-zone">Zone 2</span><span id="tc-name">Golden Canyon</span></div>
@@ -125,7 +127,7 @@
         <div class="now-showing" aria-hidden="true">
           <span class="ns-eyebrow"><span id="ns-num">Map 1</span> · Now showing</span>
           <b id="ns-name">Emerald Coast</b>
-          <span class="ns-track hidden" id="ns-track"><i aria-hidden="true">♪</i> <span id="ns-track-name"></span></span>
+          <span class="ns-track hidden" id="ns-track"><span class="ns-note" id="ns-note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 17.2V5.6l11-2.4v11.6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><ellipse cx="6.2" cy="17.6" rx="3.4" ry="2.7" fill="currentColor" transform="rotate(-18 6.2 17.6)"/><ellipse cx="17.2" cy="15.2" rx="3.4" ry="2.7" fill="currentColor" transform="rotate(-18 17.2 15.2)"/></svg></span><span id="ns-track-name"></span></span>
           <div class="ns-dots" id="ns-dots"></div>
         </div>
         <div class="title-corner">
@@ -163,7 +165,7 @@
           <div class="stats-grid">
             <div><span>Best</span><b id="over-best">0</b></div>
             <div><span>Length</span><b id="over-length">0</b></div>
-            <div><span>Top combo</span><b id="over-combo">x1</b></div>
+            <div><span>Combo</span><b id="over-combo">x1</b></div>
             <div><span>Time</span><b id="over-time">0s</b></div>
             <div><span>Zone</span><b id="over-zone">1</b></div>
             <div><span>Chains</span><b id="over-chains">0</b></div>
