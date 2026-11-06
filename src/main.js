@@ -35,6 +35,9 @@ const OVERHEAD_ROASTS = [
   'Overhead: same snake, zero adrenaline. Grandma approves.',
   'Ah yes, the view from the safety of the clouds.',
 ];
+// the jetpack and Galactic Core briefings, shown at lift-off and on restart
+const FLY_TOAST = { kicker: 'Jetpack on', title: 'Take flight', keys: [['↑', 'climb'], ['↓', 'dive'], ['← →', 'turn']], tone: 'sky', ms: 3400 };
+const CORE_TOAST = { kicker: 'Galactic Core', title: 'Fill every cell', sub: 'The black hole is eating the board', tone: 'prism', ms: 3400 };
 const mod = (a, n) => ((a % n) + n) % n;
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 const smooth01 = (v) => {
@@ -170,7 +173,7 @@ class App {
     this.updateWinBadge();
     // each map has two songs, picked at random: say which one starts playing
     this.audio.onTrack = (song) => {
-      if (this.state === 'playing' || this.state === 'countdown') this.toast(`♪ ${song.name}`);
+      if (this.state === 'playing' || this.state === 'countdown') this.toast({ kicker: 'Now playing', title: song.name, tone: 'music', ms: 2600 });
       // and on the title screen, under the map the tour is showing
       const el = $('ns-track');
       if ($('ns-track-name').textContent !== song.name || el.classList.contains('hidden')) {
@@ -180,6 +183,7 @@ class App {
         el.classList.add('swap');
       }
     };
+    this.startNoteFountain();
 
     // the title screen tours the maps in order, starting from the chosen one
     this.tourOffset = zoneForLevel(this.startLevel());
@@ -298,7 +302,7 @@ class App {
   // it's already on it).
   pickMap(zone) {
     if (ZONE_STARTS[zone] > this.unlockedLevel()) {
-      this.toast(`Reach level ${ZONE_STARTS[zone] + 1} to unlock this map`);
+      this.toast({ kicker: `${ZONE_NAMES[zone]} is locked`, title: `Reach level ${ZONE_STARTS[zone] + 1}`, tone: 'danger' });
       return;
     }
     if (zoneForLevel(this.startLevel()) === zone) {
@@ -535,7 +539,7 @@ class App {
     const box = $('set-timer');
     if (box) box.checked = this.settings.timer;
     this.audio.ui();
-    this.toast(this.settings.timer ? 'Speedrun timer on (T)' : 'Speedrun timer off');
+    this.toast({ kicker: 'Speedrun timer', title: this.settings.timer ? 'On' : 'Off' });
   }
 
   // m:ss.cc (h:mm:ss.cc past an hour)
@@ -579,7 +583,7 @@ class App {
   // ---------------------------------------------------------------- ghost
   toggleGhost() {
     this.setGhost(!this.settings.ghost);
-    this.toast(this.settings.ghost ? 'Ghost guide on: race the perfect snake' : 'Ghost guide off');
+    this.toast(this.settings.ghost ? { kicker: 'Ghost guide', title: 'On', sub: 'Race the perfect snake', tone: 'sky' } : { kicker: 'Ghost guide', title: 'Off' });
   }
 
   setGhost(on) {
@@ -871,7 +875,7 @@ class App {
     this.settings.muted = !this.settings.muted;
     this.audio.setVolumes({ muted: this.settings.muted });
     saveSettings(this.settings);
-    this.toast(this.settings.muted ? 'Sound off' : 'Sound on');
+    this.toast({ kicker: 'Sound', title: this.settings.muted ? 'Muted' : 'On' });
   }
 
   unlockAudio() {
@@ -895,7 +899,7 @@ class App {
       let i = Math.floor(Math.random() * (OVERHEAD_ROASTS.length - 1));
       if (i >= (this.roastIndex ?? -1)) i++;
       this.roastIndex = i % OVERHEAD_ROASTS.length;
-      if (this.state !== 'menu') this.toast(OVERHEAD_ROASTS[this.roastIndex]);
+      if (this.state !== 'menu') this.toast({ kicker: 'Overhead view', title: OVERHEAD_ROASTS[this.roastIndex], tone: 'quip', ms: 3200 });
     }
     this.settings.camera = mode;
     saveSettings(this.settings);
@@ -962,8 +966,8 @@ class App {
     this.audio.countdown(false);
     this.saidGo = false;
     if (this.relativeSteer) this.flashHint();
-    if (this.game.flying) this.toast('Fly! ↑ climb · ↓ dive · ← → turn');
-    if (this.game.space) this.toast('The black hole is eating the board! Fill every cell that\'s left');
+    if (this.game.flying) this.toast(FLY_TOAST);
+    if (this.game.space) this.toast(CORE_TOAST);
   }
 
   pause() {
@@ -1078,7 +1082,7 @@ class App {
       this.audio.doomWarn(ev.doomed.length);
       if (!this.collapseTold) {
         this.collapseTold = true;
-        this.later(0.3, () => this.toast('Glowing cells are about to fall into the black hole'));
+        this.later(0.3, () => this.toast({ title: 'The edge is crumbling', sub: 'Glowing cells fall in next', tone: 'danger' }));
       }
     }
     if (ev.fell) this.audio.suckIn(ev.fell.length);
@@ -1086,7 +1090,7 @@ class App {
       // the last stretch: a shockwave from the black hole, and it slows down
       this.world.space.pulse();
       this.audio.calm();
-      this.banner('Slow down');
+      this.banner('Slow down', 'Last stretch');
       this.slowMo(1.4, 0.45);
       if (!this.settings.reduceMotion) {
         this.flash(0.4, '#bfe6ff');
@@ -1102,16 +1106,16 @@ class App {
       this.audio.suckIn(2);
       if (!this.appleMovedTold) {
         this.appleMovedTold = true;
-        this.later(0.2, () => this.toast('The black hole swallowed an apple you couldn\'t safely reach'));
+        this.later(0.2, () => this.toast({ title: 'Apple swallowed', sub: 'It was out of reach, so a new one spawned', tone: 'danger' }));
       }
     }
-    if (ev.bonusSpawned) this.toast('A prism appeared! Grab it fast');
+    if (ev.bonusSpawned) this.toast({ kicker: '+50 · 9 seconds', title: 'Prism!', tone: 'prism' });
     if (ev.bonusExpired) {
       const w = at(ev.bonusExpired);
       this.effects.emit(w.x, w.y + 0.5, w.z, { count: 20, color: '#c77dff', speed: 1.5, up: 1, life: 0.6 });
     }
     if (ev.chainSpawned) {
-      this.toast('Orb chain! Eat them in order');
+      this.toast({ kicker: 'Eat them 1, 2, 3…', title: 'Orb chain!', tone: 'chain' });
       this.audio.chainLink(0);
       for (const l of ev.chainSpawned.links) {
         const w = at(l);
@@ -1124,7 +1128,7 @@ class App {
         const w = at(c);
         this.effects.emit(w.x, w.y + 0.5, w.z, { count: 26, color: '#38f6ff', speed: 3, up: 2.2, size: 0.22 });
         this.effects.shockwave(w.x, w.z, '#38f6ff', { y: w.y, max: 2.2, dur: 0.4 });
-        this.popup(new THREE.Vector3(w.x, w.y, w.z), `+${c.points}  ${c.index + 1}/${c.of}`, 'chain');
+        this.popup(new THREE.Vector3(w.x, w.y, w.z), `+${c.points}`, 'chain', `${c.index + 1}/${c.of}`);
         this.audio.chainLink(c.index + 1);
       });
     }
@@ -1132,11 +1136,11 @@ class App {
       const c = ev.chainComplete;
       this.later(delay + 0.05, () => {
         const w = at(c);
-        this.popup(new THREE.Vector3(w.x, w.y + 0.6, w.z), `CHAIN! +${c.bonus}`, 'chain big');
+        this.popup(new THREE.Vector3(w.x, w.y + 0.6, w.z), `+${c.bonus}`, 'chain big', 'chain');
         this.effects.emit(w.x, w.y + 0.6, w.z, { count: 80, color: '#7ff8ff', speed: 5, up: 3, size: 0.3 });
         this.effects.shockwave(w.x, w.z, '#38f6ff', { y: w.y, max: 6, dur: 0.7 });
         this.audio.chainComplete();
-        this.banner('Rush full!');
+        this.banner('Chain complete', 'Rush full');
         if (!rm) {
           this.flash(0.22, '#9ff8ff');
           this.rig.kick += 6;
@@ -1144,12 +1148,12 @@ class App {
       });
     }
     if (ev.chainBroken) {
-      this.toast('Chain broken: wrong order');
+      this.toast({ title: 'Chain broken', sub: 'Wrong order', tone: 'danger' });
       this.audio.chainBroken();
     }
-    if (ev.chainExpired) this.toast('The orb chain faded');
+    if (ev.chainExpired) this.toast({ title: 'Chain faded', tone: 'chain' });
     if (ev.preySpawned) {
-      this.toast('A golden mouse! Catch it');
+      this.toast({ kicker: 'Corner it · +100', title: 'Golden mouse!', tone: 'gold' });
       this.audio.preySpotted();
       const w = at(ev.preySpawned);
       this.effects.emit(w.x, w.y + 0.2, w.z, { count: 24, color: '#d8c49a', speed: 1.6, up: 1.5, size: 0.2, life: 0.7 });
@@ -1158,7 +1162,7 @@ class App {
       const c = ev.caught;
       this.later(delay, () => {
         const w = at(c);
-        this.popup(new THREE.Vector3(w.x, w.y, w.z), `+${c.points}${c.combo > 1 ? ` x${c.combo}` : ''}`, 'prey');
+        this.popup(new THREE.Vector3(w.x, w.y, w.z), `+${c.points}`, 'prey', c.combo > 1 ? `×${c.combo}` : '');
         this.effects.emit(w.x, w.y + 0.4, w.z, { count: 60, color: '#ffd36a', speed: 4, up: 3, size: 0.28 });
         this.effects.shockwave(w.x, w.z, '#ffd36a', { y: w.y, max: 4, dur: 0.55 });
         this.audio.preyCaught();
@@ -1169,7 +1173,7 @@ class App {
       });
     }
     if (ev.preyEscaped) {
-      this.toast('The mouse got away');
+      this.toast({ title: 'It got away', tone: 'gold' });
       this.audio.preyEscaped();
       const w = at(ev.preyEscaped);
       this.effects.emit(w.x, w.y + 0.15, w.z, { count: 30, color: '#b8a888', speed: 2, up: 1.2, size: 0.22, life: 0.6 });
@@ -1178,14 +1182,14 @@ class App {
       this.later(delay * 0.8, () => {
         const w = at(ev.boost);
         this.audio.boost();
-        this.popup(new THREE.Vector3(w.x, w.y, w.z), 'BOOST!', 'boost');
+        this.popup(new THREE.Vector3(w.x, w.y, w.z), 'Boost!', 'boost');
         this.effects.emit(w.x, w.y + 0.2, w.z, { count: 40, color: '#ffb020', speed: 3.5, up: 1.2, size: 0.24, life: 0.5 });
         if (!rm) this.rig.kick += 8;
       });
     }
     if (ev.obstaclesWarned) {
       this.audio.obstacleWarn();
-      this.toast('Pillars rising! Watch the red warning rings');
+      this.toast({ title: 'Pillars incoming', sub: 'Steer clear of the red rings', tone: 'danger' });
     }
     if (ev.obstaclesRaised) {
       this.audio.obstacleRise();
@@ -1235,7 +1239,7 @@ class App {
       });
       this.effects.emit(w.x, w.y + 0.45, w.z, { count: 14, color: '#ffffff', speed: 1.5, up: 3.5, size: 0.14, life: 0.5 });
       this.effects.shockwave(w.x, w.z, prism ? '#c77dff' : '#ff5a7a', { y: w.y, max: prism ? 4.5 : 2.6 });
-      this.popup(pos, `+${ate.points}${ate.combo > 1 ? ` x${ate.combo}` : ''}`, prism ? 'prism' : '');
+      this.popup(pos, `+${ate.points}`, prism ? 'prism' : '', ate.combo > 1 ? `×${ate.combo}` : '');
       const v = pos.clone().project(this.camera);
       if (prism) {
         this.audio.prism();
@@ -1282,7 +1286,7 @@ class App {
       this.protectUntil = this.simTime + 6;
       if (!this.settings.reduceMotion) this.rig.startCinematic(3.8);
       this.later(1.6, () => {
-        this.toast('Jetpack on! ↑ climb · ↓ dive · ← → turn');
+        this.toast(FLY_TOAST);
         this.flashHint();
       });
       const s = this.snake;
@@ -1303,7 +1307,7 @@ class App {
       }
     } else {
       this.audio.levelUp();
-      this.banner(lu.level >= MAX_LEVEL ? 'Max speed!' : 'Speed up!');
+      this.banner(lu.level >= MAX_LEVEL ? 'Top speed' : 'Speed up', `Level ${lu.level + 1}`);
       this.slowMo(1.1, 0.6);
       if (!this.settings.reduceMotion) this.rig.kick += 4;
     }
@@ -1338,7 +1342,7 @@ class App {
         const hd = this.snake.headDir;
         const front = this.snake.headPos.clone().addScaledVector(hd, 0.55);
         this.effects.emit(front.x, front.y + 0.4, front.z, { count: 26, color: '#ffffff', speed: 3.2, up: 1.5, size: 0.16, life: 0.4, gravity: 2 });
-        this.popup(front, 'BONK!', 'bonk');
+        this.popup(front, 'Bonk!', 'bonk');
         if (ev.cause !== 'wall' && ev.cause !== 'laser') this.effects.shockwave(w.x, w.z, '#ffd23f', { max: 1.4, dur: 0.45, y: hy });
       });
       // once the camera has pulled back, point at the crash again
@@ -1371,13 +1375,13 @@ class App {
         this.rig.shake += 0.25;
       }
     });
-    // Pull back to the overhead view so the player can see what happened. In
-    // the Galactic Core the camera lets go instead: it rises and circles the
-    // black hole, watching the snake go in.
+    // Pull back and circle the board so the player can see what happened. In
+    // the Galactic Core the camera rises and circles the black hole instead,
+    // watching the snake go in.
     // Off the edge, it first rides the snake down until the head goes in.
     if (ev.cause === 'void') this.later(0.1, () => this.startDeathFollow());
     else if (g.space) this.later(0.55, () => this.startDeathOrbit());
-    else if (this.cameraMode !== 'overhead') this.later(0.55, () => this.rig.setMode('overhead', { reduceMotion: this.settings.reduceMotion }));
+    else this.later(0.55, () => this.startDeathCircle());
     // the card (and Play again) comes up straight away; the camera carries
     // on behind it
     this.later(0.45, () => this.showGameOver(ev.cause));
@@ -1587,6 +1591,37 @@ class App {
   }
 
   // A gold "100%" next to Best once the galaxy has been finished.
+  // On the title screen the little note next to the song name bops to the
+  // beat and throws off colourful notes.
+  startNoteFountain() {
+    const NOTE_COLORS = ['#ff5d8f', '#ffd23f', '#38f6ff', '#7dffb0', '#c77dff', '#ff9a3c'];
+    const GLYPHS = [
+      '<svg viewBox="0 0 16 20"><path d="M7 2v11.2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M7 2c2 3 6 3 6 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><ellipse cx="4.6" cy="14.6" rx="3.6" ry="2.8" transform="rotate(-20 4.6 14.6)" fill="currentColor"/></svg>',
+      '<svg viewBox="0 0 22 20"><path d="M7 14V3.6l12-2.2V12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><ellipse cx="4.4" cy="14.6" rx="3.4" ry="2.6" transform="rotate(-20 4.4 14.6)" fill="currentColor"/><ellipse cx="16.4" cy="12.6" rx="3.4" ry="2.6" transform="rotate(-20 16.4 12.6)" fill="currentColor"/></svg>',
+    ];
+    let n = 0;
+    setInterval(() => {
+      if (document.hidden || this.settings.reduceMotion || this.settings.muted || this.audio.ctx?.state !== 'running') return;
+      const toast = $('toast');
+      let host = null;
+      if (toast.classList.contains('show') && toast.classList.contains('tone-music')) host = $('t-note');
+      else if (this.state === 'menu' && !$('ns-track').classList.contains('hidden')) host = $('ns-note');
+      if (!host) return;
+      const el = document.createElement('i');
+      el.className = 'ns-pop';
+      el.innerHTML = GLYPHS[n % 2];
+      const ang = -Math.PI / 2 + (Math.random() - 0.62) * 1.6; // up, leaning left, away from the screen edge
+      const dist = 34 + Math.random() * 26;
+      el.style.setProperty('--dx', `${(Math.cos(ang) * dist).toFixed(1)}px`);
+      el.style.setProperty('--dy', `${(Math.sin(ang) * dist).toFixed(1)}px`);
+      el.style.setProperty('--r', `${Math.round((Math.random() - 0.5) * 70)}deg`);
+      el.style.setProperty('--s', (0.8 + Math.random() * 0.5).toFixed(2));
+      el.style.color = NOTE_COLORS[n++ % NOTE_COLORS.length];
+      el.addEventListener('animationend', () => el.remove());
+      host.appendChild(el);
+    }, 360);
+  }
+
   updateWinBadge() {
     const el = $('win-badge');
     if (!el) return;
@@ -1595,19 +1630,38 @@ class App {
     el.title = n > 1 ? `Galaxy finished ${n} times` : 'You finished the galaxy';
   }
 
-  toast(text) {
+  // Callouts: a short headline, with an optional kicker above it and a line
+  // below, tinted by tone (info, music, prism, chain, gold, danger, sky, quip).
+  // Pass a string for a plain headline.
+  toast(msg) {
+    const m = typeof msg === 'string' ? { title: msg } : msg;
     const el = $('toast');
-    el.textContent = text;
+    el.querySelector('.t-kicker').textContent = m.kicker || '';
+    el.querySelector('.t-title').textContent = m.title || '';
+    const sub = el.querySelector('.t-sub');
+    sub.textContent = '';
+    if (m.keys) {
+      // control hints: key caps with a word each
+      for (const [k, word] of m.keys) {
+        const kb = document.createElement('kbd');
+        kb.textContent = k;
+        sub.append(kb, ` ${word}`);
+      }
+    } else sub.textContent = m.sub || '';
+    el.className = `tone-${m.tone || 'info'}`;
+    el.classList.toggle('no-kicker', !m.kicker);
+    el.classList.toggle('no-sub', !m.sub && !m.keys);
     this.placeToast(el);
+    void el.offsetWidth;
     el.classList.add('show');
     clearTimeout(this.toastTimer);
-    this.toastTimer = setTimeout(() => el.classList.remove('show'), 1900);
+    this.toastTimer = setTimeout(() => el.classList.remove('show'), m.ms || (m.sub || m.keys ? 2600 : 1900));
   }
 
   // While a menu card is up, put the toast in free space next to it (below,
   // above, then beside) so it never covers the card; otherwise use the CSS spot.
   placeToast(el) {
-    el.style.top = el.style.left = el.style.transform = '';
+    el.style.top = el.style.left = el.style.right = '';
     const holder = this.openPanel ? $(this.openPanel) : document.querySelector('.screen:not(.hidden):not(.panel)');
     const card = holder?.querySelector('.card');
     if (!card) return;
@@ -1628,12 +1682,14 @@ class App {
     } else top = H - h - gap;
     el.style.top = `${Math.round(top)}px`;
     el.style.left = `${Math.round(Math.max(gap, left))}px`;
-    el.style.transform = 'none';
+    el.style.right = 'auto';
   }
 
-  banner(text) {
+  banner(text, sub = '') {
     const el = $('banner');
     $('banner-text').textContent = text;
+    $('banner-sub').textContent = sub;
+    this.setClass($('banner-sub'), 'hidden', !sub);
     el.classList.add('hidden');
     void el.offsetWidth;
     el.classList.remove('hidden');
@@ -1657,12 +1713,19 @@ class App {
     this.flashColor.set(color);
   }
 
-  popup(pos, text, cls) {
+  // floating score text over a world position; `tag` is a smaller suffix
+  // such as a combo multiplier or a chain count
+  popup(pos, text, cls, tag = '') {
     const v = pos.clone().setY(pos.y + 0.9).project(this.camera);
     if (v.z > 1 || Math.abs(v.x) > 1.1 || Math.abs(v.y) > 1.1) return;
     const el = document.createElement('div');
     el.className = `popup ${cls}`;
     el.textContent = text;
+    if (tag) {
+      const t = document.createElement('small');
+      t.textContent = tag;
+      el.append(t);
+    }
     el.style.left = `${((v.x + 1) / 2) * window.innerWidth}px`;
     el.style.top = `${((1 - v.y) / 2) * window.innerHeight}px`;
     $('popups').appendChild(el);
@@ -1691,7 +1754,14 @@ class App {
 
   updateHud() {
     const g = this.game;
-    this.setText('hud-score', g.score.toLocaleString());
+    const scoreText = g.score.toLocaleString();
+    if (this.lastHud['hud-score'] !== scoreText && g.score > 0 && this.state === 'playing') {
+      const el = $('hud-score');
+      el.classList.remove('bump');
+      void el.offsetWidth;
+      el.classList.add('bump');
+    }
+    this.setText('hud-score', scoreText);
     this.setText('hud-best', g.best.toLocaleString());
     // through hyperspeed it's still the full snake; then it counts down as
     // the torn-off tail goes into the black hole
@@ -1711,7 +1781,7 @@ class App {
     const left = prog.need - prog.into;
     // in the Galactic Core the bar is the board filling up, in tenths
     const segs = prog.core ? 10 : prog.need;
-    this.setText('hud-lvl-next', prog.core ? `${Math.floor((prog.into / prog.need) * 100)}% filled` : maxed ? 'Max speed!' : `${left} apple${left === 1 ? '' : 's'} to Lv ${lvl + 2}`);
+    this.setText('hud-lvl-next', prog.core ? `${Math.floor((prog.into / prog.need) * 100)}% filled` : maxed ? 'Top speed' : `${left} apple${left === 1 ? '' : 's'} to go`);
     this.setStyle('hud-lvl-fill', 'transform', `scaleX(${(prog.into / prog.need).toFixed(3)})`);
     if (this.lastHud.segs !== segs) {
       this.lastHud.segs = segs;
@@ -1720,7 +1790,7 @@ class App {
     this.setClass($('hud-lvl'), 'max', maxed);
     this.setClass($('hud-lvl'), 'orbit', !!prog.core);
     const nz = ZONE_STARTS.findIndex((z) => z > lvl);
-    this.setText('hud-zone-next', g.space ? `${Math.max(0, g.coreFree())} empty cells left · fill them all` : nz < 0 ? 'Final zone' : `Next zone: ${ZONE_NAMES[nz]} at Lv ${ZONE_STARTS[nz] + 1}`);
+    this.setText('hud-zone-next', g.space ? `${Math.max(0, g.coreFree())} cells left to fill` : nz < 0 ? 'Final zone' : `Next: ${ZONE_NAMES[nz]} at Lv ${ZONE_STARTS[nz] + 1}`);
     this.setStyle('hud-rush', 'transform', `scaleX(${(g.rush / 100).toFixed(3)})`);
     const rushEl = $('hud-rush-wrap');
     this.setClass(rushEl, 'active', g.rushing);
@@ -1730,7 +1800,7 @@ class App {
     const showCombo = g.combo > 1 && comboLeft > 0 && this.state !== 'over';
     this.setClass($('hud-combo'), 'hidden', !showCombo);
     if (showCombo) {
-      this.setText('hud-combo-x', `x${g.combo}`);
+      this.setText('hud-combo-x', `×${g.combo}`);
       this.setStyle('hud-combo-bar', 'transform', `scaleX(${Math.max(0, comboLeft).toFixed(2)})`);
     }
     // chain tracker
@@ -1797,87 +1867,176 @@ class App {
     return { x: Math.sin(yaw), z: Math.cos(yaw) };
   }
 
+  // Pickup pointers: while a pickup is out of view, a dart sits on the
+  // screen's edge pointing the way to go (the apple's carries its distance).
+  // Once it's on screen the dart fades away.
   updateCompass() {
     const g = this.game;
-    const f = this.viewForward();
-    const hp = this.snake.headPos;
-    const aim = (target, needle) => {
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - (this.poiT || now)) / 1000);
+    this.poiT = now;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const small = W < 720;
+    // keep clear of the HUD corners and the rush bar
+    const m = { l: small ? 28 : 44, r: small ? 28 : 44, t: small ? 150 : 110, b: small ? 150 : 90 };
+    const cx = (m.l + W - m.r) / 2;
+    const cy = (m.t + H - m.b) / 2;
+    const hw = (W - m.l - m.r) / 2;
+    const hh = (H - m.t - m.b) / 2;
+    const cam = this.camera;
+    const v = this.poiV || (this.poiV = new THREE.Vector3());
+    const point = (target, key, withDist) => {
+      const el = $(`poi-${key}`);
       if (!target) {
-        this.setClass(needle, 'hidden', true);
-        return null;
+        this.setClass(el, 'hidden', true);
+        if (this.poiState?.[key]) this.poiState[key].snap = true; // a new one starts where it is
+        return;
       }
-      this.setClass(needle, 'hidden', false);
-      const w = this.toWorld(target.x, target.z);
-      const vx = w.x - hp.x;
-      const vz = w.z - hp.z;
-      const rel = Math.atan2(f.x * vz - f.z * vx, f.x * vx + f.z * vz);
-      needle.style.transform = `rotate(${rel.toFixed(3)}rad)`;
-      return Math.abs(target.x - g.head.x) + Math.abs(target.z - g.head.z) + Math.abs((target.y || 0) - (g.head.y || 0));
+      this.setClass(el, 'hidden', false);
+      const w = this.toWorld(target.x, target.z, target.y);
+      const d = Math.abs(target.x - g.head.x) + Math.abs(target.z - g.head.z) + Math.abs((target.y || 0) - (g.head.y || 0));
+      v.set(w.x, w.y + 0.6, w.z).applyMatrix4(cam.matrixWorldInverse);
+      const front = v.z < 0;
+      const camX = v.x;
+      const camY = v.y;
+      v.applyMatrix4(cam.projectionMatrix);
+      const sx = ((v.x + 1) / 2) * W;
+      const sy = ((1 - v.y) / 2) * H;
+      let x;
+      let y;
+      let a;
+      const over = front && Math.abs(sx - cx) <= hw && Math.abs(sy - cy) <= hh;
+      if (over) {
+        x = sx;
+        y = sy - 34;
+        a = Math.PI / 2;
+      } else {
+        let dx = front ? sx - cx : camX;
+        let dy = front ? sy - cy : -camY;
+        if (!front) dy = Math.max(dy, 0.2 * Math.hypot(dx, dy)); // behind: lean towards the bottom edge
+        if (Math.abs(dx) + Math.abs(dy) < 1e-6) dy = 1;
+        const k = Math.min(hw / Math.max(1e-6, Math.abs(dx)), hh / Math.max(1e-6, Math.abs(dy)));
+        x = cx + dx * k;
+        y = cy + dy * k;
+        a = Math.atan2(dy, dx);
+      }
+      // glide between spots rather than jumping
+      const s = this.poiState || (this.poiState = {});
+      const p = s[key];
+      if (!p || p.snap) s[key] = { x, y, a, snap: false };
+      else {
+        const f = Math.min(1, dt * 14);
+        p.x += (x - p.x) * f;
+        p.y += (y - p.y) * f;
+        let da = a - p.a;
+        da = Math.atan2(Math.sin(da), Math.cos(da));
+        p.a += da * f;
+      }
+      const q = s[key];
+      el.style.transform = `translate(${q.x.toFixed(1)}px, ${q.y.toFixed(1)}px)`;
+      el.firstElementChild.style.transform = `rotate(${q.a.toFixed(3)}rad)`;
+      this.setClass(el, 'over', over);
+      this.setClass(el, 'near', over); // on screen: no pointer needed
+      if (withDist) {
+        const b = $(`poi-${key}-d`);
+        b.textContent = String(d);
+        b.style.transform = `translate(calc(-50% + ${(-Math.cos(q.a) * 30).toFixed(1)}px), calc(-50% + ${(-Math.sin(q.a) * 26).toFixed(1)}px))`;
+      }
     };
-    const d = aim(g.food, $('needle-orb'));
-    aim(g.bonus, $('needle-prism'));
-    aim(g.prey, $('needle-prey'));
-    // in the sky, also say whether the apple is above or below
-    const dy = g.food && g.flying ? g.food.y - g.head.y : 0;
-    this.setText('compass-text', d == null ? '' : `${d}${dy > 0 ? '▲' : dy < 0 ? '▼' : ''}`);
+    point(g.food, 'orb', true);
+    point(g.bonus, 'prism', false);
+    point(g.prey, 'prey', false);
   }
 
+  // Pixel-art map, a few canvas pixels per cell and scaled up crisp by CSS.
+  // It turns in quarter steps so the way the camera faces is up and the
+  // pixels never smear.
   drawMinimap() {
-    const c = this.mmCtx || (this.mmCtx = $('minimap').getContext('2d'));
-    const W = c.canvas.width;
+    const cv = $('minimap');
     const g = this.game;
-    c.clearRect(0, 0, W, W);
+    const N = g.size;
+    const P = 5; // canvas pixels per cell
+    const B = 2; // border pixels
+    const S = N * P + B * 2;
+    if (cv.width !== S) cv.width = cv.height = S;
+    const c = this.mmCtx || (this.mmCtx = cv.getContext('2d'));
+    c.imageSmoothingEnabled = false;
+    const t = this.simTime;
+    const blink = Math.floor(t * 4) % 2 === 0;
     const f = this.viewForward();
-    const a = Math.atan2(f.x, -f.z);
-    const N = g.size; // the sky box is wider than the board
-    const cell = W / (N * 1.45);
-    const o = (N - 1) / 2;
-    c.save();
-    c.translate(W / 2, W / 2);
-    c.rotate(-a);
-    c.fillStyle = 'rgba(120, 210, 120, 0.22)';
-    c.strokeStyle = 'rgba(56, 246, 255, 0.9)';
-    c.lineWidth = 2;
-    if (g.space && g.land) {
-      // the Galactic Core: only the cells still there, doomed ones pulsing
-      const pulse = 0.45 + 0.35 * Math.sin(this.simTime * 14);
-      for (let x = 0; x < N; x++) {
-        for (let z = 0; z < N; z++) {
+    const q = (((Math.round(Math.atan2(f.x, -f.z) / (Math.PI / 2))) % 4) + 4) % 4;
+    const M = N - 1;
+    // grid cell -> map cell, a quarter turn at a time
+    const T = (x, z) => {
+      for (let i = 0; i < q; i++) [x, z] = [z, M - x];
+      return [x, z];
+    };
+    const px = (x, z, color, inset = 0) => {
+      const [u, v] = T(x, z);
+      c.fillStyle = color;
+      c.fillRect(B + u * P + inset, B + v * P + inset, P - inset * 2, P - inset * 2);
+    };
+    // frame and floor
+    c.fillStyle = '#070d26';
+    c.fillRect(0, 0, S, S);
+    c.fillStyle = '#5a78d8';
+    c.fillRect(0, 0, S, B);
+    c.fillRect(0, S - B, S, B);
+    c.fillRect(0, 0, B, S);
+    c.fillRect(S - B, 0, B, S);
+    for (let x = 0; x < N; x++) {
+      for (let z = 0; z < N; z++) {
+        if (g.space && g.land) {
           if (!g.land[x * N + z]) continue;
-          c.fillStyle = g.doomAt(x, z) ? `rgba(255, 170, 90, ${pulse})` : 'rgba(95, 214, 255, 0.28)';
-          c.fillRect((x - o - 0.5) * cell, (z - o - 0.5) * cell, cell, cell);
+          if (g.doomAt(x, z)) {
+            px(x, z, blink ? '#ff9a3c' : '#7a3a20');
+            continue;
+          }
+        }
+        px(x, z, (x + z) & 1 ? '#172a63' : '#1f3678');
+      }
+    }
+    for (const ob of g.obstacles) {
+      if (ob.solid) px(ob.x, ob.z, '#e8dcc0');
+      else if (blink) px(ob.x, ob.z, '#ff3b5c', 1);
+    }
+    for (const p of g.pads) px(p.x, p.z, '#ff9a3c', 1);
+    if (g.chain) {
+      for (let i = g.chain.next; i < g.chain.links.length; i++) {
+        const l = g.chain.links[i];
+        if (i === g.chain.next) px(l.x, l.z, blink ? '#ffffff' : '#38f6ff');
+        else px(l.x, l.z, '#38f6ff', 1);
+      }
+    }
+    if (this.settings.ghost) for (const gc of this.ghost.cells) px(gc.x, gc.z, 'rgba(168, 240, 255, 0.45)', 1);
+    // snake: body in its colour with a darker belly stripe, white head
+    const body = this.snake.trailColor || '#38f6ff';
+    for (let i = g.cells.length - 1; i >= 1; i--) {
+      px(g.cells[i].x, g.cells[i].z, body);
+      if (i % 2) px(g.cells[i].x, g.cells[i].z, 'rgba(0, 0, 0, 0.22)', 2);
+    }
+    px(g.head.x, g.head.z, '#ffffff');
+    // little pixel sprites, always drawn upright
+    const sprite = (x, z, rows, colors) => {
+      const [u, v] = T(x, z);
+      const o = (rows.length - P) >> 1; // bigger sprites spill over their cell evenly
+      for (let r = 0; r < rows.length; r++) {
+        for (let k = 0; k < rows[r].length; k++) {
+          const ch = rows[r][k];
+          if (ch === '.') continue;
+          c.fillStyle = colors[ch];
+          c.fillRect(B + u * P + k - o, B + v * P + r - o, 1, 1);
         }
       }
-    } else {
-      c.fillRect((-N / 2) * cell, (-N / 2) * cell, N * cell, N * cell);
-      c.strokeRect((-N / 2) * cell, (-N / 2) * cell, N * cell, N * cell);
+    };
+    if (g.prey) sprite(g.prey.x, g.prey.z, ['.y.y.', 'yyyyy', 'ykyky', 'yyyyy', '.yyy.'], { y: '#ffd36a', k: '#3a2400' });
+    if (g.bonus) sprite(g.bonus.x, g.bonus.z, ['..v..', '.vwv.', 'vvvvv', '.vvv.', '..v..'], { v: '#c77dff', w: '#ffffff' });
+    if (g.food) {
+      // a pixel apple; it flashes white now and then so it's easy to spot
+      const flash = (t * 1.5) % 1 < 0.12;
+      sprite(g.food.x, g.food.z, ['...gg..', '..g....', '.rr.rr.', 'rwrrrrr', 'rwrrrrr', 'rrrrrrr', '.rrrrr.'], { g: '#5be36a', r: flash ? '#ffffff' : '#ff3355', w: '#ffd0d8' });
     }
-    const dot = (x, z, color, r = 0.5) => {
-      c.fillStyle = color;
-      c.beginPath();
-      c.arc((x - o) * cell, (z - o) * cell, cell * r, 0, Math.PI * 2);
-      c.fill();
-    };
-    const sq = (x, z, color) => {
-      c.fillStyle = color;
-      c.fillRect((x - o - 0.45) * cell, (z - o - 0.45) * cell, cell * 0.9, cell * 0.9);
-    };
-    for (const ob of g.obstacles) sq(ob.x, ob.z, ob.solid ? '#d8d0c0' : 'rgba(255, 60, 90, 0.7)');
-    for (const p of g.pads) dot(p.x, p.z, '#ff8a2a', 0.6);
-    if (g.chain) for (let i = g.chain.next; i < g.chain.links.length; i++) dot(g.chain.links[i].x, g.chain.links[i].z, '#38f6ff', i === g.chain.next ? 0.75 : 0.5);
-    if (g.food) dot(g.food.x, g.food.z, '#ff4d6d', 0.75);
-    if (g.bonus) dot(g.bonus.x, g.bonus.z, '#d9a3ff', 0.8);
-    if (g.prey) dot(g.prey.x, g.prey.z, '#fff2b0', 0.7);
-    if (this.settings.ghost) for (const c of this.ghost.cells) dot(c.x, c.z, 'rgba(168, 240, 255, 0.55)', 0.32);
-    for (let i = g.cells.length - 1; i >= 1; i--) dot(g.cells[i].x, g.cells[i].z, '#17c3b2', 0.48);
-    dot(g.head.x, g.head.z, '#ffffff', 0.62);
-    c.restore();
-    c.fillStyle = 'rgba(255,255,255,0.85)';
-    c.beginPath();
-    c.moveTo(W / 2, 6);
-    c.lineTo(W / 2 - 5, 14);
-    c.lineTo(W / 2 + 5, 14);
-    c.fill();
   }
 
   // Galactic Core deaths: the camera lets go of the board, drifts up and
@@ -1907,6 +2066,44 @@ class App {
       obj.up.set(0, 1, 0);
       // the eye settles on the black hole
       obj.lookAt(l0.x * (1 - k), l0.y + (CORE_Y + 1.5 - l0.y) * k, l0.z * (1 - k));
+      out.quat.copy(obj.quaternion);
+      out.fov = 50;
+    }, { duration: rm ? 0.4 : 1.1 });
+  }
+
+  // Every other map: the camera pulls up and back from wherever it was and
+  // slowly circles the board, eyes on the crash, for as long as the
+  // game-over card is up.
+  startDeathCircle() {
+    const g = this.game;
+    const rm = this.settings.reduceMotion;
+    const cam = this.camera.position;
+    const hp = this.snake.headPos.clone();
+    const half = (g.size / 2) * Math.SQRT2; // board centre to a corner
+    // look between the crash and the board's middle, so both stay in frame
+    const lookT = new THREE.Vector3(hp.x * 0.35, hp.y - (g.flying ? 0 : 0.5), hp.z * 0.35);
+    const rT = half * 1.15 + 9;
+    const yT = hp.y + half * 0.9 + 5;
+    const r0 = Math.max(2, Math.hypot(cam.x, cam.z));
+    const y0 = cam.y;
+    let a = Math.atan2(cam.x, cam.z);
+    const l0 = new THREE.Vector3(); // where the camera was looking
+    this.camera.getWorldDirection(l0).multiplyScalar(8).add(cam);
+    const look = new THREE.Vector3();
+    const obj = this.rig.tmpObj;
+    let t = 0;
+    this.deathOrbit = true;
+    this.rig.setDirector((dt, out) => {
+      t += dt;
+      const k = smooth01(t / 2.6);
+      // the turn picks up gently, then keeps going
+      a += dt * (rm ? 0.04 : 0.15) * smooth01(t / 2.2);
+      const r = r0 + (rT - r0) * k;
+      out.pos.set(Math.sin(a) * r, y0 + (yT - y0) * k, Math.cos(a) * r);
+      obj.position.copy(out.pos);
+      obj.up.set(0, 1, 0);
+      look.copy(l0).lerp(lookT, k);
+      obj.lookAt(look);
       out.quat.copy(obj.quaternion);
       out.fov = 50;
     }, { duration: rm ? 0.4 : 1.1 });
@@ -2457,7 +2654,7 @@ class App {
       } else if (!busy && this.settings.quality === 'auto' && this.activeQuality !== 'low' && ++d.slowAtMin >= 6) {
         this.activeQuality = this.activeQuality === 'high' ? 'medium' : 'low';
         this.applyQuality();
-        if (this.state === 'playing') this.toast(`Graphics set to ${this.activeQuality} for smoother play`);
+        if (this.state === 'playing') this.toast({ kicker: 'Graphics', title: this.activeQuality === 'low' ? 'Low' : 'Medium', sub: 'Lowered to keep it smooth' });
       }
     } else if (p80 < 17.8) {
       d.slowAtMin = 0;

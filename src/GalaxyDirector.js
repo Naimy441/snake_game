@@ -74,7 +74,7 @@ export class GalaxyDirector {
     app.rig.setDirector((dt, out) => this.warpCam(dt, out), { duration: rm ? 0.3 : 0.9 });
     this.jumpAt = this.pre ? (rm ? 0.8 : 1.7) : 0;
     this.dropAt = this.jumpAt + (rm ? 2 : 4.2);
-    app.later(0.15, () => app.banner('Hyperspeed!'));
+    app.later(0.15, () => app.banner('Hyperspeed', 'Next stop: the Galactic Core'));
   }
 
   // Charging up in the sky, before the jump.
@@ -190,7 +190,7 @@ export class GalaxyDirector {
       });
       app.later(ripping ? 2.7 : 0.9, () => app.titleCard(SPACE_ZONE));
       app.later(3.0, () => app.rig.setMode(app.cameraMode, { duration: 1.4 }));
-      app.later(ripping ? 5.2 : 4.2, () => this.finish(app.tailLost > 1 ? 'The black hole ripped off your tail! Now it\'s eating the board: fill every cell that\'s left' : 'The black hole is eating the board! Fill every cell that\'s left'));
+      app.later(ripping ? 5.2 : 4.2, () => this.finish(app.tailLost > 1 ? { kicker: 'Your tail is gone', title: 'Fill every cell', sub: 'The black hole is eating the board', tone: 'prism', ms: 3600 } : { kicker: 'Galactic Core', title: 'Fill every cell', sub: 'The black hole is eating the board', tone: 'prism', ms: 3400 }));
     }
   }
 
@@ -207,7 +207,7 @@ export class GalaxyDirector {
     this.space.startFinale(g);
     const E = this.space.eruptAt;
     $('countdown').classList.add('hidden');
-    app.banner('100%!');
+    app.banner('100%', 'Galaxy complete');
     const cam = app.camera;
     this.fin = { a: Math.atan2(cam.position.z, cam.position.x), r: Math.hypot(cam.position.x, cam.position.z), h: cam.position.y };
     app.rig.setDirector((dt, out) => this.finaleCam(dt, out), { duration: 1.6 });
