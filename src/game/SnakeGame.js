@@ -62,7 +62,7 @@ export const CORE_SIZE = 12;
 export const COLLAPSE_PER_APPLE = 3;
 export const DOOM_MS = 1300;
 export const DOOM_STAGGER_MS = 170;
-export const CORE_FAST = 122; // ms per move once the board is nearly full
+export const CORE_FAST = 132; // ms per move once the board is nearly full (~7.6 moves/s: room to think in the endgame)
 const MAX_FREE_EATS = 4; // dead-end nubs taken per apple, on top
 // What the bot's planning copies can share with the game (never changed in
 // the Galactic Core, or not wanted in a copy).
