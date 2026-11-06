@@ -63,6 +63,12 @@ export const COLLAPSE_PER_APPLE = 3;
 export const DOOM_MS = 1300;
 export const DOOM_STAGGER_MS = 170;
 export const CORE_FAST = 132; // ms per move once the board is nearly full (~7.6 moves/s: room to think in the endgame)
+// The black hole calms down for the last stretch: once the snake is this
+// long, a shockwave rolls out and the game eases back to CORE_CALM over
+// CORE_CALM_MOVES moves, and stays there.
+export const CORE_CALM_LEN = 35;
+export const CORE_CALM = 180; // ms per move (~5.5 moves/s)
+export const CORE_CALM_MOVES = 10;
 const MAX_FREE_EATS = 4; // dead-end nubs taken per apple, on top
 // What the bot's planning copies can share with the game (never changed in
 // the Galactic Core, or not wanted in a copy).
@@ -179,6 +185,8 @@ export class SnakeGame {
     this.land = null; // Galactic Core: 1 for each cell still there (x * size + z)
     this.doomed = []; // cells about to fall: { x, z, doomAt, fallAt, id }
     this.fallen = 0;
+    this.calm = -1; // Galactic Core: moves since the slow-down began (-1: not yet)
+    this.calmFrom = 0; // (and how fast it was going then, ms per move)
     this.clearCoreTimers();
     this.launch = 0; // lift-off climb steps left (input is ignored meanwhile)
     this.height = 1;
@@ -326,7 +334,12 @@ export class SnakeGame {
     if (this.space) {
       // by the fullest the board has been, so it never slows down again
       const f = Math.max(this.fillTop || 0, this.fill);
-      return LEVEL_SPEEDS[SPACE_START] + (CORE_FAST - LEVEL_SPEEDS[SPACE_START]) * f * f;
+      const base = LEVEL_SPEEDS[SPACE_START] + (CORE_FAST - LEVEL_SPEEDS[SPACE_START]) * f * f;
+      if (!(this.calm >= 0)) return base;
+      // eased from the speed it had when the calm began, so it never lands mid-turn
+      const from = this.calmFrom || base;
+      const t = Math.min(1, this.calm / CORE_CALM_MOVES);
+      return from + (CORE_CALM - from) * t * t * (3 - 2 * t);
     }
     return Math.max(MIN_INTERVAL, LEVEL_SPEEDS[this.level]);
   }
@@ -868,6 +881,8 @@ export class SnakeGame {
     this.doomed = [];
     this.fallen = 0;
     this.fillTop = 0;
+    this.calm = -1;
+    this.calmFrom = 0;
     this.clearCoreTimers();
     const c = Math.floor(S / 2);
     const z0 = S - 5;
@@ -1794,6 +1809,12 @@ export class SnakeGame {
 
     if (this.space) {
       this.fillTop = Math.max(this.fillTop, this.fill);
+      if (this.calm >= 0) this.calm = Math.min(CORE_CALM_MOVES, this.calm + 1);
+      else if (this.cells.length >= CORE_CALM_LEN) {
+        this.calmFrom = this.baseInterval();
+        this.calm = 0;
+        ev.calm = true;
+      }
       // the black hole feeds on the board; once every cell left is snake, it's won
       if (eaten) {
         this.food = null;

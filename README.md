@@ -202,7 +202,11 @@ continues in the finale.
   the board in two, and never cuts your head off from your own tail, so
   there is always a way to stay alive. Dead-end cells (one neighbour left,
   which could only ever be filled last) are eaten first, for free. The game
-  speeds up as the board fills.
+  speeds up as the board fills (about 6.7 to 7.6 moves a second).
+- **Slow down:** once the snake is 35 long, the black hole flares and a
+  shockwave rolls out across the board under a "Slow down" banner. Over the
+  next 10 moves the game eases back to about 5.5 moves a second and stays
+  there for the final stretch.
 - **Fair apples:** a new apple only goes where the snake can still get
   itself safe (the game checks by playing it out ahead), preferring cells it
   can actually reach, eat and survive; it never lands on a dead end, and the
@@ -305,6 +309,22 @@ jetpack-ignition roar. The Galactic Core has a slow, vast minor-key anthem,
 with a hyperspeed riser, a deep boom as you drop out, and a finale that goes
 silent before the eruption and resolves into a major-key victory chord. On the
 title screen, the music follows the map the tour is showing.
+
+The original songs are **Seaside Sprint** (Emerald Coast), **Desert Wind**
+(Golden Canyon), **City Lights** (Neon Night), **Data Stream** (Cyber
+Overdrive), **Skyward** (Sunset Heavens) and **Last Light** (Galactic Core).
+Every map has **two songs**, and one is picked at random each time its music
+starts (a new map or a new run); a small "♪ name" note says which, and on
+the title screen the song playing is shown under the map name. The second
+set is written hook first, in the same chiptune voices: a short catchy motif
+that repeats and climbs through the verse, and a bigger chorus where the lead
+doubles an octave up. **High Tide** (a sunny, bouncing anthem) on Emerald
+Coast, **Gold Rush** (a galloping western) in Golden Canyon, **Midnight Drive**
+(octave-popping disco synth-pop) on Neon Night, **Firewall** (a harmonic-minor
+chase theme) in Cyber Overdrive, **Golden Hour** (a dreamy, soaring climb) in
+Sunset Heavens and **Supernova** (a major-key anthem of wonder) in the Galactic Core.
+To pin one while testing, run
+`__coil.audio.forceTrack = 0` (original) or `1` (alternate) in the console.
 
 ### Chase and first-person aids
 

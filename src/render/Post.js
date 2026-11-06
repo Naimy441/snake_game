@@ -59,6 +59,7 @@ uniform float uBloom; uniform float uSpeed; uniform float uChroma; uniform float
 uniform float uDanger; uniform vec3 uDangerColor; uniform float uFlash; uniform vec3 uFlashColor;
 uniform float uTime; uniform float uLines; uniform vec2 uCenter; uniform float uAspect;
 uniform float uSat; uniform float uContrast; uniform vec3 uTint; uniform vec3 uLift; uniform bool uUseBloom;
+uniform vec3 uHole; // a black hole on screen (uv centre, radius in uv heights; 0: none)
 varying vec2 vUv;
 float hash(float n){ return fract(sin(n) * 43758.5453123); }
 vec3 scene(vec2 uv){ return texture2D(tScene, min(clamp(uv, 0.0, 1.0) * uScale, uScale - uTexel * 0.5)).rgb; }
@@ -87,7 +88,12 @@ void main(){
     col.r = mix(col.r, scene(uv + off).r, 0.85);
     col.b = mix(col.b, scene(uv - off).b, 0.85);
   }
-  if (uUseBloom) col += texture2D(tBloom, uv).rgb * uBloom;
+  if (uUseBloom) {
+    // nothing glows inside a black hole: the bloom of the bright ring round
+    // it would otherwise wash over it and light it up like a sphere
+    float hole = uHole.z > 0.0 ? smoothstep(uHole.z * 0.9, uHole.z, length((uv - uHole.xy) * vec2(uAspect, 1.0))) : 1.0;
+    col += texture2D(tBloom, uv).rgb * uBloom * hole;
+  }
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
   // colour grade in tone-mapped linear space
@@ -159,6 +165,7 @@ export class PostFX {
         uTexel: { value: new THREE.Vector2(1, 1) },
         tBloom: { value: null },
         uUseBloom: { value: true },
+        uHole: { value: new THREE.Vector3() },
         uBloom: { value: 0.35 },
         uSpeed: { value: 0 },
         uChroma: { value: 0 },

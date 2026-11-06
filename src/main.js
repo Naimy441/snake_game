@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { GhostBot } from './game/GhostBot.js';
 import { SnakeGame, BOARD_SIZES, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, LEVEL_AT, SKY_H, SPACE_ZONE, zoneForLevel } from './game/SnakeGame.js';
 import { GalaxyDirector } from './GalaxyDirector.js';
-import { fallPath } from './render/Space.js';
+import { fallPath, CORE_Y, HORIZON_R } from './render/Space.js';
 import { SKINS, ACCESSORIES, skinById, accessoryById, isUnlocked, unlockProgress } from './skins.js';
 import { World } from './render/World.js';
 import { SnakeView } from './render/SnakeView.js';
@@ -37,6 +37,10 @@ const OVERHEAD_ROASTS = [
 ];
 const mod = (a, n) => ((a % n) + n) % n;
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
+const smooth01 = (v) => {
+  const t = clamp01(v);
+  return t * t * (3 - 2 * t);
+};
 // Fraction of a step after a tick during which a new turn redoes that step.
 // Together with the drawn head's lead this ends just past the turning cell's
 // centre, so a redo never visibly snaps the head by more than ~1/4 cell.
@@ -164,6 +168,18 @@ class App {
     this.world.space.setWon(this.stats.wins > 0);
     this.world.space.setSnakeColor(this.snake.trailColor);
     this.updateWinBadge();
+    // each map has two songs, picked at random: say which one starts playing
+    this.audio.onTrack = (song) => {
+      if (this.state === 'playing' || this.state === 'countdown') this.toast(`♪ ${song.name}`);
+      // and on the title screen, under the map the tour is showing
+      const el = $('ns-track');
+      if ($('ns-track-name').textContent !== song.name || el.classList.contains('hidden')) {
+        $('ns-track-name').textContent = song.name;
+        el.classList.remove('hidden', 'swap');
+        void el.offsetWidth;
+        el.classList.add('swap');
+      }
+    };
 
     // the title screen tours the maps in order, starting from the chosen one
     this.tourOffset = zoneForLevel(this.startLevel());
@@ -476,10 +492,23 @@ class App {
     this.lensTarget = portrait ? { x: 0, y: Math.min(H * 0.3, col.offsetHeight * 0.45) } : { x: Math.min(W * 0.25, col.offsetWidth * 0.5), y: 0 };
   }
 
+  // After a Galactic Core death the black hole is framed in the space the
+  // results card leaves free (right of it, or above it on a phone).
+  overLens() {
+    const card = document.querySelector('#screen-over .card');
+    if (!card || !card.offsetWidth) return null;
+    const r = card.getBoundingClientRect();
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    if (r.right < W * 0.75) return { x: r.right / 2, y: 0 };
+    return { x: 0, y: Math.max(0, (H - r.top) / 2) };
+  }
+
   updateLens(dt) {
     const on = this.state === 'menu' && !this.garageOpen;
     if (on && !this.lensTarget) this.measureLens(); // first frame after the loader
-    const t =on && this.lensTarget ? this.lensTarget : { x: 0, y: 0 };
+    const over = (this.state === 'over' || this.state === 'dying') && this.deathOrbit && this.rig.mode === 'director' ? this.overLens() : null;
+    const t = over || (on && this.lensTarget ? this.lensTarget : { x: 0, y: 0 });
     const l = this.lens || (this.lens = { x: 0, y: 0 });
     const k = Math.min(1, dt * 2.5);
     l.x += (t.x - l.x) * k;
@@ -807,6 +836,9 @@ class App {
     }
     if (this.openPanel) return kind !== 'space' ? (this.closePanel(), true) : false;
     if (this.state === 'menu' || this.state === 'over') {
+      // the card comes up fast: a key still held from the crash (rush, a
+      // turn's Enter) mustn't restart the run before it's even seen
+      if (this.state === 'over' && performance.now() - (this.overAt || 0) < 300) return true;
       this.startGame();
       return true;
     }
@@ -843,9 +875,10 @@ class App {
   }
 
   unlockAudio() {
-    const first = !this.audio.ctx;
     this.audio.unlock();
-    if (first && this.audio.ctx && this.state === 'menu') this.audio.startMusic({ menu: true });
+    // (the title music starts with the first gesture that unlocks sound, and
+    // again if something stopped it while the menu was up)
+    if (this.audio.ctx && this.state === 'menu' && !this.audio.musicOn) this.audio.startMusic({ menu: true });
   }
 
   cycleCamera() {
@@ -896,8 +929,8 @@ class App {
     this.world.space.reset();
     this.world.space.setSnakeColor(this.snake.trailColor);
     this.voidFall = null;
-    this.snake.group.position.set(0, 0, 0);
-    this.snake.group.scale.setScalar(1);
+    this.deathOrbit = false;
+    this.snake.group.visible = true;
     this.game.reset();
     this.game.wantRush = this.input.rushKeys.size > 0;
     this.t = 0;
@@ -975,6 +1008,10 @@ class App {
     this.showZoneInTour(this.tourZone());
     this.demoZone = null;
     $('hud').classList.add('hidden');
+    // the play aids live outside #hud and updateHud doesn't run on the title
+    // screen, so leaving from the pause menu would strand them on it
+    this.setClass($('app'), 'view-aids', false);
+    for (const id of ['compass', 'minimap', 'alt', 'touch', 'fp-hint']) this.setClass($(id), 'hidden', true);
     this.rig.setMode('tour', { reduceMotion: this.settings.reduceMotion });
     this.showScreen('screen-start');
     this.updateCameraUI();
@@ -1045,6 +1082,18 @@ class App {
       }
     }
     if (ev.fell) this.audio.suckIn(ev.fell.length);
+    if (ev.calm) {
+      // the last stretch: a shockwave from the black hole, and it slows down
+      this.world.space.pulse();
+      this.audio.calm();
+      this.banner('Slow down');
+      this.slowMo(1.4, 0.45);
+      if (!this.settings.reduceMotion) {
+        this.flash(0.4, '#bfe6ff');
+        this.rig.shake += 0.25;
+        this.rig.kick -= 6;
+      }
+    }
     if (ev.appleMoved) {
       // an apple no one could safely reach: the black hole pulls it in as light
       const f = ev.appleMoved.from;
@@ -1298,8 +1347,7 @@ class App {
     if (ev.cause === 'void') {
       // over the edge: the snake slides off and the black hole pulls it
       // down, spiralling, shedding light as it goes
-      const w = this.toWorld(ev.hit.x, ev.hit.z, 0);
-      this.voidFall = { p0: new THREE.Vector3(w.x, 0.3, w.z), emitted: 0 };
+      this.startVoidFall(ev.hit);
       this.audio.suckIn(3);
     }
     this.later(this.crash ? 0.16 : 0.08, () => {
@@ -1323,9 +1371,16 @@ class App {
         this.rig.shake += 0.25;
       }
     });
-    // Pull back to the overhead view so the player can see what happened.
-    if (this.cameraMode !== 'overhead') this.later(0.55, () => this.rig.setMode('overhead', { reduceMotion: this.settings.reduceMotion }));
-    this.later(ev.cause === 'void' ? 1.7 : 1.25, () => this.showGameOver(ev.cause));
+    // Pull back to the overhead view so the player can see what happened. In
+    // the Galactic Core the camera lets go instead: it rises and circles the
+    // black hole, watching the snake go in.
+    // Off the edge, it first rides the snake down until the head goes in.
+    if (ev.cause === 'void') this.later(0.1, () => this.startDeathFollow());
+    else if (g.space) this.later(0.55, () => this.startDeathOrbit());
+    else if (this.cameraMode !== 'overhead') this.later(0.55, () => this.rig.setMode('overhead', { reduceMotion: this.settings.reduceMotion }));
+    // the card (and Play again) comes up straight away; the camera carries
+    // on behind it
+    this.later(0.45, () => this.showGameOver(ev.cause));
   }
 
   // Death lunge for a crash, in cells past the last pose: a fast shove into
@@ -1345,6 +1400,7 @@ class App {
   showGameOver(cause) {
     const g = this.game;
     this.state = 'over';
+    this.overAt = performance.now();
     const unlocked = this.recordRun();
     $('over-unlocks').classList.toggle('hidden', !unlocked.length);
     if (unlocked.length) {
@@ -1477,10 +1533,12 @@ class App {
     $('fps').classList.toggle('hidden', !s.showFps);
     this.applyMotion();
 
-    // first interaction anywhere unlocks audio (and starts the menu music)
+    // Interaction anywhere unlocks audio (and starts the menu music). Not
+    // just the first one: browsers ignore some gestures (Esc, a modifier key
+    // still held from a reload) and can suspend sound later (an audio device
+    // change, Safari interruptions), so every gesture checks it's running.
     const unlock = () => this.unlockAudio();
-    window.addEventListener('pointerdown', unlock, { once: true });
-    window.addEventListener('keydown', unlock, { once: true });
+    for (const ev of ['pointerdown', 'pointerup', 'click', 'keydown', 'touchend']) window.addEventListener(ev, unlock, true);
   }
 
   applyMotion() {
@@ -1822,31 +1880,170 @@ class App {
     c.fill();
   }
 
-  // Falling off the Galactic Core's board: the whole snake is pulled after
-  // its head along the path into the black hole, shrinking as it goes.
-  updateVoidFall() {
-    const f = this.voidFall;
-    const grp = this.snake.group;
-    if (!f || (this.state !== 'dying' && this.state !== 'over')) {
-      if (f) this.voidFall = null;
-      if (grp.scale.x !== 1 || grp.position.lengthSq() > 0) {
-        grp.position.set(0, 0, 0);
-        grp.scale.setScalar(1);
+  // Galactic Core deaths: the camera lets go of the board, drifts up and
+  // circles the black hole for as long as the game-over card is up.
+  startDeathOrbit() {
+    const cam = this.camera.position;
+    const rm = this.settings.reduceMotion;
+    const a0 = Math.atan2(cam.x, cam.z);
+    const r0 = Math.hypot(cam.x, cam.z);
+    const y0 = cam.y;
+    const rT = 30;
+    const yT = 6;
+    const obj = this.rig.tmpObj;
+    let t = 0;
+    let a = a0;
+    const l0 = this.rig.tmpV.clone(); // where the camera was looking
+    this.camera.getWorldDirection(l0).multiplyScalar(8).add(cam);
+    this.deathOrbit = true;
+    this.rig.setDirector((dt, out) => {
+      t += dt;
+      const k = smooth01(t / 3.2);
+      // the turn picks up gently, then keeps going
+      a += dt * (rm ? 0.04 : 0.16) * smooth01(t / 2.5);
+      const r = r0 + (rT - r0) * k;
+      out.pos.set(Math.sin(a) * r, y0 + (yT - y0) * k, Math.cos(a) * r);
+      obj.position.copy(out.pos);
+      obj.up.set(0, 1, 0);
+      // the eye settles on the black hole
+      obj.lookAt(l0.x * (1 - k), l0.y + (CORE_Y + 1.5 - l0.y) * k, l0.z * (1 - k));
+      out.quat.copy(obj.quaternion);
+      out.fov = 50;
+    }, { duration: rm ? 0.4 : 1.1 });
+  }
+
+  // Falling off the Galactic Core: the camera rides down behind the snake's
+  // head, all the way to the black hole (voidFallPose then zooms it out).
+  startDeathFollow() {
+    const hp = this.snake.headPos;
+    const pos = this.camera.position.clone();
+    const look = new THREE.Vector3();
+    const want = new THREE.Vector3();
+    const obj = this.rig.tmpObj;
+    this.deathOrbit = true; // framed beside the results card (see updateLens)
+    this.rig.setDirector((dt, out) => {
+      const hd = this.snake.headDir;
+      // behind and above the head, more above it the steeper it dives
+      want.copy(hp).addScaledVector(hd, -4.2);
+      want.y += 2.4;
+      pos.lerp(want, Math.min(1, dt * 5));
+      look.copy(hp).addScaledVector(hd, 2);
+      out.pos.copy(pos);
+      obj.position.copy(pos);
+      obj.up.set(0, 1, 0);
+      obj.lookAt(look);
+      out.quat.copy(obj.quaternion);
+      out.fov = 62;
+    }, { duration: this.settings.reduceMotion ? 0.3 : 0.6 });
+  }
+
+  // Sliding off the Galactic Core's board: the snake keeps going, its body
+  // following its head over the edge, down into the void and round the
+  // spiral into the black hole. The path: the body's cells, then a drop off
+  // the edge, then the fall path (from where the drop ends) to the horizon.
+  // Distance e along it is 0 at the head's cell, + ahead of it, - behind.
+  startVoidFall(hit) {
+    const g = this.game;
+    const body = g.cells.map((c) => {
+      const w = this.toWorld(c.x, c.z, 0);
+      return new THREE.Vector3(w.x, w.y || 0, w.z);
+    });
+    const hw = this.toWorld(hit.x, hit.z, 0);
+    const h0 = body[0];
+    const fwd = new THREE.Vector3(hw.x - h0.x, 0, hw.z - h0.z).normalize();
+    // off the edge (half a cell out), it drops away under gravity
+    const pts = [];
+    for (let i = 0; i <= 60; i++) {
+      const h = (i / 60) * 3.4;
+      const d = Math.max(0, h - 0.5);
+      pts.push(new THREE.Vector3(h0.x + fwd.x * h, h0.y - 0.5 * d * d, h0.z + fwd.z * h));
+    }
+    const p1 = pts[pts.length - 1].clone();
+    const P = new THREE.Vector3();
+    for (let i = 1; i <= 700; i++) pts.push(fallPath(p1, i / 700, 0.4, P).clone());
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + pts[i].distanceTo(pts[i - 1]));
+    const len = cum[cum.length - 1];
+    const out = { x: 0, y: 0, z: 0 };
+    const at = (e) => {
+      if (e <= 0) {
+        // back along the body, a cell per unit
+        const k = Math.min(body.length - 1, -e);
+        const i = Math.min(body.length - 2, Math.floor(k));
+        if (i < 0) return Object.assign(out, { x: h0.x, y: h0.y, z: h0.z });
+        const f = k - i;
+        const A = body[i];
+        const B = body[i + 1];
+        return Object.assign(out, { x: A.x + (B.x - A.x) * f, y: A.y + (B.y - A.y) * f, z: A.z + (B.z - A.z) * f });
       }
-      return;
+      e = Math.min(len, e);
+      let lo = 0;
+      let hi = cum.length - 1;
+      while (hi - lo > 1) {
+        const m = (lo + hi) >> 1;
+        if (cum[m] <= e) lo = m;
+        else hi = m;
+      }
+      const f = (e - cum[lo]) / Math.max(1e-6, cum[hi] - cum[lo]);
+      const A = pts[lo];
+      const B = pts[hi];
+      return Object.assign(out, { x: A.x + (B.x - A.x) * f, y: A.y + (B.y - A.y) * f, z: A.z + (B.z - A.z) * f });
+    };
+    const n = body.length;
+    const rm = this.settings.reduceMotion;
+    // it leaves at the speed it was moving and is reeled in faster and
+    // faster, the whole snake gone in about T seconds whatever its length
+    const v0 = 1000 / Math.max(60, g.currentInterval(false));
+    const T = rm ? 1.8 : 2.8;
+    const acc = Math.max(5, (2 * (len + n - v0 * T)) / (T * T));
+    this.voidFall = {
+      at, len, n, v0, acc, adv: 0, gone: 0, emitted: 0,
+      game: { cells: [], removedTail: null, facing: g.facing, flying: false, space: true, ticks: g.ticks },
+    };
+  }
+
+  // This frame's pose for the falling snake (a stand-in game whose cells are
+  // distances along the fall), or null when it isn't falling.
+  voidFallPose() {
+    const f = this.voidFall;
+    if (!f) return null;
+    if (this.state !== 'dying' && this.state !== 'over') {
+      this.voidFall = null;
+      this.snake.group.visible = true;
+      return null;
     }
-    const T = this.settings.reduceMotion ? 1.0 : 1.5;
-    const u = clamp01((this.dyingTime - 0.12) / T);
-    const p = fallPath(f.p0, u, 0.5, this.tmpFall || (this.tmpFall = new THREE.Vector3()));
-    const sc = Math.max(0.02, 1 - u * u * 0.95);
-    grp.scale.setScalar(sc);
-    grp.position.set(p.x - f.p0.x * sc, p.y - f.p0.y * sc, p.z - f.p0.z * sc);
-    grp.visible = u < 0.98;
-    // shed light along the way
-    if (u > 0 && f.emitted < 6 && u >= f.emitted / 6) {
+    const tau = this.dyingTime || 0;
+    const adv = f.v0 * tau + 0.5 * f.acc * tau * tau;
+    f.adv = adv;
+    // cells that have reached the horizon are gone, from the head back
+    const gone = Math.min(f.n, Math.max(0, Math.ceil(adv - (f.len - 0.6))));
+    const sp = this.world.space;
+    const color = this.snake.trailColor || '#38f6ff';
+    if (gone > f.gone) {
+      // the head is in: pull out to circle the black hole
+      if (f.gone === 0) this.startDeathOrbit();
+      const end = f.at(f.len);
+      sp.emitStreams(new THREE.Vector3(end.x, end.y, end.z), Math.min(60, (gone - f.gone) * 4), color, { spread: 0.6, over: 0.1, dur: 0.8 });
+      sp.feed = Math.min(1.6, sp.feed + (gone - f.gone) * 0.05);
+      if (f.gone === 0) this.audio.suckIn(4);
+      f.gone = gone;
+    }
+    // the head sheds light as it falls
+    const e = Math.min(adv, f.len);
+    if (adv > 1 && f.emitted < 6 && e / f.len >= f.emitted / 6) {
       f.emitted++;
-      this.world.space.emitStreams(p, 18, this.snake.trailColor || '#38f6ff', { spread: 0.3, y: 0, over: 0.15, dur: 1.6 * (1 - u * 0.7) });
+      const p = f.at(e);
+      sp.emitStreams(new THREE.Vector3(p.x, p.y, p.z), 16, color, { spread: 0.3, y: 0, over: 0.15, dur: 1.4 });
     }
+    const left = f.n - gone;
+    this.snake.group.visible = left >= 2;
+    if (left < 2) return null;
+    const cells = f.game.cells;
+    while (cells.length < left) cells.push({ x: 0, z: 0, y: 0 });
+    cells.length = left;
+    for (let i = 0; i < left; i++) cells[i].x = gone + i;
+    f.headGone = gone > 0;
+    return { game: f.game, toWorld: (x) => f.at(adv - x) };
   }
 
   // Hyperspeed drops the snake onto the Galactic Core's board as four
@@ -2085,8 +2282,9 @@ class App {
     const pre = this.galaxy.kind === 'warp' && !this.galaxy.dropped ? this.galaxy.pre : null;
     const snakeGame = pre || g;
     const snakeWorld = pre ? (x, z, y) => this.world.toWorld(x, z, y, pre.yMid, pre.size) : this.toWorld;
-    this.snake.update(snakeGame, pre ? 1 : clamp01(this.t), this.simTime, snakeWorld, {
-      lunge: this.lunge,
+    const fall = this.voidFallPose();
+    this.snake.update(fall ? fall.game : snakeGame, pre || fall ? 1 : clamp01(this.t), this.simTime, fall ? fall.toWorld : snakeWorld, {
+      lunge: fall ? 0 : this.lunge,
       rushGlow: this.rushGlow,
       deathFlash: this.deathFlash,
       dt,
@@ -2096,7 +2294,6 @@ class App {
       travel: this.warpTravel,
       wiggle: warping && !rm ? 2.6 : 1,
     });
-    this.updateVoidFall();
     this.updateTailRip(dt);
     this.jetExhaust(g);
     this.snake.setRim(this.world.p.rimColor, 0.35 + this.world.p.rimIntensity * 0.25);
@@ -2146,7 +2343,7 @@ class App {
       flying: g.flying && this.state !== 'menu', pitch: steering ? next.y || 0 : 0, box: sky, sky: this.world.skyAmount, space: this.world.spaceAmount,
     });
     // The first-person camera sits inside the head; hide it once we're there.
-    this.snake.head.visible = !(this.rig.mode === 'fp' && this.rig.blend > 0.85);
+    this.snake.head.visible = !(this.rig.mode === 'fp' && this.rig.blend > 0.85) && !(this.voidFall && this.voidFall.headGone);
     this.effects.uniforms.scale.value = pxScale;
     this.world.space.syncBoard(g.space ? g : null, clamp01(this.t));
     this.world.updateSpace(dt, this.camera, { pxScale, dpr: this.renderer.getPixelRatio() * this.post.scale, reduceMotion: rm });
@@ -2194,8 +2391,27 @@ class App {
     P.uFlashColor.value.copy(this.flashColor);
     P.uTime.value = this.simTime;
     P.uCenter.value.set(0.5, view ? 0.56 : 0.5);
+    this.holeOnScreen(P.uHole.value);
     this.renderer.toneMappingExposure = pp.exposure;
     this.post.render(this.scene, this.camera, { threshold: pp.threshold });
+  }
+
+  // Where the Galactic Core's black hole is on screen, for the bloom mask:
+  // uv centre and radius (in screen heights), or a zero radius.
+  holeOnScreen(out) {
+    out.z = 0;
+    if (!(this.world.spaceAmount > 0)) return;
+    const cam = this.camera;
+    const c = this.tmpHole || (this.tmpHole = new THREE.Vector3());
+    c.set(0, CORE_Y, 0);
+    const d = c.distanceTo(cam.position);
+    if (d <= HORIZON_R * 1.05) return;
+    c.project(cam);
+    if (c.z > 1 || c.z < -1) return;
+    // the sphere's outline, as a fraction of the screen's height
+    const ang = Math.asin(HORIZON_R / d);
+    const r = Math.tan(ang) / Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) / 2;
+    out.set(c.x * 0.5 + 0.5, c.y * 0.5 + 0.5, r);
   }
 
   // Frame-time driven resolution scaling, then quality stepping (Auto only).

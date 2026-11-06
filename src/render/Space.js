@@ -9,7 +9,7 @@ import { CORE_SIZE } from '../game/SnakeGame.js';
 // in, and the finale where the galaxy erupts.
 
 export const CORE_Y = -16; // the black hole sits this far below the board
-const HORIZON_R = 5;
+export const HORIZON_R = 5;
 const DISK_IN = 5.9;
 const DISK_OUT = 19;
 const TILE = 0.94; // tile width (cells are 1 apart)
@@ -115,7 +115,8 @@ void main(){
   vec2 c = (vUv - 0.5) * 2.0;
   float r = length(c);
   float ring = exp(-pow((r - uR) * 70.0, 2.0)) * 2.4;
-  float glow = smoothstep(uR * 0.98, uR * 1.02, r) * exp(-(r - uR) * 5.5) * 0.9;
+  // faded right out before the quad's edge, or its square outline shows
+  float glow = smoothstep(uR * 0.98, uR * 1.02, r) * exp(-(r - uR) * 5.5) * 0.9 * smoothstep(1.0, 0.7, r);
   float ang = atan(c.y, c.x);
   float flick = 0.85 + 0.15 * sin(ang * 6.0 + uTime * 2.0) + uHeat * 0.6 * sin(uTime * 37.0 + ang * 9.0);
   vec3 col = vec3(1.0, 0.86, 0.6) * ring * flick + vec3(1.0, 0.45, 0.2) * glow;
@@ -629,6 +630,52 @@ export class Space {
     this.flashSprite.scale.setScalar(10);
     this.flashSprite.visible = false;
     this.group.add(this.flashSprite);
+    // the calm-down pulse (see pulse()): a ring that rolls out over the board,
+    // one round the core, and a flash in the horizon
+    const pgeo = new THREE.RingGeometry(0.86, 1, 192, 1);
+    pgeo.rotateX(-Math.PI / 2);
+    this.pulses = ['#bfe6ff', '#ffb0e8', '#ffffff'].map((col, i) => {
+      const m = new THREE.Mesh(pgeo, new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide, ...additive({ opacity: 0 }) }));
+      m.position.y = i === 2 ? CORE_Y : 0.25;
+      m.visible = false;
+      m.frustumCulled = false;
+      m.renderOrder = 5;
+      this.group.add(m);
+      return m;
+    });
+    this.pulseGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: '#cfe8ff', ...additive({ opacity: 0 }) }));
+    this.pulseGlow.position.y = CORE_Y;
+    this.pulseGlow.visible = false;
+    this.group.add(this.pulseGlow);
+    this.pulseT = null;
+  }
+
+  // The black hole calms down: it flares and a shockwave rolls out from the
+  // core, across the board and away into the galaxy.
+  pulse() {
+    this.pulseT = 0;
+    this.feed = Math.max(this.feed, 1.6);
+  }
+
+  updatePulse(dt) {
+    const on = this.pulseT != null && this.pulseT < 3.2;
+    for (const m of this.pulses) m.visible = on;
+    this.pulseGlow.visible = on;
+    if (!on) {
+      this.pulseT = null;
+      return;
+    }
+    const t = (this.pulseT += dt);
+    // two rings sweep across the board, the second a beat behind; the third
+    // lies flat round the horizon and races out through the disk
+    this.pulses.forEach((m, i) => {
+      const e = Math.max(0, t - (i === 1 ? 0.22 : 0));
+      const r = 0.3 + (i === 2 ? e * 34 : 26 * (1 - Math.exp(-e * 1.25)));
+      m.scale.setScalar(r);
+      m.material.opacity = e > 0 ? Math.max(0, 1 - e / (i === 2 ? 2.4 : 2.8)) ** 1.5 * (i === 1 ? 0.7 : 1) : 0;
+    });
+    this.pulseGlow.scale.setScalar(12 + t * 30);
+    this.pulseGlow.material.opacity = Math.max(0, 1 - t / 1.2) * 0.9;
   }
 
   buildWarp() {
@@ -685,6 +732,7 @@ export class Space {
     this.scheduled.length = 0;
     this.feed = 0;
     this.fed = 0;
+    this.pulseT = null;
     this.prevLand = null;
     this.seenDoom.clear();
     this.applyWon();
@@ -863,6 +911,7 @@ export class Space {
     this.updateFalls(dt, show, dpr);
 
     this.updateFinale(dt);
+    this.updatePulse(dt);
     this.updateWarp(dt, camera);
   }
 
@@ -1009,7 +1058,7 @@ export class Space {
 
   // Everything that might be shown, for shader warm-up.
   forCompile(fn) {
-    const objs = [this.group, this.warp, this.jets, this.tiles, this.falls, this.streams, ...this.shocks, this.flashSprite];
+    const objs = [this.group, this.warp, this.jets, this.tiles, this.falls, this.streams, ...this.shocks, this.flashSprite, ...this.pulses, this.pulseGlow];
     const vis = objs.map((o) => o.visible);
     const count = this.falls.count;
     objs.forEach((o) => (o.visible = true));
