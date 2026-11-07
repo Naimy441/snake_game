@@ -479,7 +479,10 @@ export class AudioEngine {
       this.layers[name] = { gain: g, level: 0, target: 0 };
     }
     this.layers.lead.gain.connect(this.delay);
-    this.layers.lead.gain.connect(this.reverb);
+    // the lead's reverb send skips the music bus, so it carries its own copy
+    // of the music volume (otherwise music at 0 still leaks through the room)
+    this.musicSend = c.createGain();
+    this.layers.lead.gain.connect(this.musicSend).connect(this.reverb);
     this.layers.counter.gain.connect(this.delay);
     this.sfxSend = c.createGain();
     this.sfxSend.gain.value = 0.35;
@@ -511,6 +514,7 @@ export class AudioEngine {
     this.master.gain.value = this.muted ? 0 : 1;
     this.sfx.gain.value = this.sfxVolume * 0.55;
     this.music.gain.value = this.musicVolume * 0.42;
+    this.musicSend.gain.value = this.musicVolume;
   }
 
   setVolumes({ sfx, music, muted }) {
