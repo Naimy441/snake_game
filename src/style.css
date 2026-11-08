@@ -795,3 +795,23 @@ button { font-family: var(--display); }
   .speedrun { top: calc(52px + var(--safe-top)); }
   #sr-time { font-size: 19px; padding: 4px 9px; }
 }
+
+/* ---------- Bonus level ---------- */
+.bonus-btn .mi-label { display: inline-flex; align-items: center; gap: 8px; color: var(--yellow); }
+.bonus-btn .mi-val { color: #ffe9a8; }
+.bonus-apple {
+  width: 14px; height: 14px; border-radius: 50% 50% 46% 46%; display: inline-block; flex: none;
+  background: radial-gradient(circle at 35% 30%, #fff6c8 0 12%, #ffd23f 30%, #ff9d00 75%, #a85a00);
+  box-shadow: 0 0 10px rgba(255, 190, 40, 0.9);
+  animation: bonusGlow 1.8s ease-in-out infinite;
+}
+@keyframes bonusGlow { 50% { box-shadow: 0 0 18px rgba(255, 210, 63, 1), 0 0 4px #fff; } }
+.bonus-btn.locked { opacity: 0.62; }
+.bonus-btn.locked .mi-label { color: var(--muted); }
+.bonus-btn.locked .bonus-apple { filter: grayscale(1) brightness(0.6); animation: none; box-shadow: none; }
+.bonus-btn.locked .mi-val::before { content: ''; display: inline-block; width: 10px; height: 12px; margin-right: 6px; vertical-align: -1px; background: currentColor; -webkit-mask: var(--lock) center / contain no-repeat; mask: var(--lock) center / contain no-repeat; }
+.bonus-btn.nope { animation: bonusNope 0.4s; }
+@keyframes bonusNope { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+.bonus-o { color: var(--yellow) !important; border-color: rgba(255, 210, 63, 0.55) !important; }
+.popup.gold { color: #fff3c4; font-size: 34px; text-shadow: 0 3px 0 rgba(30, 14, 0, 0.75), 0 0 16px rgba(255, 190, 40, 1); }
+.reduce-motion .bonus-apple { animation: none; }

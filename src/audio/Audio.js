@@ -788,10 +788,77 @@ export class AudioEngine {
     this.noiseHit({ at: 4.4, dur: 2.5, gain: 0.07, freq: 8000, type: 'highpass' });
   }
 
+  // ---------------------------------------------------------------- bonus level sfx
+  // A big stage light switching on: a heavy clunk and a hum.
+  lightOn(big = true) {
+    this.noiseHit({ dur: 0.09, gain: big ? 0.32 : 0.22, freq: 900, q: 1.4 });
+    this.voice(big ? 70 : 90, { dur: 0.22, gain: big ? 0.4 : 0.28, wave: 'sine', slide: 0.6 });
+    this.voice(big ? 110 : 140, { at: 0.02, dur: 0.6, gain: 0.05, wave: 0.5, release: 0.5 });
+  }
+
+  // The glow-in-the-dark rim charging up.
+  rimOn() {
+    this.voice(midi(60), { dur: 0.6, gain: 0.06, wave: 0.125, slide: 4, release: 0.3 });
+    this.noiseHit({ dur: 0.5, gain: 0.05, freq: 3000, type: 'bandpass', q: 3, sweep: 3 });
+  }
+
+  // A golden apple: a bright bell that climbs with each one in the dark.
+  goldEat(n = 0, pan = 0) {
+    const b = 79 + Math.min(n, 12);
+    this.voice(midi(b), { wave: 0.25, dur: 0.08, gain: 0.15, pan });
+    this.voice(midi(b + 7), { wave: 0.5, at: 0.05, dur: 0.25, gain: 0.13, release: 0.2, pan });
+    this.voice(midi(b + 12), { wave: 'sine', at: 0.05, dur: 0.45, gain: 0.08, release: 0.4, pan });
+    this.voice(midi(b + 19), { wave: 'sine', at: 0.1, dur: 0.4, gain: 0.04, release: 0.35, pan });
+  }
+
+  // A firework: a whistle, then a crackling pop.
+  firework(pan = 0, far = false) {
+    const g = far ? 0.5 : 1;
+    this.voice(midi(84), { dur: 0.25, gain: 0.025 * g, wave: 'sine', slide: 1.8, pan });
+    this.noiseHit({ at: 0.22, dur: 0.35, gain: 0.16 * g, freq: 700, type: 'lowpass', sweep: 0.4 });
+    for (let i = 0; i < 5; i++) this.noiseHit({ at: 0.3 + i * 0.05 + Math.random() * 0.04, dur: 0.04, gain: 0.05 * g, freq: 5000 + Math.random() * 3000, type: 'highpass' });
+  }
+
+  // The party explosion.
+  partyBoom() {
+    this.noiseHit({ dur: 1.4, gain: 0.4, freq: 1200, type: 'lowpass', sweep: 0.08 });
+    this.voice(90, { dur: 1.1, gain: 0.5, wave: 'sine', slide: 0.3, release: 0.8 });
+    [0, 4, 7, 12, 16, 19, 24].forEach((n, i) => this.voice(midi(72 + n), { at: 0.05 + i * 0.03, dur: 0.5, gain: 0.07, wave: 0.25, release: 0.4 }));
+  }
+
   // ---------------------------------------------------------------- music
-  startMusic({ menu = false } = {}) {
+  // custom: a track object with its own scheduler (the bonus level's song);
+  // it plays through the same music bus, so pause, slow motion, volume and
+  // fades all work on it the same way.
+  startMusic({ menu = false, custom = null } = {}) {
     if (!this.ctx) return;
     this.state.menu = menu;
+    const was = this.custom;
+    this.custom = custom;
+    if (custom) {
+      clearTimeout(this.stopTimer);
+      const now = this.ctx.currentTime;
+      this.musicFade.gain.cancelScheduledValues(now);
+      this.musicFade.gain.setTargetAtTime(1, now, 0.05);
+      this.musicFilter.frequency.cancelScheduledValues(now);
+      this.musicFilter.frequency.setTargetAtTime(18000, now, 0.05);
+      // the map song's layers go quiet; the custom track brings its own
+      for (const L of Object.values(this.layers)) {
+        L.target = 0;
+        L.gain.gain.cancelScheduledValues(now);
+        L.gain.gain.setTargetAtTime(0, now, 0.05);
+      }
+      this.musicOn = true;
+      custom.start(now + 0.08);
+      clearInterval(this.timer);
+      this.timer = setInterval(() => this.schedule(), 25);
+      return;
+    }
+    if (was) {
+      // back from a custom track: the map song starts over cleanly
+      was.stop();
+      this.musicOn = false;
+    }
     clearTimeout(this.stopTimer);
     const now = this.ctx.currentTime;
     this.musicFade.gain.cancelScheduledValues(now);
@@ -839,6 +906,10 @@ export class AudioEngine {
       if (this.musicFade.gain.value < 0.05) {
         this.musicOn = false;
         clearInterval(this.timer);
+        if (this.custom) {
+          this.custom.stop();
+          this.custom = null;
+        }
       }
     }, fade * 1000 + 100);
   }
@@ -915,6 +986,10 @@ export class AudioEngine {
 
   schedule() {
     if (!this.ctx || !this.musicOn) return;
+    if (this.custom) {
+      this.custom.schedule(this.ctx.currentTime + 0.15);
+      return;
+    }
     this.updateLayers();
     while (this.nextTime < this.ctx.currentTime + 0.15) {
       this.playStep(this.nextTime);

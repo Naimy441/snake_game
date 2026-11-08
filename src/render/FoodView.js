@@ -117,6 +117,51 @@ class Pickup {
     this.group.add(this.beam);
   }
 
+  // The bonus level's golden apple: the same crystal apple, recoloured gold
+  // (its beam, glow and ring too). Off puts the ruby colours back.
+  setGold(on) {
+    if (this.kind !== 'orb' || this.gold === on) return;
+    this.gold = on;
+    const [body, , leaf] = this.core.children;
+    if (!this.ruby) {
+      this.ruby = {
+        body: [body.material.color.clone(), body.material.emissive.clone(), body.material.emissiveIntensity, body.material.metalness, body.material.roughness],
+        leaf: [leaf.material.color.clone(), leaf.material.emissive.clone()],
+        ring: this.ring.material.color.clone(),
+        glow: this.glow.material.color.clone(),
+        floor: this.floor.material.color.clone(),
+        beam: this.beam.material.uniforms.color.value.clone(),
+      };
+    }
+    const r = this.ruby;
+    const bm = body.material;
+    if (on) {
+      bm.color.set('#ffc93a');
+      bm.emissive.set('#ff9500');
+      bm.emissiveIntensity = 0.7;
+      bm.metalness = 0.75;
+      bm.roughness = 0.12;
+      leaf.material.color.set('#fff27a');
+      leaf.material.emissive.set('#c8a000');
+      this.ring.material.color.set('#ffe7a0').multiplyScalar(2);
+      this.glow.material.color.set('#ffb52e');
+      this.floor.material.color.set('#ffb030').multiplyScalar(1.4);
+      this.beam.material.uniforms.color.value.set('#ffc94a');
+    } else {
+      bm.color.copy(r.body[0]);
+      bm.emissive.copy(r.body[1]);
+      bm.emissiveIntensity = r.body[2];
+      bm.metalness = r.body[3];
+      bm.roughness = r.body[4];
+      leaf.material.color.copy(r.leaf[0]);
+      leaf.material.emissive.copy(r.leaf[1]);
+      this.ring.material.color.copy(r.ring);
+      this.glow.material.color.copy(r.glow);
+      this.floor.material.color.copy(r.floor);
+      this.beam.material.uniforms.color.value.copy(r.beam);
+    }
+  }
+
   place(cell, pos) {
     this.cell = cell;
     this.group.position.set(pos.x, pos.y || 0, pos.z);

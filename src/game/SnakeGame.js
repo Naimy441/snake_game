@@ -90,6 +90,14 @@ export const SKY_PAD = 2;
 // built around the 19 board). It grows by a ring of cells on every side, so
 // everything on it keeps its place on screen.
 export const BOARD_SIZES = [15, 17, 19];
+
+// The bonus level (unlocked by growing to BONUS_UNLOCK_LENGTH in the Galactic
+// Core): classic Snake on a 17 x 17 board. No power-ups, no mice, no speed
+// ramp; every golden apple grows the snake by one, and Rush still works.
+export const BONUS_SIZE = 17;
+export const BONUS_INTERVAL = 128; // ms per move (~7.8 moves/s), the whole level
+export const BONUS_PARTY_AT = 10; // apples until the lights come on
+export const BONUS_UNLOCK_LENGTH = 30;
 export const SKY_SIZE = BOARD_SIZES[BOARD_SIZES.length - 1] + SKY_PAD * 2;
 export const SKY_H = 13;
 export const SKY_LIFT = 3;
@@ -182,6 +190,7 @@ export class SnakeGame {
     this.facing = { ...DIRS.up };
     this.flying = false;
     this.space = false; // on the collapsing board of the Galactic Core
+    this.bonusLevel = false; // in the bonus level (see enterBonusLevel)
     this.land = null; // Galactic Core: 1 for each cell still there (x * size + z)
     this.doomed = []; // cells about to fall: { x, z, doomAt, fallAt, id }
     this.fallen = 0;
@@ -269,6 +278,7 @@ export class SnakeGame {
   }
 
   get level() {
+    if (this.bonusLevel) return 0;
     if (this.space) return SPACE_START;
     let l = 0;
     while (l < SPACE_START && this.foodEaten >= LEVEL_AT[l + 1]) l++;
@@ -278,6 +288,10 @@ export class SnakeGame {
   // Apples eaten into the current level and how many it takes. In the
   // Galactic Core: how much of what is left of the board the snake fills.
   levelProgress() {
+    if (this.bonusLevel) {
+      const n = this.foodEaten;
+      return { into: Math.min(n, BONUS_PARTY_AT), need: BONUS_PARTY_AT, max: n >= BONUS_PARTY_AT, bonus: true };
+    }
     if (this.space) {
       const n = this.cells.length;
       return { into: n, need: n + Math.max(0, this.coreFree()), max: false, core: true };
@@ -331,6 +345,7 @@ export class SnakeGame {
   // Milliseconds per move. Speed is capped so that a quick double tap (a
   // tight U-turn) is still physically possible at the top speed.
   baseInterval() {
+    if (this.bonusLevel) return BONUS_INTERVAL;
     if (this.space) {
       // by the fullest the board has been, so it never slows down again
       const f = Math.max(this.fillTop || 0, this.fill);
@@ -353,6 +368,7 @@ export class SnakeGame {
 
   // Speed as a 0..1 value for presentation effects.
   intensity() {
+    if (this.bonusLevel) return Math.min(1, 0.35 + (this.rushing ? 0.45 : 0));
     const lvl = this.level / MAX_LEVEL;
     return Math.min(1, lvl * 0.7 + (this.rushing || this.boostTicks > 0 ? 0.45 : 0));
   }
@@ -743,7 +759,7 @@ export class SnakeGame {
   }
 
   padTarget() {
-    if (this.space) return 0;
+    if (this.space || this.bonusLevel) return 0;
     const z = this.zone;
     return z >= 3 ? 3 : z >= 1 ? 2 : 0;
   }
@@ -863,6 +879,24 @@ export class SnakeGame {
       this.queue = [{ ...DIRS.rise }];
       this.launch = SKY_CLIMB;
     }
+  }
+
+  // ---------------------------------------------------------------- bonus level
+  // A fresh run on the bonus board: a short snake low in the middle heading
+  // up, the first golden apple straight ahead, and nothing else at all.
+  enterBonusLevel() {
+    this.reset();
+    const S = BONUS_SIZE;
+    this.bonusLevel = true;
+    this.size = S;
+    const c = Math.floor(S / 2);
+    const z0 = S - 5;
+    this.cells = [];
+    for (let i = 0; i < 4; i++) this.cells.push({ x: c, z: z0 + i, y: 0 });
+    this.removedTail = { x: c, z: z0 + 4, y: 0 };
+    this.preyTimer = Infinity;
+    this.rush = 50;
+    this.food = { x: c, z: z0 - 6, y: 0, type: 'orb', id: this.uid++, spawnedAt: 0 };
   }
 
   // ---------------------------------------------------------------- galactic core
@@ -1678,7 +1712,7 @@ export class SnakeGame {
           this.movePrey({ x: nx, z: nz });
         }
       }
-    } else if (this.foodEaten >= 2 && !this.flying && !this.space) {
+    } else if (this.foodEaten >= 2 && !this.flying && !this.space && !this.bonusLevel) {
       this.preyTimer -= interval;
       if (this.preyTimer <= 0) {
         const p = this.spawnPrey();
@@ -1725,7 +1759,7 @@ export class SnakeGame {
       const points = def.points * this.combo * this.scoreMult;
       this.score += points;
       // an apple grows by the map it was eaten on (before any level-up it brings)
-      this.pendingGrowth += this.space ? 1 : eaten.type === 'orb' ? appleGrowth(this.zone) : def.grow;
+      this.pendingGrowth += this.space || this.bonusLevel ? 1 : eaten.type === 'orb' ? appleGrowth(this.zone) : def.grow;
       this.rush = Math.min(100, this.rush + def.rush);
       const prevLevel = this.level;
       if (eaten.type === 'orb') this.foodEaten++;
@@ -1868,7 +1902,9 @@ export class SnakeGame {
       return ev;
     }
 
-    if (eaten === this.food) {
+    if (eaten === this.food && this.bonusLevel) {
+      this.food = this.spawn('orb');
+    } else if (eaten === this.food) {
       this.food = this.spawn('orb');
       const r = this.rng();
       if (!this.bonus && this.foodEaten >= 3 && r < 0.28) {

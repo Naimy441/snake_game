@@ -239,6 +239,43 @@ continues in the finale.
 - The ghost guide sits the Galactic Core out; it's your puzzle. Once you've
   reached it, the level select can start a run there.
 
+### Bonus level: lights out, then party
+
+Grow to **length 30** in the Galactic Core and a secret unlocks: the **Bonus
+level** button on the title screen (beating the game unlocks it too). It plays
+in the same game, with the same HUD, cameras, Rush, pause and results screens.
+
+- **The rules:** classic Snake on a 17 x 17 board. No power-ups, no golden
+  mouse, no boost pads and no speed-ups (about 7.8 moves a second the whole
+  way). Every **golden apple** grows the snake by one. Rush still works: hold
+  it to go faster and score double while the meter lasts. The bonus level keeps
+  its own best score.
+- **Lights out:** it starts in total darkness. All you can see is the board's
+  glow-in-the-dark rim (it turns pink-red as your head gets close), the golden
+  apple (the regular crystal apple, in gold) under a small spotlight, and a
+  matching little spotlight that follows your snake's head and widens a touch
+  with every apple.
+- **Party mode:** the tenth apple sets off a huge explosion of pixels and the
+  lights come on over a magical lake at night: a starry violet sky with the
+  milky way, mountains, a castle on the far shore with its windows lighting
+  up, a little town and street lamps round the water, pine forests, and
+  hundreds of sky lanterns rising from the lake. The lake is a real mirror,
+  so the castle, the lanterns and the board shimmer in it. The board becomes a
+  softly glowing dance floor in lantern colours, pulsing to the beat, its rim
+  turns gold, and it lifts off the water and floats above it, trailing glitter.
+  Fireflies drift round it and fireworks keep going off over the castle. Every
+  10 apples after that sets off five firework rings over the board and lifts
+  the music a semitone.
+- **The music:** an original chiptune party anthem in C minor at 158 BPM. In the
+  dark it starts as a lone heartbeat, and every apple adds a layer (hats, bass,
+  an arpeggio opening up through a filter, a backbeat, the hook played softly,
+  four-on-the-floor, snare rolls, then a rising siren on apple nine). Apple ten
+  drops the full song: disco octave bass, power-chord stabs, the chanted hook in
+  a square lead and crowd "HEY!"s. A crash winds it down like a record losing
+  power.
+- **Playtesting:** open `?bonus` to start the bonus level straight away (it's
+  unlocked for that visit), or `?bonus=9` to start nine apples in.
+
 ### Controls that feel instant
 
 The snake moves on a grid, and the drawn snake trails the game's logic a
@@ -426,6 +463,9 @@ src/
   Input.js               keyboard, touch and gamepad
   main.js                app shell, game loop, HUD and menus
   GalaxyDirector.js      the Galactic Core's set pieces: hyperspeed and the finale
+  bonus/BonusStage.js    the bonus level's set: darkness and spotlights, then the lantern lake, castle, town and dance floor
+  bonus/BonusMusic.js    the bonus level's song, layered by apples eaten, with the drop on apple ten
+  bonus/PixelParticles.js instanced pixel-cube explosions and fireworks
 ```
 
 The game runs on a fixed grid tick; the renderer interpolates between ticks

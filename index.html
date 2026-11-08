@@ -122,6 +122,7 @@
             <button id="btn-garage" class="menu-item garage-btn"><span class="mi-label">Garage</span><span class="mi-val">Skins</span></button>
             <button class="menu-item" data-open="help"><span class="mi-label">How to play</span></button>
             <button class="menu-item" data-open="settings"><span class="mi-label">Settings</span></button>
+            <button id="btn-bonus" class="menu-item bonus-btn locked" title="Bonus level: grow to length 30 in the Galactic Core (map 6) to unlock it"><span class="mi-label"><i class="bonus-apple" aria-hidden="true"></i>Bonus level</span><span class="mi-val" id="btn-bonus-val">Length 30 on map 6</span></button>
           </div>
         </div>
         <div class="now-showing" aria-hidden="true">
@@ -174,6 +175,7 @@
           </div>
           <div id="over-unlocks" class="unlocks hidden"></div>
           <button id="btn-again" class="play-btn"><span>Play again</span><kbd>Enter</kbd></button>
+          <button id="btn-bonus-o" class="secondary wide bonus-o hidden">★ Bonus level</button>
           <button id="btn-garage-o" class="secondary wide">Garage</button>
           <button id="btn-menu-o" class="ghost">Main menu</button>
         </div>
@@ -246,6 +248,11 @@
                 <li>Clear Sunset Heavens and the snake jumps to <b class="cyan">hyperspeed</b>, dropping out onto a board floating over a black hole.</li>
                 <li>The black hole is <b>eating the board</b>: every apple dooms a few cells, spiralling in from the edge. They <b class="red">glow</b>, then fall in once you're off them. Don't slide off the edge!</li>
                 <li>Fill <b>every cell that's left</b> to finish the galaxy and win the game: <b class="gold">100%</b>. The board shrinks to meet you, and it never cuts you off from your own tail.</li>
+              </ul>
+              <h3>Bonus level</h3>
+              <ul class="plain">
+                <li>Grow to <b>length 30</b> in the Galactic Core to unlock it. Classic Snake on a 17 x 17 board: no power-ups, no speed-ups, every <b class="gold">golden apple</b> grows you by one, and Rush still works.</li>
+                <li>It starts in <b>complete darkness</b>. Your spotlight grows with every apple; eat <b>ten</b> and the party starts.</li>
               </ul>
             </div>
           </div>

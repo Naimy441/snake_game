@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 import { GhostBot } from './game/GhostBot.js';
-import { SnakeGame, BOARD_SIZES, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, LEVEL_AT, SKY_H, SPACE_ZONE, zoneForLevel } from './game/SnakeGame.js';
+import { SnakeGame, BOARD_SIZES, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, LEVEL_AT, SKY_H, SPACE_ZONE, BONUS_PARTY_AT, BONUS_UNLOCK_LENGTH, zoneForLevel } from './game/SnakeGame.js';
 import { GalaxyDirector } from './GalaxyDirector.js';
 import { fallPath, CORE_Y, HORIZON_R } from './render/Space.js';
 import { SKINS, ACCESSORIES, skinById, accessoryById, isUnlocked, unlockProgress } from './skins.js';
@@ -17,6 +17,8 @@ import { HEAD_LEAD } from './render/SnakeView.js';
 import { makeGlowTexture, makeScaleNormalMap, makeRingTexture, makeChevronTexture } from './render/textures.js';
 import { AudioEngine } from './audio/Audio.js';
 import { Input } from './Input.js';
+import { BonusStage } from './bonus/BonusStage.js';
+import { BonusMusic } from './bonus/BonusMusic.js';
 import { loadSettings, saveSettings, loadBest, saveBest, loadStats, saveStats, QUALITY } from './settings.js';
 
 const $ = (id) => document.getElementById(id);
@@ -37,6 +39,7 @@ const OVERHEAD_ROASTS = [
 ];
 // the jetpack and Galactic Core briefings, shown at lift-off and on restart
 const FLY_TOAST = { kicker: 'Jetpack on', title: 'Take flight', keys: [['↑', 'climb'], ['↓', 'dive'], ['← →', 'turn']], tone: 'sky', ms: 3400 };
+const BONUS_TOAST = { kicker: 'Bonus level', title: 'Lights out', sub: 'Ten golden apples turn the lights on', tone: 'gold', ms: 3400 };
 const CORE_TOAST = { kicker: 'Galactic Core', title: 'Fill every cell', sub: 'The black hole is eating the board', tone: 'prism', ms: 3400 };
 const mod = (a, n) => ((a % n) + n) % n;
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
@@ -61,6 +64,10 @@ class App {
     const qs = new URLSearchParams(location.search);
     this.playtest = qs.has('level') ? { level: Math.max(0, Math.min(MAX_LEVEL, Math.floor(+qs.get('level') || 0))), length: Math.floor(+qs.get('length') || 0), bot: qs.get('bot') === '1' } : null;
     this.camOverride = CAMERA_ORDER.includes(qs.get('cam')) ? qs.get('cam') : null; // this visit only, not saved
+    // ?bonus opens the bonus level straight away (unlocked for this visit);
+    // ?bonus=9 starts it 9 apples in, one away from the party
+    this.bonusTest = qs.has('bonus') ? { apples: Math.max(0, Math.min(40, Math.floor(+qs.get('bonus') || 0))) } : null;
+    this.mode = 'main'; // or 'bonus': which level Play again / Restart replays
     this.canvas = $('scene');
     try {
       this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: false, stencil: false, powerPreference: 'high-performance' });
@@ -199,6 +206,8 @@ class App {
     this.renderer.setAnimationLoop((now) => this.frame(now));
     this.THREE = THREE;
     window.__coil = this; // handy for debugging and automated tests
+    this.renderBonusButton();
+    if (this.bonusTest) this.startGame({ bonus: true });
   }
 
   // Warm up before the first frame: with every zone, pickup and pillar
@@ -610,7 +619,7 @@ class App {
     const v = this.ghostView;
     const inRun = ['playing', 'paused', 'countdown', 'dying', 'over'].includes(this.state);
     // the Galactic Core is a puzzle of its own: no ghost there
-    const show = this.settings.ghost && inRun && !this.game.space;
+    const show = this.settings.ghost && inRun && !this.game.space && !this.game.bonusLevel;
     if (!show) {
       v.group.visible = false;
       return;
@@ -761,6 +770,7 @@ class App {
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     this.post.scale = this.dyn.scale;
     this.post.setSize(size.x, size.y);
+    if (this.bonus) this.bonus.resize(size.x, size.y);
   }
 
   // ---------------------------------------------------------------- input
@@ -920,7 +930,9 @@ class App {
   }
 
   // ---------------------------------------------------------------- flow
-  startGame() {
+  startGame({ bonus } = {}) {
+    if (bonus !== undefined) this.mode = bonus ? 'bonus' : 'main';
+    if (this.mode === 'bonus' && !this.bonusUnlocked()) this.mode = 'main';
     if (this.garageOpen) {
       this.garageOpen = false;
       $('garage').classList.add('hidden');
@@ -944,6 +956,11 @@ class App {
     this.food.hideAll();
     this.board.clear();
     this.syncFood();
+    if (this.mode === 'bonus') {
+      this.startBonus();
+      return;
+    }
+    this.exitBonusScene();
     const startLevel = this.startLevel();
     this.game.startAtLevel(startLevel);
     if (this.playtest && this.playtest.length > this.game.cells.length) this.game.coilTo(this.playtest.length);
@@ -992,6 +1009,9 @@ class App {
 
   toMenu() {
     this.state = 'menu';
+    this.mode = 'main';
+    this.exitBonusScene();
+    this.renderBonusButton();
     this.galaxy.clear();
     this.world.space.reset();
     this.world.space.setWon(this.stats.wins > 0);
@@ -1020,6 +1040,172 @@ class App {
     this.showScreen('screen-start');
     this.updateCameraUI();
     this.renderLevelSelect();
+  }
+
+  // ---------------------------------------------------------------- bonus level
+  // Unlocked by growing to BONUS_UNLOCK_LENGTH in the Galactic Core (beating
+  // the game counts too, as that takes you past it).
+  bonusUnlocked() {
+    return !!(this.stats.bonusUnlocked || (this.stats.wins || 0) > 0 || this.bonusTest);
+  }
+
+  unlockBonus() {
+    this.stats.bonusUnlocked = true;
+    saveStats(this.stats);
+    this.renderBonusButton();
+    this.audio.chainComplete();
+    this.toast({ kicker: 'Secret unlocked', title: 'Bonus level!', sub: 'Play it from the title screen', tone: 'gold', ms: 3800 });
+  }
+
+  renderBonusButton() {
+    const on = this.bonusUnlocked();
+    const b = $('btn-bonus');
+    if (!b) return;
+    b.classList.toggle('locked', !on);
+    b.setAttribute('aria-disabled', String(!on));
+    $('btn-bonus-val').textContent = on ? (this.stats.bonusBest ? `Best ${this.stats.bonusBest.toLocaleString()}` : 'Party time') : `Length ${BONUS_UNLOCK_LENGTH} on map 6`;
+    // after a run: offer it (or offer it again) under Play again
+    $('btn-bonus-o').classList.toggle('hidden', !on || this.mode === 'bonus');
+  }
+
+  playBonus() {
+    this.unlockAudio();
+    if (!this.bonusUnlocked()) {
+      this.audio.ui();
+      this.toast({ kicker: 'Locked', title: 'Bonus level', sub: `Grow to length ${BONUS_UNLOCK_LENGTH} in the Galactic Core`, tone: 'gold' });
+      const b = $('btn-bonus');
+      b.classList.remove('nope');
+      void b.offsetWidth;
+      b.classList.add('nope');
+      return;
+    }
+    this.closePanel();
+    this.startGame({ bonus: true });
+  }
+
+  ensureBonus() {
+    if (this.bonus) return;
+    this.bonus = new BonusStage({ renderer: this.renderer, glowTex: this.glowTex, quality: this.activeQuality });
+    const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    this.bonus.resize(size.x, size.y);
+    this.bonusMusic = new BonusMusic(this.audio);
+    this.bonus.onEvent = (name, d) => {
+      if (name === 'lightOn') this.audio.lightOn(d.big);
+      else if (name === 'rimOn') this.audio.rimOn();
+      else if (name === 'firework') this.audio.firework(THREE.MathUtils.clamp(d.x / 14, -0.8, 0.8), d.far);
+    };
+  }
+
+  // The game's snake, pickups and effects move into the bonus stage's scene
+  // (and back out again afterwards): everything else carries on as usual.
+  bonusActors() {
+    return [this.snake.group, this.food.group, this.effects.group, this.board.group, this.ghostView.group];
+  }
+
+  enterBonusScene() {
+    if (this.bonusOn) return;
+    this.bonusOn = true;
+    this.scene = this.bonus.scene;
+    for (const o of this.bonusActors()) this.scene.add(o);
+    // the regular apple, in gold
+    this.food.orb.setGold(true);
+    // compile everything now, behind the dark intro
+    this.renderer.compile(this.scene, this.camera);
+  }
+
+  exitBonusScene() {
+    if (!this.bonusOn) return;
+    this.bonusOn = false;
+    this.scene = this.world.scene;
+    for (const o of this.bonusActors()) this.scene.add(o);
+    this.food.orb.setGold(false);
+  }
+
+  startBonus() {
+    const rm = this.settings.reduceMotion;
+    this.ensureBonus();
+    this.enterBonusScene();
+    const g = this.game;
+    g.enterBonusLevel();
+    g.best = this.stats.bonusBest || 0;
+    g.wantRush = this.input.rushKeys.size > 0;
+    this.bonus.reset();
+    this.bonus.intro();
+    this.run = { t: 0, running: false, done: false, full: false, record: false };
+    this.ghostFade = 0;
+    this.audio.setMusicState({ menu: false, intensity: 0.3 });
+    this.audio.startMusic({ custom: this.bonusMusic });
+    // playtesting: start some apples in
+    if (this.bonusTest && this.bonusTest.apples && !this.bonusTested) {
+      this.bonusTested = true;
+      const n = this.bonusTest.apples;
+      g.foodEaten = n;
+      g.coilTo(4 + n);
+      g.food = g.spawn('orb');
+      this.bonus.hRTarget = 1.05 + Math.min(n, 9) * 0.07;
+      this.bonus.apples = n;
+      this.bonusMusic.setApples(n);
+      if (n >= BONUS_PARTY_AT) this.later(1.6, () => this.startParty(this.toWorld(g.food.x, g.food.z)));
+    }
+    this.showScreen(null);
+    $('hud').classList.remove('hidden');
+    this.rig.cine = null;
+    this.rig.setMode(this.cameraMode, { reduceMotion: rm });
+    this.state = 'countdown';
+    this.updateCameraUI();
+    this.protectUntil = this.simTime + 4;
+    this.countdown = rm ? 1.3 : 2.0;
+    this.showCountdown('READY');
+    this.audio.countdown(false);
+    this.saidGo = false;
+    if (this.relativeSteer) this.flashHint();
+    this.toast(BONUS_TOAST);
+  }
+
+  onBonusEat(ate) {
+    const g = this.game;
+    const count = g.foodEaten;
+    const w = this.toWorld(ate.x, ate.z, ate.y);
+    const pos = new THREE.Vector3(w.x, w.y, w.z);
+    const rm = this.settings.reduceMotion;
+    this.later(this.visualDelay(), () => {
+      this.bonus.onEat(w, count);
+      this.bonusMusic.setApples(count);
+      this.popup(pos, `+${ate.points}`, 'gold', ate.combo > 1 ? `×${ate.combo}` : '');
+      const v = pos.clone().project(this.camera);
+      this.audio.goldEat(count, THREE.MathUtils.clamp(v.x, -0.8, 0.8));
+      if (!rm) this.rig.kick += 2.5;
+      if (this.cameraMode !== 'fp') this.rig.shake += 0.03;
+      if (count === BONUS_PARTY_AT) this.startParty(w);
+      else if (count === BONUS_PARTY_AT - 1) this.banner('One more!', 'Then the lights come on');
+      else if (count > BONUS_PARTY_AT && count % 10 === 0) {
+        this.banner(`${count} apples!`, 'Turn it up');
+        this.bonusMusic.keyUp();
+        if (!rm) this.flash(0.25, '#ffe9a8');
+      }
+    });
+    if (ate.combo > 1) {
+      const el = $('hud-combo');
+      el.classList.remove('pop');
+      void el.offsetWidth;
+      el.classList.add('pop');
+    }
+  }
+
+  // The tenth golden apple: the lights come on and the party starts.
+  startParty(w) {
+    const rm = this.settings.reduceMotion;
+    this.bonus.startParty(w);
+    this.bonusMusic.drop();
+    this.audio.partyBoom();
+    this.banner('PARTY MODE!', 'The lights are on');
+    this.slowMo(1.5, 0.35);
+    this.protectUntil = this.simTime + 4;
+    if (!rm) {
+      this.flash(0.9, '#ffffff');
+      this.rig.shake += 0.4;
+      this.rig.kick += 14;
+    }
   }
 
   showCountdown(text) {
@@ -1078,6 +1264,7 @@ class App {
       return;
     }
     if (ev.ate) this.onEat(ev.ate, ev.levelUp);
+    if (g.space && g.cells.length >= BONUS_UNLOCK_LENGTH && !this.stats.bonusUnlocked) this.unlockBonus();
     if (ev.doomed) {
       this.audio.doomWarn(ev.doomed.length);
       if (!this.collapseTold) {
@@ -1223,6 +1410,10 @@ class App {
 
   onEat(ate, levelUp) {
     const g = this.game;
+    if (g.bonusLevel) {
+      this.onBonusEat(ate);
+      return;
+    }
     const w = this.toWorld(ate.x, ate.z, ate.y);
     const pos = new THREE.Vector3(w.x, w.y, w.z);
     const delay = this.visualDelay();
@@ -1327,8 +1518,19 @@ class App {
     this.t = 1; // the failed move never happened: hold the last pose
     this.dyingTime = 0;
     this.audio.death();
+    if (g.bonusLevel) {
+      // the bonus level keeps a best score of its own
+      this.bonusMusic.powerDown();
+      if (g.score > (this.stats.bonusBest || 0)) {
+        this.stats.bonusBest = g.score;
+        saveStats(this.stats);
+      }
+      const pts = g.cells.map((c) => this.toWorld(c.x, c.z, c.y));
+      const col = this.snake.trailColor || '#38f6ff';
+      this.bonus.onDeath(pts, [col, '#ffffff', col, '#ffd23f']);
+      if (ev.cause === 'win') this.bonus.onWin();
+    } else saveBest(g.best);
     this.audio.stopMusic({ fade: 1.0 });
-    saveBest(g.best);
     const hp = this.snake.headPos;
     const won = ev.cause === 'win';
     // A crash: the head lunges into what it hit, bounces off and sees stars,
@@ -1413,7 +1615,7 @@ class App {
     }
     this.audio.gameOver();
     const galaxyWon = cause === 'win' && g.space;
-    $('over-title').textContent = galaxyWon ? 'Galaxy complete!' : cause === 'win' ? 'Perfect board!' : 'Wipeout!';
+    $('over-title').textContent = galaxyWon ? 'Galaxy complete!' : cause === 'win' ? 'Perfect board!' : g.bonusLevel ? (g.foodEaten >= BONUS_PARTY_AT ? 'Party over!' : 'Lights out!') : 'Wipeout!';
     $('over-cause').textContent = galaxyWon
       ? 'You filled every cell the black hole left, then it swallowed you whole, and the whole galaxy went supernova. You beat Snake Rush: 100%.'
       : {
@@ -1442,12 +1644,16 @@ class App {
     $('over-length').textContent = g.cells.length;
     $('over-combo').textContent = `x${g.maxCombo}`;
     $('over-time').textContent = this.formatTime(g.time);
-    $('over-zone').textContent = g.space ? `${g.zone + 1} · ${Math.floor(g.fill * 100)}%` : String(g.zone + 1);
-    $('over-chains').textContent = String(g.stats.chains);
-    $('over-prey').textContent = String(g.stats.prey);
-    $('over-pads').textContent = String(g.stats.pads);
+    $('over-zone').textContent = g.bonusLevel ? 'Bonus' : g.space ? `${g.zone + 1} · ${Math.floor(g.fill * 100)}%` : String(g.zone + 1);
+    $('over-chains').textContent = g.bonusLevel ? '–' : String(g.stats.chains);
+    $('over-prey').textContent = g.bonusLevel ? '–' : String(g.stats.prey);
+    $('over-pads').textContent = g.bonusLevel ? '–' : String(g.stats.pads);
     $('over-newbest').classList.toggle('hidden', !(g.newBest && g.score > 0));
-    $('start-best').textContent = g.best.toLocaleString();
+    if (g.bonusLevel) {
+      const n = g.foodEaten;
+      if (cause !== 'win') $('over-cause').textContent = `${cause === 'body' ? 'You ran into your own body' : 'You crashed into the wall'} after ${n} golden apple${n === 1 ? '' : 's'}.${n >= BONUS_PARTY_AT ? '' : ` ${BONUS_PARTY_AT - n} more and the party starts!`}`;
+    } else $('start-best').textContent = g.best.toLocaleString();
+    this.renderBonusButton();
     this.showScreen('screen-over');
     $('btn-again').focus({ preventScroll: true });
   }
@@ -1459,7 +1665,9 @@ class App {
 
   // ---------------------------------------------------------------- UI
   bindUI() {
-    $('btn-play').addEventListener('click', () => this.startGame());
+    $('btn-play').addEventListener('click', () => this.startGame({ bonus: false }));
+    $('btn-bonus').addEventListener('click', () => this.playBonus());
+    $('btn-bonus-o').addEventListener('click', () => this.playBonus());
     $('btn-again').addEventListener('click', () => this.startGame());
     $('btn-resume').addEventListener('click', () => this.resume());
     $('btn-restart-p').addEventListener('click', () => this.startGame());
@@ -1772,8 +1980,8 @@ class App {
     this.setText('hud-length', String(shownLen));
     this.setText('hud-time', this.formatTime(g.time));
     if (this.settings.ghost) this.setText('hud-ghost', this.ghost.score.toLocaleString());
-    this.setText('hud-level', String(g.level + 1));
-    this.setText('hud-zone', ZONE_NAMES[g.zone]);
+    this.setText('hud-level', g.bonusLevel ? '★' : String(g.level + 1));
+    this.setText('hud-zone', g.bonusLevel ? (g.foodEaten >= BONUS_PARTY_AT ? 'Bonus · Party' : 'Bonus · Lights out') : ZONE_NAMES[g.zone]);
     // progress to the next speed level and zone
     const lvl = g.level;
     const prog = g.levelProgress();
@@ -1781,7 +1989,7 @@ class App {
     const left = prog.need - prog.into;
     // in the Galactic Core the bar is the board filling up, in tenths
     const segs = prog.core ? 10 : prog.need;
-    this.setText('hud-lvl-next', prog.core ? `${Math.floor((prog.into / prog.need) * 100)}% filled` : maxed ? 'Top speed' : `${left} apple${left === 1 ? '' : 's'} to go`);
+    this.setText('hud-lvl-next', prog.bonus ? (maxed ? 'Party mode!' : `${left} apple${left === 1 ? '' : 's'} to the party`) : prog.core ? `${Math.floor((prog.into / prog.need) * 100)}% filled` : maxed ? 'Top speed' : `${left} apple${left === 1 ? '' : 's'} to go`);
     this.setStyle('hud-lvl-fill', 'transform', `scaleX(${(prog.into / prog.need).toFixed(3)})`);
     if (this.lastHud.segs !== segs) {
       this.lastHud.segs = segs;
@@ -1790,7 +1998,9 @@ class App {
     this.setClass($('hud-lvl'), 'max', maxed);
     this.setClass($('hud-lvl'), 'orbit', !!prog.core);
     const nz = ZONE_STARTS.findIndex((z) => z > lvl);
-    this.setText('hud-zone-next', g.space ? `${Math.max(0, g.coreFree())} cells left to fill` : nz < 0 ? 'Final zone' : `Next: ${ZONE_NAMES[nz]} at Lv ${ZONE_STARTS[nz] + 1}`);
+    const toFw = 10 - (g.foodEaten % 10);
+    if (g.bonusLevel) this.setText('hud-zone-next', g.foodEaten >= BONUS_PARTY_AT ? `${toFw} to the next fireworks` : 'Find the golden apples');
+    else this.setText('hud-zone-next', g.space ? `${Math.max(0, g.coreFree())} cells left to fill` : nz < 0 ? 'Final zone' : `Next: ${ZONE_NAMES[nz]} at Lv ${ZONE_STARTS[nz] + 1}`);
     this.setStyle('hud-rush', 'transform', `scaleX(${(g.rush / 100).toFixed(3)})`);
     const rushEl = $('hud-rush-wrap');
     this.setClass(rushEl, 'active', g.rushing);
@@ -2493,7 +2703,8 @@ class App {
     });
     this.updateTailRip(dt);
     this.jetExhaust(g);
-    this.snake.setRim(this.world.p.rimColor, 0.35 + this.world.p.rimIntensity * 0.25);
+    if (this.bonusOn) this.snake.setRim(this.bonus.rimColor(this.tmpRim || (this.tmpRim = new THREE.Color())), 0.55);
+    else this.snake.setRim(this.world.p.rimColor, 0.35 + this.world.p.rimIntensity * 0.25);
     this.updateGhost(gdt);
     if (fast && this.state === 'playing' && Math.random() < 0.8) {
       const hp = this.snake.headPos;
@@ -2520,12 +2731,20 @@ class App {
     const pxScale = rs.y / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
     // the arena grows with the zones; under the sky box it stays the full board
     const ground = g.flying || g.space ? g.boardSize : g.size;
-    if (this.world.setBoardSize(ground, { instant: rm })) this.onBoardResized(ground);
-    this.rig.setBoardSize(g.space ? g.size : ground, rm);
-    this.world.update(dt, { level: this.state === 'menu' ? 0 : g.level, reduceMotion: rm, pxScale });
-    this.world.updateWalls(g, dt, this.state === 'playing');
     const food = g.food ? this.toWorld(g.food.x, g.food.z, g.food.y) : null;
-    arena.update(dt, this.simTime, this.world.skyAmount, this.snake.headPos, food, g.flying && this.state !== 'menu');
+    if (this.bonusOn) {
+      // the bonus level's own stage stands in for the world
+      this.rig.setBoardSize(g.size, rm);
+      this.bonus.setApple(food);
+      const beat = this.bonusMusic.beat();
+      this.bonus.update(gdt, { head: this.snake.headPos, cells: g.cells, beat: beat ? beat.beat : null, camera: this.camera, pxScale, reduceMotion: rm });
+    } else {
+      if (this.world.setBoardSize(ground, { instant: rm })) this.onBoardResized(ground);
+      this.rig.setBoardSize(g.space ? g.size : ground, rm);
+      this.world.update(dt, { level: this.state === 'menu' ? 0 : g.level, reduceMotion: rm, pxScale });
+      this.world.updateWalls(g, dt, this.state === 'playing');
+      arena.update(dt, this.simTime, this.world.skyAmount, this.snake.headPos, food, g.flying && this.state !== 'menu');
+    }
     // Chase / first-person cameras aim along the snake's next move (a queued
     // turn if there is one), so they start turning the moment a key is
     // pressed, at most one move ahead of the snake.
@@ -2542,8 +2761,10 @@ class App {
     // The first-person camera sits inside the head; hide it once we're there.
     this.snake.head.visible = !(this.rig.mode === 'fp' && this.rig.blend > 0.85) && !(this.voidFall && this.voidFall.headGone);
     this.effects.uniforms.scale.value = pxScale;
-    this.world.space.syncBoard(g.space ? g : null, clamp01(this.t));
-    this.world.updateSpace(dt, this.camera, { pxScale, dpr: this.renderer.getPixelRatio() * this.post.scale, reduceMotion: rm });
+    if (!this.bonusOn) {
+      this.world.space.syncBoard(g.space ? g : null, clamp01(this.t));
+      this.world.updateSpace(dt, this.camera, { pxScale, dpr: this.renderer.getPixelRatio() * this.post.scale, reduceMotion: rm });
+    }
 
     this.updateLens(dt);
 
@@ -2561,7 +2782,7 @@ class App {
 
   renderFrame(dt, view, rm) {
     const P = this.post.params;
-    const pp = this.world.postParams();
+    const pp = this.bonusOn ? this.bonus.postParams() : this.world.postParams();
     this.flashAmt = Math.max(0, this.flashAmt - dt * 2.6);
     let danger = 0;
     const g = this.game;
@@ -2597,7 +2818,7 @@ class App {
   // uv centre and radius (in screen heights), or a zero radius.
   holeOnScreen(out) {
     out.z = 0;
-    if (!(this.world.spaceAmount > 0)) return;
+    if (!(this.world.spaceAmount > 0) || this.bonusOn) return;
     const cam = this.camera;
     const c = this.tmpHole || (this.tmpHole = new THREE.Vector3());
     c.set(0, CORE_Y, 0);
