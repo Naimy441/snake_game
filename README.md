@@ -252,9 +252,8 @@ in the same game, with the same HUD, cameras, Rush, pause and results screens.
   its own best score.
 - **Lights out:** it starts in total darkness. All you can see is the board's
   glow-in-the-dark rim (it turns pink-red as your head gets close), the golden
-  apple (the regular crystal apple, in gold) under a small spotlight, and a
-  matching little spotlight that follows your snake's head and widens a touch
-  with every apple.
+  apple (the regular crystal apple, in gold) under a small spotlight, and your
+  snake's own rim light.
 - **Party mode:** the tenth apple sets off a huge explosion of pixels and the
   lights come on over a magical lake at night: a starry violet sky with the
   milky way, mountains, a castle on the far shore with its windows lighting
@@ -270,11 +269,14 @@ in the same game, with the same HUD, cameras, Rush, pause and results screens.
   dark it starts as a lone heartbeat, and every apple adds a layer (hats, bass,
   an arpeggio opening up through a filter, a backbeat, the hook played softly,
   four-on-the-floor, snare rolls, then a rising siren on apple nine). Apple ten
-  drops the full song: disco octave bass, power-chord stabs, the chanted hook in
-  a square lead and crowd "HEY!"s. A crash winds it down like a record losing
-  power.
+  flips the song from dark C minor into bright E-flat major: a stuttered,
+  chanted sing-along hook ("la-la-la-LAA") over oom-pah bass, offbeat chord
+  stabs and a stomping beat, then a rapid-fire verse with crowd "HEY!"s that
+  winds up with a snare roll and a beat of silence before the hook comes back,
+  harmonised. A crash winds it down like a record losing power.
 - **Playtesting:** open `?bonus` to start the bonus level straight away (it's
-  unlocked for that visit), or `?bonus=9` to start nine apples in.
+  unlocked for that visit), or `?bonus=9` to start nine apples in. Add
+  `&bonusmix=classic` to hear the original drop (verse first) instead.
 
 ### Controls that feel instant
 

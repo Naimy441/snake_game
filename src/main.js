@@ -1088,7 +1088,9 @@ class App {
     this.bonus = new BonusStage({ renderer: this.renderer, glowTex: this.glowTex, quality: this.activeQuality });
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     this.bonus.resize(size.x, size.y);
-    this.bonusMusic = new BonusMusic(this.audio);
+    // ?bonusmix=classic plays the original party drop instead of the hype one
+    const mix = new URLSearchParams(location.search).get('bonusmix');
+    this.bonusMusic = new BonusMusic(this.audio, { version: mix === 'classic' ? 'classic' : 'hype' });
     this.bonus.onEvent = (name, d) => {
       if (name === 'lightOn') this.audio.lightOn(d.big);
       else if (name === 'rimOn') this.audio.rimOn();
@@ -1142,7 +1144,6 @@ class App {
       g.foodEaten = n;
       g.coilTo(4 + n);
       g.food = g.spawn('orb');
-      this.bonus.hRTarget = 1.05 + Math.min(n, 9) * 0.07;
       this.bonus.apples = n;
       this.bonusMusic.setApples(n);
       if (n >= BONUS_PARTY_AT) this.later(1.6, () => this.startParty(this.toWorld(g.food.x, g.food.z)));

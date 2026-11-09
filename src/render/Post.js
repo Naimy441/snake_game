@@ -19,6 +19,9 @@ const DOWN_FS = `
 uniform sampler2D tInput; uniform vec2 texel; uniform float threshold; uniform float knee; uniform bool prefilter; uniform vec2 inScale;
 varying vec2 vUv;
 vec3 pre(vec3 c){
+  // a stray NaN pixel would otherwise be blurred into a big blob of bloom
+  if (!(c.r == c.r && c.g == c.g && c.b == c.b)) return vec3(0.0);
+  c = max(c, 0.0);
   float br = max(c.r, max(c.g, c.b));
   float soft = clamp(br - threshold + knee, 0.0, 2.0 * knee);
   soft = soft * soft / (4.0 * knee + 1e-4);

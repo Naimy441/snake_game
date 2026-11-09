@@ -7,7 +7,7 @@ import { PixelParticles, RAINBOW, GOLD } from './PixelParticles.js';
 // bonus level runs (the game's snake, apple, effects and cameras move in).
 //
 // It opens in total darkness: only the board's glow-in-the-dark rim, a small
-// spotlight on the golden apple and a matching one on the snake's head.
+// spotlight on the golden apple and the snake's own rim light.
 // On the tenth apple the lights come on over a magical lake at night: a
 // starry violet sky with the milky way, mountains, a castle on the far shore
 // with its windows lit, a little town round the water, and hundreds of
@@ -127,11 +127,16 @@ const WATER_FS = `uniform vec3 color; uniform sampler2D tDiffuse; uniform float 
 varying vec4 vUv; varying vec3 vW;
 void main(){
   vec2 p = vW.xz;
-  vec2 w = vec2(sin(p.x * 0.31 + uTime * 0.9) + sin(p.y * 0.53 - uTime * 0.7) + sin((p.x + p.y) * 0.9 + uTime * 1.3) * 0.5,
-                cos(p.y * 0.27 + uTime * 0.8) + sin(p.x * 0.47 + uTime * 0.6) + cos((p.x - p.y) * 0.8 - uTime * 1.1) * 0.5);
+  // small, fine ripples: a gentle shimmer rather than big wobbles
+  vec2 w = vec2(sin(p.x * 1.7 + uTime * 1.1) * 0.5 + sin(p.y * 2.3 - uTime * 0.9) * 0.3 + sin((p.x + p.y) * 3.1 + uTime * 1.6) * 0.2,
+                cos(p.y * 1.5 + uTime * 1.0) * 0.5 + sin(p.x * 2.1 + uTime * 0.8) * 0.3 + cos((p.x - p.y) * 2.9 - uTime * 1.4) * 0.2);
   float dist = length(p - cameraPosition.xz);
   vec4 uv = vUv;
-  uv.xy += w * (0.012 + 0.004 * min(dist, 60.0) / 60.0) * uv.w;
+  // calmer further out, and none at the screen's edges, where the mirror has
+  // nothing to show past the frame and would smear its last pixels
+  vec2 s = uv.xy / uv.w;
+  float edge = smoothstep(0.0, 0.12, s.x) * smoothstep(0.0, 0.12, 1.0 - s.x) * smoothstep(0.0, 0.12, s.y) * smoothstep(0.0, 0.12, 1.0 - s.y);
+  uv.xy += w * 0.0045 * (1.0 - 0.6 * smoothstep(10.0, 80.0, dist)) * edge * uv.w;
   vec3 refl = texture2DProj(tDiffuse, uv).rgb;
   vec3 deep = vec3(0.012, 0.008, 0.04);
   float fres = 0.55 + 0.4 * smoothstep(5.0, 70.0, dist);
@@ -178,10 +183,13 @@ varying float vY; varying float vFace; varying float vAlpha; varying float vFlic
 void main(){
   if (vAlpha < 0.01) discard;
   // glowing paper: hottest low down by the flame and through the middle
-  vec3 paper = mix(vec3(1.0, 0.3, 0.05), vec3(1.0, 0.62, 0.22), smoothstep(0.0, 0.7, 1.0 - vY));
-  float core = 0.6 + 0.9 * pow(vFace, 1.5);
-  float flame = exp(-vY * 3.5) * 1.6;
-  vec3 c = paper * (core + flame) * vFlick * 1.5;
+  // kept under the bloom threshold: warm gold paper
+  vec3 paper = mix(vec3(1.0, 0.34, 0.03), vec3(1.0, 0.58, 0.1), smoothstep(0.0, 0.7, 1.0 - vY));
+  // (vFace can interpolate a hair below zero on the silhouette, and pow() of
+  // a negative is NaN, which the bloom smeared into big pale blobs)
+  float core = 0.36 + 0.24 * pow(max(vFace, 0.0), 1.5);
+  float flame = exp(-vY * 3.5) * 0.2;
+  vec3 c = paper * (core + flame) * vFlick;
   gl_FragColor = vec4(c * vAlpha, 1.0);
 }`;
 
@@ -219,7 +227,10 @@ void main(){
     on = uLift * (1.0 - fall / 9.0) * (0.5 + 0.5 * sin(uTime * 9.0 + aSeed.z * 40.0));
   }
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
-  gl_PointSize = max(1.0, sz * uScale / -mv.z) * step(0.001, on);
+  float px = sz * uScale / -mv.z;
+  // far lanterns: never a big soft disc, however close one drifts
+  if (uMode < 0.5) px = min(px, uScale * 0.022);
+  gl_PointSize = max(1.0, px) * step(0.001, on);
   vCol = aColor;
   vA = on;
   gl_Position = projectionMatrix * mv;
@@ -229,11 +240,11 @@ void main(){
   vec2 d = gl_PointCoord - 0.5;
   float r = length(d) * 2.0;
   if (r > 1.0) discard;
-  float a = exp(-r * r * 4.0) + 0.6 * exp(-r * r * 30.0);
+  float a = 0.55 * exp(-r * r * 7.0) + 0.75 * exp(-r * r * 34.0);
   gl_FragColor = vec4(vCol * a * vA, 1.0);
 }`;
 
-// Light shafts for the two small spotlights: soft, brightest where you look
+// Light shaft for the apple's small spotlight: soft, brightest where you look
 // through the most of the cone, fading towards the floor.
 const BEAM_VS = `varying float vH; varying vec3 vN; varying vec3 vV;
 void main(){ vH = -position.y; vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = -mv.xyz; vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * mv; }`;
@@ -357,6 +368,22 @@ export class BonusStage {
       // the mirror is drawn at a reduced resolution; it's rippled anyway
       this.water = new Reflector(new THREE.CircleGeometry(150, 96), { shader, color: '#d8ccff', textureWidth: 512, textureHeight: 512, multisample: 0, clipBias: 0.002 });
       this.water.rotation.x = -Math.PI / 2;
+      // The mirror's camera is flipped left to right, so a sideways view
+      // offset (the results card shifts the picture over) would push its
+      // picture the wrong way and smear its edge into streaks. Render the
+      // reflection with the horizontal offset reversed.
+      const reflect = this.water.onBeforeRender;
+      this.water.onBeforeRender = (renderer, scene, camera, ...rest) => {
+        const e = camera.projectionMatrix.elements;
+        const ox = e[8];
+        if (ox === 0) return reflect(renderer, scene, camera, ...rest);
+        e[8] = -ox;
+        try {
+          reflect(renderer, scene, camera, ...rest);
+        } finally {
+          e[8] = ox;
+        }
+      };
     } else {
       this.water = new THREE.Mesh(
         new THREE.CircleGeometry(150, 96).rotateX(-Math.PI / 2),
@@ -632,9 +659,9 @@ export class BonusStage {
       const a = rand() < 0.45 ? -Math.PI / 2 + (rand() - 0.5) * 1.6 : rand() * Math.PI * 2;
       const r = 40 + Math.pow(rand(), 0.7) * 260;
       pos.set([Math.cos(a) * r, 0, Math.sin(a) * r], i * 3);
-      c.set(LANTERN[i % LANTERN.length]).multiplyScalar(1.3 + rand() * 1.1);
+      c.set(LANTERN[i % LANTERN.length]).multiplyScalar(0.8 + rand() * 0.5); // gold, not white where they overlap
       col.set([c.r, c.g, c.b], i * 3);
-      seed.set([rand(), rand(), rand() < 0.35 ? 0 : rand() * 9, 2.2 + rand() * 2.4], i * 4);
+      seed.set([rand(), rand(), rand() < 0.35 ? 0 : rand() * 9, 1.4 + rand() * 1.4], i * 4);
     }, this.farMat);
     // fireflies round the board
     this.flyMat = pointsMaterial(2);
@@ -761,22 +788,6 @@ export class BonusStage {
     this.applePoint = new THREE.PointLight('#ffb93a', 0, 4.5, 2);
     this.scene.add(this.applePoint);
 
-    // and a matching one following the snake's head
-    this.hSpot = new THREE.SpotLight('#d8f4ff', 0, 20, 0.1, 0.6, 2);
-    this.scene.add(this.hSpot, this.hSpot.target);
-    this.hBeam = new THREE.Mesh(CONE, beamMaterial('#cdeeff'));
-    this.hBeam.frustumCulled = false;
-    this.scene.add(this.hBeam);
-    this.hSpotPos = new THREE.Vector3(0, 8, 4);
-    this.headPoint = new THREE.PointLight('#bfe8ff', 0, 3, 2);
-    this.scene.add(this.headPoint);
-    this.headPool = new THREE.Mesh(
-      new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ map: this.glowTex, color: '#9fdcff', transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending })
-    );
-    this.headPool.position.y = 0.03;
-    this.headPool.renderOrder = 2;
-    this.scene.add(this.headPool);
   }
 
   // Reflections for the party: the night sky with lantern glows, prefiltered.
@@ -808,14 +819,12 @@ export class BonusStage {
     this.partyAmt = 0;
     this.lift = 0;
     this.aSpotOn = 0;
-    this.hSpotOn = 0;
     this.rimOn = 0;
     this.rimWave = 0;
     this.dead = false;
     this.deadT = 0;
     this.won = false;
     this.flicker = 0;
-    this.hR = this.hRTarget = 1.05;
     this.ripples.length = 0;
     this.pixels.clear();
     this.apple = null;
@@ -832,10 +841,6 @@ export class BonusStage {
     this.later(0.75, () => {
       this.aSpotOn = 1;
       this.flicker = 0.25;
-      this.emit('lightOn', { big: false });
-    });
-    this.later(1.15, () => {
-      this.hSpotOn = 1;
       this.emit('lightOn', { big: false });
     });
   }
@@ -865,8 +870,7 @@ export class BonusStage {
     this.pixels.burst(p, { count: 20, colors: GOLD, speed: 0.7, size: 0.8 });
     const party = this.partyT >= 0;
     this.ripple(pos.x, pos.z, party ? MAGIC[count % MAGIC.length] : '#ffc860', { strength: party ? 0.9 : 0.55 });
-    if (!party) this.hRTarget = 1.05 + Math.min(count, 9) * 0.07;
-    else if (count % 10 === 0) this.fireworks(5, 0.15, 70, 1.1, 0.25, 1.3);
+    if (party && count % 10 === 0) this.fireworks(5, 0.15, 70, 1.1, 0.25, 1.3);
   }
 
   // Firework rings over the board (n of them, gap seconds apart).
@@ -1012,24 +1016,6 @@ export class BonusStage {
     this.applePoint.intensity = ap ? (2.4 + Math.sin(t * 5) * 0.4) * this.aSpotOn * (1 - P * 0.3) : 0;
     if (ap) this.applePoint.position.set(ap.x, 0.9, ap.z);
 
-    // and the head's
-    if (head) {
-      this.hSpotPos.x += (head.x - this.hSpotPos.x) * Math.min(1, dt * 14);
-      this.hSpotPos.z += (head.z - this.hSpotPos.z) * Math.min(1, dt * 14);
-      this.headPoint.position.set(head.x, head.y + 0.9, head.z);
-    }
-    this.hR += (this.hRTarget - this.hR) * Math.min(1, dt * 3);
-    const hOn = this.hSpotOn * dim;
-    if (this.dead && this.partyT < 0) this.hSpot.color.set('#d8f4ff').lerp(HOT, Math.min(1, this.deadT * 2));
-    else this.hSpot.color.set('#d8f4ff');
-    this.hBeam.material.uniforms.uColor.value.copy(this.hSpot.color);
-    this.placeSpot(this.hSpot, this.hBeam, this.hSpotPos, this.hR, sh, 150 * hOn * (1 - P * 0.5), 0.22 * hOn * (1 - P * 0.6));
-    this.headPoint.intensity = 1.5 * hOn;
-    this.headPool.position.x = this.hSpotPos.x;
-    this.headPool.position.z = this.hSpotPos.z;
-    this.headPool.scale.setScalar(this.hR * 2.6);
-    this.headPool.material.opacity = 0.42 * hOn * (1 - P * 0.7);
-    this.headPool.material.color.copy(this.hSpot.color);
 
     // the rim
     this.rimWave += dt * 1.6;

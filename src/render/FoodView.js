@@ -122,11 +122,10 @@ class Pickup {
   setGold(on) {
     if (this.kind !== 'orb' || this.gold === on) return;
     this.gold = on;
-    const [body, , leaf] = this.core.children;
+    const [body] = this.core.children;
     if (!this.ruby) {
       this.ruby = {
-        body: [body.material.color.clone(), body.material.emissive.clone(), body.material.emissiveIntensity, body.material.metalness, body.material.roughness],
-        leaf: [leaf.material.color.clone(), leaf.material.emissive.clone()],
+        body: [body.material.color.clone(), body.material.emissive.clone()],
         ring: this.ring.material.color.clone(),
         glow: this.glow.material.color.clone(),
         floor: this.floor.material.color.clone(),
@@ -136,13 +135,10 @@ class Pickup {
     const r = this.ruby;
     const bm = body.material;
     if (on) {
-      bm.color.set('#ffc93a');
-      bm.emissive.set('#ff9500');
-      bm.emissiveIntensity = 0.7;
-      bm.metalness = 0.75;
-      bm.roughness = 0.12;
-      leaf.material.color.set('#fff27a');
-      leaf.material.emissive.set('#c8a000');
+      // only the body's hue changes: same finish and green leaf as the red
+      // apple, with a darker glow so its facets still read
+      bm.color.set('#e6a516');
+      bm.emissive.set('#9e5e00');
       this.ring.material.color.set('#ffe7a0').multiplyScalar(2);
       this.glow.material.color.set('#ffb52e');
       this.floor.material.color.set('#ffb030').multiplyScalar(1.4);
@@ -150,11 +146,6 @@ class Pickup {
     } else {
       bm.color.copy(r.body[0]);
       bm.emissive.copy(r.body[1]);
-      bm.emissiveIntensity = r.body[2];
-      bm.metalness = r.body[3];
-      bm.roughness = r.body[4];
-      leaf.material.color.copy(r.leaf[0]);
-      leaf.material.emissive.copy(r.leaf[1]);
       this.ring.material.color.copy(r.ring);
       this.glow.material.color.copy(r.glow);
       this.floor.material.color.copy(r.floor);

@@ -12,6 +12,14 @@
 //    hook in a bright square lead, crowd "HEY!"s, a crash every 8 bars.
 //    Every 10 apples after that it lifts a semitone, after a fill.
 //
+// Two versions of the party half share the same build:
+//  - 'hype' (the default): the lights flip the song from the build's dark
+//    C minor into bright E-flat major. A stuttered, chanted sing-along hook
+//    ("la-la-la-LAA") over oom-pah bass and offbeat chord stabs, then a
+//    rapid-fire eighth-note verse that winds up with a snare roll and a beat
+//    of silence before the hook comes back, harmonised.
+//  - 'classic': the original drop (verse first, then the chorus).
+//
 // It plugs into AudioEngine as a custom track (startMusic({ custom })), so it
 // plays through the game's music bus: pause, slow motion and volume apply.
 
@@ -51,6 +59,32 @@ const HOOK_B = [
   '12 - 14# - 15 - - - 14# - 12 - 11 - 9 -',
 ];
 
+// The 'hype' party, in E-flat major (the same notes as C minor, so the
+// degrees below still count from C: 3 = Eb, 5 = G, 7 = Bb, 10 = Eb up).
+// Hook: Eb Bb Cm Ab | Eb Bb Ab Bb. Verse: Cm Ab Eb Bb | Cm Ab Ab Bb.
+const HOOK_CHORDS = [[3, MAJ], [-2, MAJ], [0, MIN], [-4, MAJ], [3, MAJ], [-2, MAJ], [-4, MAJ], [-2, MAJ]];
+const RAP_CHORDS = [[0, MIN], [-4, MAJ], [3, MAJ], [-2, MAJ], [0, MIN], [-4, MAJ], [-4, MAJ], [-2, MAJ]];
+const HYPE_HOOK = [
+  '10 . 10 . 10 . 10 . 12 - - - 10 - . .',
+  '9 . 9 . 9 . 9 . 11 - - - 9 - . .',
+  '8 . 8 . 8 . 8 . 10 - - - 12 - 10 -',
+  '13 - - - 12 - - - 10 - - - . . 7 8',
+  '10 . 10 . 10 . 10 . 12 - - - 14 - 12 -',
+  '11 . 11 . 11 . 11 . 14 - - - 11 - 9 -',
+  '13 . 13 . 12 . 10 . 12 - - - 13 - 14 -',
+  '14 - - - - - - - 12 - 11 - 9 - - -',
+];
+const HYPE_RAP = [
+  '8 8 8 . 7 . 8 . 10 . 8 . 7 . 5 .',
+  '6 6 6 . 5 . 6 . 8 . 6 . 5 . 3 .',
+  '5 5 5 . 3 . 5 . 7 . 10 . 12 - - -',
+  '11 - 11 - 11 - 9 - 7 - - - . . . .',
+  '8 8 8 . 7 . 8 . 10 . 8 . 7 . 5 .',
+  '6 6 6 . 5 . 6 . 8 . 6 . 5 . 3 .',
+  '6 . 8 . 10 . 13 . 12 . 10 . 8 . 10 .',
+  '9 - - - 11 - - - 14 - - - . . . .',
+];
+
 function parse(bars) {
   const notes = [];
   bars.forEach((bar, b) => {
@@ -63,7 +97,10 @@ function parse(bars) {
       const sharp = tok.endsWith('#');
       const d = parseInt(tok, 10);
       const semis = SCALE[(d - 1) % 7] + 12 * Math.floor((d - 1) / 7) + (sharp ? 1 : 0);
-      notes[b * 16 + s] = { semis, len };
+      // a third below, in the scale (for harmonies)
+      const h = Math.max(1, d - 2);
+      const low = SCALE[(h - 1) % 7] + 12 * Math.floor((h - 1) / 7);
+      notes[b * 16 + s] = { semis, len, low };
     }
   });
   return notes;
@@ -72,10 +109,13 @@ const NOTES_A = parse(HOOK_A);
 const NOTES_B = parse(HOOK_B);
 // the hook's opening phrase alone, for the build
 const NOTES_TEASE = parse(HOOK_A.slice(0, 4));
+const NOTES_HOOK = parse(HYPE_HOOK);
+const NOTES_RAP = parse(HYPE_RAP);
 
 export class BonusMusic {
-  constructor(audio) {
+  constructor(audio, { version = 'hype' } = {}) {
     this.audio = audio; // the game's AudioEngine (its context must be unlocked)
+    this.version = version === 'classic' ? 'classic' : 'hype';
     this.tempo = BONUS_TEMPO;
     this.spb = 60 / this.tempo / 4; // seconds per 16th
     this.mode = 'build';
@@ -167,6 +207,10 @@ export class BonusMusic {
     f.setValueAtTime(f.value, now);
     f.exponentialRampToValueAtTime(18000, now + 0.08);
     this.impact(now);
+    if (this.version === 'hype') {
+      this.section = 'H';
+      this.bigHit(now);
+    }
   }
 
   // Lift the song a semitone, on the next bar after a fill (every 10 apples).
@@ -213,6 +257,16 @@ export class BonusMusic {
       if (this.bar >= 4) this.bar = 0;
       return;
     }
+    if (this.version === 'hype') {
+      if (this.bar >= 8) {
+        this.bar = 0;
+        this.section = this.section === 'H' ? 'R' : 'H';
+        if (this.section === 'H') this.loops++;
+        this.key = this.pendingKey; // a lift lands on the next section
+      }
+      if (this.bar === 0 || (this.section === 'H' && this.bar === 4)) this.crash = true;
+      return;
+    }
     if (this.fill) {
       this.fill = false;
       this.crash = true;
@@ -228,6 +282,7 @@ export class BonusMusic {
 
   playStep(t) {
     if (this.mode === 'build') this.playBuild(t);
+    else if (this.version === 'hype') this.playHype(t);
     else this.playParty(t);
   }
 
@@ -381,6 +436,89 @@ export class BonusMusic {
       // the chorus (and every second time round) doubles an octave up
       if (isB || this.loops % 2 === 1) a.voice(midi(n + 12), { t, dur, gain: 0.035, wave: 0.125, dest: B.lead, release: rel });
       else a.voice(midi(n - 12), { t, dur, gain: 0.03, wave: 0.25, dest: B.lead, release: rel });
+    }
+  }
+
+  // ------------------------------------------------------------ 'hype' party
+  // The lights-on hit: on top of impact(), a bright E-flat major chord rung
+  // out on pulse waves, and a quick run up to the hook.
+  bigHit(t) {
+    const a = this.audio;
+    for (const n of [51, 63, 67, 70, 75, 79, 82]) a.voice(midi(n), { t, dur: 1.2, gain: 0.03, wave: n < 60 ? 'triangle' : 0.25, dest: this.bus.fx, release: 0.9 });
+    [63, 67, 70, 75, 79, 82, 87].forEach((n, i) => a.voice(midi(n), { t: t + i * 0.025, dur: 0.12, gain: 0.04, wave: 0.125, dest: this.bus.fx, release: 0.06 }));
+  }
+
+  // A bright offbeat chord stab (the triad, close voiced).
+  stab(t, root, chord, gain) {
+    for (const k of chord) this.audio.voice(midi(60 + root + k), { t, dur: this.spb * 1.1, gain, wave: 0.25, dest: this.bus.stabs, release: 0.04 });
+  }
+
+  playHype(t) {
+    const a = this.audio;
+    const s = this.step;
+    const spb = this.spb;
+    const B = this.bus;
+    const key = this.key;
+    const hook = this.section === 'H';
+    const [cRoot, chord] = (hook ? HOOK_CHORDS : RAP_CHORDS)[this.bar];
+    const root = cRoot + key;
+    const windUp = !hook && this.bar === 7; // into the hook
+    const gap = windUp && s >= 14; // the beat of silence before it lands
+
+    // ---- drums: a bouncy stomp
+    if (this.crash && s === 0) {
+      a.noiseHit({ t, dur: 1.5, gain: 0.16, freq: 5000, type: 'highpass', dest: B.drums });
+      this.crash = false;
+    }
+    if (windUp) {
+      if (s === 0 || s === 8) a.kick(t, B.drums);
+      if (!gap && (s >= 8 || s % 2 === 0)) a.snare(t, B.drums, 0.06 + (s / 14) * 0.15);
+      if (s === 0) a.noiseHit({ t, dur: spb * 14, gain: 0.08, freq: 700, type: 'bandpass', q: 1.5, sweep: 10, dest: B.fx });
+    } else {
+      if (hook ? s % 4 === 0 || s === 10 : s === 0 || s === 6 || s === 8) a.kick(t, B.drums);
+      if (hook && s % 4 === 0) a.voice(midi(36 + key), { t, dur: 0.1, gain: 0.2, wave: 'sine', slide: 0.5, dest: B.drums }); // extra thump
+      if (s === 4 || s === 12) {
+        a.snare(t, B.drums, 0.17);
+        a.noiseHit({ t: t + 0.01, dur: 0.09, gain: 0.09, freq: 1400, q: 1.2, dest: B.drums }); // clap
+      }
+      if (s % 2 === 0) a.hat(t, B.drums, s % 4 === 2 ? 0.075 : 0.045, hook && s % 4 === 2);
+      else if (hook) a.hat(t, B.drums, 0.028);
+    }
+
+    // ---- bass: oom-pah, low root on the beat, octave and fifth between
+    if (!gap && s % 2 === 0 && !(windUp && s >= 8 && s % 4 !== 0)) {
+      const step = [0, 12, 7, 12][(s / 2) % 4];
+      const f = midi(BASS_ROOT + root + step);
+      a.voice(f, { t, dur: spb * (step ? 1.1 : 1.7), gain: step ? 0.26 : 0.34, wave: 'triangle', dest: B.bass, release: 0.03 });
+      a.voice(f * 2, { t, dur: spb * 1, gain: 0.035, wave: 0.25, dest: B.bass, release: 0.03 });
+    }
+
+    // ---- offbeat chord stabs (the "pah")
+    if (!windUp && s % 4 === 2) this.stab(t, root, chord, hook ? 0.045 : 0.03);
+    if (!windUp && !hook && (s === 7 || s === 15)) this.stab(t, root, chord, 0.016);
+
+    // ---- sparkle: a fast arpeggio up top in the hook
+    if (hook && !windUp) {
+      const order = [0, 1, 2, 1];
+      a.voice(midi(84 + root + chord[order[s % 4]] + (s % 8 >= 4 ? 12 : 0)), { t, dur: spb * 0.5, gain: 0.016, wave: 0.125, dest: B.arp, release: 0.02 });
+    }
+
+    // ---- crowd
+    if (hook && this.bar === 3 && s === 12) this.hey(t);
+    if (!hook && (this.bar === 3 || this.bar === 7) && s === 12 && !windUp) this.hey(t);
+    if (!hook && this.bar === 3 && s === 14) this.hey(t);
+
+    // ---- the lead: bright square, doubled an octave up; the hook gets a
+    // harmony a third below from its second time round
+    const nt = (hook ? NOTES_HOOK : NOTES_RAP)[this.bar * 16 + s];
+    if (nt && !gap) {
+      const dur = spb * nt.len * (nt.len === 1 ? 0.62 : 0.95);
+      const n = ROOT + key + nt.semis;
+      const rel = Math.min(0.06, dur * 0.3);
+      const vib = nt.len >= 3 ? 0.012 : 0;
+      a.voice(midi(n), { t, dur, gain: hook ? 0.12 : 0.1, wave: 0.5, dest: B.lead, release: rel, vibrato: vib });
+      a.voice(midi(n + 12), { t, dur, gain: hook ? 0.05 : 0.025, wave: 0.125, dest: B.lead, release: rel });
+      if (hook && this.loops >= 1) a.voice(midi(ROOT + key + nt.low), { t, dur, gain: 0.05, wave: 0.25, dest: B.lead, release: rel });
     }
   }
 }
