@@ -98,6 +98,25 @@ export const BONUS_SIZE = 17;
 export const BONUS_INTERVAL = 128; // ms per move (~7.8 moves/s), the whole level
 export const BONUS_PARTY_AT = 10; // apples until the lights come on
 export const BONUS_UNLOCK_LENGTH = 30;
+// The epilogue's meteor storm, on Emerald Coast's own 15 x 15 board, with
+// the snake's home (a 3 x 3 block, family and all) in the middle. A first
+// barrage has already landed when it starts; the rest rain down in
+// METEOR_WAVES, each meteor marking where it will land METEOR_WARN_MS ahead,
+// then burning there until it is eaten. Eat all METEOR_TOTAL before
+// METEOR_TIME_MS runs out (or one big one finishes everything off). One that
+// lands on the snake clangs off its head: it's gone, but it costs one of
+// METEOR_LIVES. Walls, its own body and its home are solid. It speeds up as
+// it goes.
+export const METEOR_SIZE = 15;
+export const METEOR_LIVES = 3;
+export const METEOR_TIME_MS = 120000;
+export const METEOR_FIRST = 8; // already burning on the board at the start
+export const METEOR_WAVES = [6, 8, 10];
+export const METEOR_TOTAL = METEOR_FIRST + METEOR_WAVES.reduce((a, b) => a + b, 0);
+export const METEOR_WARN_MS = 1700;
+export const METEOR_STAGGER_MS = 240;
+export const METEOR_INTERVAL = [130, 100]; // ms per move, first meteor to last
+export const METEOR_POINTS = 30;
 export const SKY_SIZE = BOARD_SIZES[BOARD_SIZES.length - 1] + SKY_PAD * 2;
 export const SKY_H = 13;
 export const SKY_LIFT = 3;
@@ -191,6 +210,13 @@ export class SnakeGame {
     this.flying = false;
     this.space = false; // on the collapsing board of the Galactic Core
     this.bonusLevel = false; // in the bonus level (see enterBonusLevel)
+    this.meteorLevel = false; // in the epilogue's meteor storm (see enterMeteorLevel)
+    this.meteors = []; // { x, z, y, id, landAt, landed }
+    this.meteorsEaten = 0;
+    this.meteorsSpawned = 0;
+    this.wave = 0;
+    this.home = null;
+    this.lives = 0;
     this.land = null; // Galactic Core: 1 for each cell still there (x * size + z)
     this.doomed = []; // cells about to fall: { x, z, doomAt, fallAt, id }
     this.fallen = 0;
@@ -278,7 +304,7 @@ export class SnakeGame {
   }
 
   get level() {
-    if (this.bonusLevel) return 0;
+    if (this.bonusLevel || this.meteorLevel) return 0;
     if (this.space) return SPACE_START;
     let l = 0;
     while (l < SPACE_START && this.foodEaten >= LEVEL_AT[l + 1]) l++;
@@ -288,6 +314,10 @@ export class SnakeGame {
   // Apples eaten into the current level and how many it takes. In the
   // Galactic Core: how much of what is left of the board the snake fills.
   levelProgress() {
+    if (this.meteorLevel) {
+      const n = this.meteorsEaten;
+      return { into: n, need: METEOR_TOTAL, max: n >= METEOR_TOTAL, meteor: true };
+    }
     if (this.bonusLevel) {
       const n = this.foodEaten;
       return { into: Math.min(n, BONUS_PARTY_AT), need: BONUS_PARTY_AT, max: n >= BONUS_PARTY_AT, bonus: true };
@@ -346,6 +376,10 @@ export class SnakeGame {
   // tight U-turn) is still physically possible at the top speed.
   baseInterval() {
     if (this.bonusLevel) return BONUS_INTERVAL;
+    if (this.meteorLevel) {
+      const f = Math.min(1, this.meteorsEaten / (METEOR_TOTAL - 1));
+      return Math.round(METEOR_INTERVAL[0] + (METEOR_INTERVAL[1] - METEOR_INTERVAL[0]) * f);
+    }
     if (this.space) {
       // by the fullest the board has been, so it never slows down again
       const f = Math.max(this.fillTop || 0, this.fill);
@@ -368,6 +402,7 @@ export class SnakeGame {
 
   // Speed as a 0..1 value for presentation effects.
   intensity() {
+    if (this.meteorLevel) return Math.min(1, 0.45 + (this.meteorsEaten / METEOR_TOTAL) * 0.3 + (this.rushing ? 0.35 : 0));
     if (this.bonusLevel) return Math.min(1, 0.35 + (this.rushing ? 0.45 : 0));
     const lvl = this.level / MAX_LEVEL;
     return Math.min(1, lvl * 0.7 + (this.rushing || this.boostTicks > 0 ? 0.45 : 0));
@@ -465,6 +500,7 @@ export class SnakeGame {
     if (this.chain) for (let i = this.chain.next; i < this.chain.links.length; i++) add(this.chain.links[i]);
     for (const o of this.obstacles) for (let y = 0; y < (flat ? 1 : this.height); y++) taken.add(cellKey(o.x, o.z, y));
     for (const p of this.pads) add(p);
+    for (const m of this.meteors) add(m);
     return taken;
   }
 
@@ -897,6 +933,94 @@ export class SnakeGame {
     this.preyTimer = Infinity;
     this.rush = 50;
     this.food = { x: c, z: z0 - 6, y: 0, type: 'orb', id: this.uid++, spawnedAt: 0 };
+  }
+
+  // ---------------------------------------------------------------- meteor storm
+  // A fresh run in the epilogue: a short snake low on the left heading up,
+  // its home (a solid cell) in the middle, and the first barrage of meteors
+  // already burning on the board.
+  enterMeteorLevel() {
+    this.reset();
+    const S = METEOR_SIZE;
+    const c = Math.floor(S / 2);
+    this.meteorLevel = true;
+    this.size = S;
+    this.home = { x: c, z: c };
+    this.obstacles = [];
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) this.obstacles.push({ x: c + dx, z: c + dz, solid: true, solidAt: 0, id: this.uid++, home: true });
+    this.lives = METEOR_LIVES;
+    const x0 = c - 4;
+    const z0 = S - 6;
+    this.cells = [];
+    for (let i = 0; i < 5; i++) this.cells.push({ x: x0, z: z0 + i, y: 0 });
+    this.removedTail = { x: x0, z: z0 + 5, y: 0 };
+    this.preyTimer = Infinity;
+    this.rush = 60;
+    this.food = null;
+    this.meteors = [];
+    this.meteorsEaten = 0;
+    this.meteorsSpawned = 0;
+    this.wave = 0;
+    this.nextWaveAt = 0;
+    for (let i = 0; i < METEOR_FIRST; i++) {
+      const m = this.spawnMeteor(0);
+      if (m) m.landed = true;
+    }
+  }
+
+  get meteorsLeft() {
+    return Math.max(0, METEOR_TOTAL - this.meteorsEaten);
+  }
+
+  // Real time left (ms) before the last meteor finishes everything off.
+  get timeLeft() {
+    return Math.max(0, METEOR_TIME_MS - this.clock);
+  }
+
+  // A meteor aimed at a free cell: not right next to home, not right by the
+  // head or in its path, and not where another one is.
+  spawnMeteor(landAt) {
+    const h = this.home;
+    const head = this.head;
+    let free = this.freeCells().filter((c) => !h || Math.max(Math.abs(c.x - h.x), Math.abs(c.z - h.z)) > 2);
+    const fair = free.filter((c) => this.dist(c, head) > 3 && !this.inFrontOfHead(c, 5));
+    if (fair.length) free = fair;
+    if (!free.length) return null;
+    const c = this.pick(free);
+    const m = { x: c.x, z: c.z, y: 0, id: this.uid++, landAt, landed: false, type: 'meteor', spawnedAt: this.time };
+    this.meteors.push(m);
+    this.meteorsSpawned++;
+    return m;
+  }
+
+  // Meteors land on time; once the sky has (nearly) emptied, the next wave.
+  updateMeteors(ev) {
+    for (let i = this.meteors.length - 1; i >= 0; i--) {
+      const m = this.meteors[i];
+      if (m.landed || this.time < m.landAt) continue;
+      if (this.occupied(m.x, m.z)) {
+        // it clangs off the snake: gone, but it costs a life
+        this.meteors.splice(i, 1);
+        this.meteorsEaten++;
+        this.lives = Math.max(0, this.lives - 1);
+        (ev.meteorsSmashed || (ev.meteorsSmashed = [])).push({ ...m, lives: this.lives });
+      } else {
+        m.landed = true;
+        (ev.meteorsLanded || (ev.meteorsLanded = [])).push({ ...m });
+      }
+    }
+    const left = this.meteors.length;
+    if (this.meteorsSpawned < METEOR_TOTAL && left <= 2 && this.time >= this.nextWaveAt) {
+      const n = Math.min(METEOR_WAVES[this.wave] ?? 6, METEOR_TOTAL - this.meteorsSpawned);
+      const list = [];
+      for (let i = 0; i < n; i++) {
+        const m = this.spawnMeteor(this.time + METEOR_WARN_MS + i * METEOR_STAGGER_MS);
+        if (m) list.push({ ...m });
+      }
+      this.wave++;
+      this.nextWaveAt = this.time + METEOR_WARN_MS + n * METEOR_STAGGER_MS;
+      if (list.length) ev.meteorWave = { n: this.wave, of: METEOR_WAVES.length, meteors: list };
+    }
   }
 
   // ---------------------------------------------------------------- galactic core
@@ -1691,6 +1815,17 @@ export class SnakeGame {
     }
 
     if (this.space) this.updateCollapse(ev);
+    if (this.meteorLevel) {
+      this.updateMeteors(ev);
+      // out of lives, or out of time: it's over
+      const end = this.lives <= 0 ? 'crushed' : this.clock >= METEOR_TIME_MS ? 'doom' : null;
+      if (end) {
+        this.die(end);
+        ev.died = true;
+        ev.cause = end;
+        return ev;
+      }
+    }
 
     const h = this.head;
     let nx = h.x + this.dir.x;
@@ -1731,7 +1866,7 @@ export class SnakeGame {
       return ev;
     }
     if (this.obstacleAt(nx, nz)) {
-      const cause = 'obstacle';
+      const cause = this.obstacleAt(nx, nz).home ? 'home' : 'obstacle';
       this.die(cause);
       ev.died = true;
       ev.cause = cause;
@@ -1743,8 +1878,9 @@ export class SnakeGame {
     if (this.food && at(this.food, nx, nz, ny)) eaten = this.food;
     else if (this.bonus && at(this.bonus, nx, nz, ny)) eaten = this.bonus;
     const caught = this.prey && at(this.prey, nx, nz, ny) ? this.prey : null;
+    const meteor = this.meteorLevel ? this.meteors.find((m) => m.landed && m.x === nx && m.z === nz) || null : null;
 
-    const growing = this.pendingGrowth > 0 || !!eaten || !!caught;
+    const growing = this.pendingGrowth > 0 || !!eaten || !!caught || !!meteor;
     if (this.occupied(nx, nz, !growing, ny)) {
       this.die('body');
       ev.died = true;
@@ -1796,6 +1932,17 @@ export class SnakeGame {
       ev.caught = { ...caught, type: 'prey', points, combo: this.combo };
       this.prey = null;
       this.preyTimer = 18000 + this.rng() * 12000;
+    }
+
+    if (meteor) {
+      this.meteors.splice(this.meteors.indexOf(meteor), 1);
+      this.registerEat();
+      const points = METEOR_POINTS * this.combo * this.scoreMult;
+      this.score += points;
+      this.pendingGrowth += 1;
+      this.rush = Math.min(100, this.rush + 20);
+      this.meteorsEaten++;
+      ev.ate = { ...meteor, type: 'meteor', points, combo: this.combo, rushing: this.scoreMult > 1, left: this.meteorsLeft };
     }
 
     const link = this.chainIndexAt(nx, nz, ny);
@@ -1902,7 +2049,15 @@ export class SnakeGame {
       return ev;
     }
 
-    if (eaten === this.food && this.bonusLevel) {
+    if (this.meteorLevel) {
+      if (this.meteorsEaten >= METEOR_TOTAL) {
+        this.won = true;
+        this.die('win');
+        ev.won = true;
+        ev.died = true;
+        ev.cause = 'win';
+      }
+    } else if (eaten === this.food && this.bonusLevel) {
       this.food = this.spawn('orb');
     } else if (eaten === this.food) {
       this.food = this.spawn('orb');
@@ -1922,7 +2077,7 @@ export class SnakeGame {
       this.bonus = null;
     }
 
-    if (!this.space && !this.food && !this.bonus && this.freeCells().length === 0) {
+    if (!this.space && !this.meteorLevel && !this.food && !this.bonus && this.freeCells().length === 0) {
       this.won = true;
       this.die('win');
       ev.won = true;

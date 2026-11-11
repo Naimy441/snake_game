@@ -43,7 +43,7 @@ function glowSprite(tex, color, scale, opacity = 0.5) {
 
 // A faceted ruby apple: lathe-turned body with dimples, a stem and a
 // crystal leaf. Flat shading plus the environment map makes it sparkle.
-function makeCrystalApple() {
+export function makeCrystalApple() {
   const g = new THREE.Group();
   const prof = [
     [0.001, -0.25], [0.07, -0.275], [0.17, -0.255], [0.255, -0.18], [0.3, -0.06], [0.305, 0.06],

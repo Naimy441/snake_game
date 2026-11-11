@@ -312,6 +312,7 @@ export class SnakeView {
     this.trailColor = skin.trail;
     // head
     const h = skin.head;
+    if (this.jawMat) this.jawMat.color.set(h.belly || h.side);
     const top = new THREE.Color(h.top);
     const side = new THREE.Color(h.side);
     const bel = new THREE.Color(h.belly);
@@ -376,6 +377,8 @@ export class SnakeView {
     for (const o of [...this.eyes, this.tongue, this.accHolder]) host.add(o);
     this.eyes.forEach((e, i) => (block ? e.position.set((i ? 1 : -1) * 0.25, faceH * 0.2, 0.5) : e.position.set((i ? 1 : -1) * 0.22, 0.11, 0.12)));
     this.eyes.forEach((e) => e.scale.setScalar(h.eyeScale || 1));
+    this.eyeBase = h.eyeScale || 1;
+    if (this.blockMouth) this.blockMouth.position.set(0, -faceH * 0.18, 0.52);
     this.nostrils.forEach((n) => (n.visible = !block));
     if (block) this.tongue.position.set(0, -faceH * 0.25, 0.5);
     else this.tongue.position.set(0, -0.02, 0.38);
@@ -712,6 +715,8 @@ export class SnakeView {
       this.nostrils.push(nostril);
     }
 
+    this.buildFace(head);
+
     const tongueMat = new THREE.MeshStandardMaterial({ color: '#e0245e', roughness: 0.4 });
     this.tongue = new THREE.Group();
     const stem = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.012, 0.22), tongueMat);
@@ -731,6 +736,111 @@ export class SnakeView {
     this.group.add(head);
   }
 
+  // Expressions for the epilogue's cutscene: a grin along the snout, brows
+  // over the eyes and squinting (happy) eyes. Hidden until setFace asks.
+  buildFace(head) {
+    const mat = new THREE.MeshBasicMaterial({ color: '#170709' });
+    this.faceMat = mat;
+    // the grin hugs the round head: points on the unit sphere, put through
+    // the same squash as the skull (see buildHead), a hair outside it
+    const onSkull = (phi, theta) => {
+      let x = 0.5 * Math.cos(theta) * Math.sin(phi) * 0.8;
+      let y = 0.5 * Math.sin(theta) * 0.55;
+      let z = 0.5 * Math.cos(theta) * Math.cos(phi) * 0.95;
+      if (z > 0) {
+        const f = 1 - 0.38 * Math.pow(z / 0.475, 1.6);
+        x *= f;
+        y *= 0.75 + 0.25 * f;
+      }
+      if (y < 0) y *= 0.62;
+      return new THREE.Vector3(x, y, z).multiplyScalar(1.035);
+    };
+    const pts = [];
+    for (let i = 0; i <= 16; i++) {
+      const u = i / 16 * 2 - 1;
+      pts.push(onSkull(u * 1.05, -0.32 + 0.26 * u * u));
+    }
+    const geo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 0.017, 6, false);
+    geo.translate(0, 0, -0.3);
+    this.mouth = new THREE.Mesh(geo, mat);
+    this.mouth.position.z = 0.3; // scales about the snout, so the grin widens from the middle
+    this.mouth.visible = false;
+    head.add(this.mouth);
+    // block skins: a flat grin on the face cube's front
+    this.blockMouth = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.028, 6, 24, Math.PI), mat);
+    this.blockMouth.rotation.z = Math.PI;
+    this.blockMouth.visible = false;
+    this.face.add(this.blockMouth);
+    // an open mouth (for biting into things): a dark maw at the snout with
+    // two little fangs hanging from the top lip
+    // (in front of the snout, so it shows side on as well as head on), and a
+    // lower jaw (in the belly colour) that hinges open under it
+    this.maw = new THREE.Group();
+    const inside = new THREE.Mesh(new THREE.SphereGeometry(0.17, 20, 12), new THREE.MeshBasicMaterial({ color: '#3a0812' }));
+    inside.scale.set(0.95, 0.75, 0.55);
+    this.maw.add(inside);
+    const tongue = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 8), new THREE.MeshStandardMaterial({ color: '#e0245e', roughness: 0.5 }));
+    tongue.scale.set(1, 0.35, 1.3);
+    tongue.position.set(0, -0.07, 0.02);
+    this.maw.add(tongue);
+    const fangGeo = new THREE.ConeGeometry(0.024, 0.08, 6);
+    fangGeo.rotateX(Math.PI);
+    const fangMat = new THREE.MeshStandardMaterial({ color: '#fffaf0', roughness: 0.3 });
+    for (const sx of [-1, 1]) {
+      const f = new THREE.Mesh(fangGeo, fangMat);
+      f.position.set(sx * 0.08, 0.075, 0.06);
+      this.maw.add(f);
+    }
+    this.maw.visible = false;
+    head.add(this.maw);
+    this.jawMat = new THREE.MeshStandardMaterial({ color: '#cccccc', roughness: 0.45 });
+    this.jaw = new THREE.Group(); // hinged at the back of the mouth
+    this.jaw.position.set(0, -0.09, 0.08);
+    const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.2, 20, 12), this.jawMat);
+    jaw.scale.set(0.95, 0.32, 1.25);
+    jaw.position.set(0, -0.01, 0.2);
+    this.jaw.add(jaw);
+    this.jaw.visible = false;
+    head.add(this.jaw);
+    const browGeo = new THREE.BoxGeometry(0.045, 0.03, 0.17);
+    this.brows = this.eyes.map((eye, i) => {
+      const b = new THREE.Mesh(browGeo, mat);
+      b.position.set((i ? 1 : -1) * 0.02, 0.105, 0.01);
+      b.visible = false;
+      eye.add(b);
+      return b;
+    });
+    this.eyeBase = 1;
+  }
+
+  // smile 0..1; brows -1 (worried) .. 1 (determined); squint 0..1;
+  // open 0..1: the mouth wide open, to bite.
+  setFace({ smile = 0, brows = 0, squint = 0, open = 0 } = {}) {
+    const op = Math.min(1, open);
+    this.maw.visible = op > 0.03 && !this.isGhost;
+    this.jaw.visible = this.maw.visible && !this.block;
+    if (this.maw.visible) {
+      if (this.block) this.maw.position.set(0, -0.12, 0.52);
+      else this.maw.position.set(0, -0.08 - 0.04 * op, 0.43);
+      this.maw.scale.set(0.6 + 0.4 * op, Math.max(0.05, op), 1);
+      this.jaw.rotation.x = 0.65 * op; // the jaw drops open
+    }
+    const on = smile > 0.02 && op < 0.3;
+    this.mouth.visible = on && !this.block && !this.isGhost;
+    this.blockMouth.visible = on && this.block && !this.isGhost;
+    const w = 0.25 + 0.75 * Math.min(1, smile);
+    this.mouth.scale.set(w, 0.6 + 0.4 * Math.min(1, smile), 1);
+    this.blockMouth.scale.set(w, w, 1);
+    for (const b of this.brows) {
+      b.visible = Math.abs(brows) > 0.02 && !this.isGhost;
+      // front end down: a determined frown; up: worried
+      b.rotation.x = brows * 0.55;
+      b.position.y = 0.105 - Math.max(0, brows) * 0.02;
+    }
+    const k = this.eyeBase;
+    for (const e of this.eyes) e.scale.set(k, k * (1 - 0.6 * Math.min(1, squint)), k);
+  }
+
   setRadial(radial) {
     // Radial detail is fixed at construction; quality changes rebuild the view.
     return radial === this.radial;
@@ -748,7 +858,9 @@ export class SnakeView {
   // (stars circle the head while it is >= 0).
   // travel: extra slither phase (hyperspeed keeps the body swimming while the
   // game holds still); wiggle: how strongly it swims (1 is normal).
-  update(game, t, time, toWorld, { lunge = 0, rushGlow = 0, deathFlash = 0, dt = 1 / 60, squash = 0, dizzy = -1, travel = 0, wiggle = 1 } = {}) {
+  // bulge: a lump (something swallowed) this many cells down the body;
+  // bulgeAmt: how much fatter it is there (0 for none).
+  update(game, t, time, toWorld, { lunge = 0, rushGlow = 0, deathFlash = 0, dt = 1 / 60, squash = 0, dizzy = -1, travel = 0, wiggle = 1, bulge = 0, bulgeAmt = 0 } = {}) {
     const path = this.path;
     path.setFromCells(game.cells, game.removedTail, toWorld);
     const L = path.length;
@@ -810,6 +922,10 @@ export class SnakeView {
         // gentle world-fixed slither wave, faded in behind the head
         const amp = this.wiggle * 0.07 * Math.min(1, d / 1.4) * Math.min(1, (total - d) / 1.5 + 0.3);
         off = amp * Math.sin((this.travel - d) * 2.6);
+        if (bulgeAmt > 0) {
+          const q = (d - bulge) / 0.32;
+          r *= 1 + bulgeAmt * Math.exp(-q * q);
+        }
         rh = r * 0.82;
         lift = rh * 0.92;
       }

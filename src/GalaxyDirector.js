@@ -7,7 +7,8 @@ import { CORE_Y } from './render/Space.js';
 //             the galaxy and gliding down to the board above the black hole.
 //   finale  - every cell left is snake: what remains of the board and the
 //             snake itself pour into the black hole as light, the core
-//             gathers itself, then the whole galaxy erupts, and the run is won.
+//             gathers itself, then the whole galaxy erupts, and the run is won
+//             (the results then unlock the ending: epilogue/EpilogueDirector.js).
 const smooth = (t) => t * t * (3 - 2 * t);
 const clamp01 = (t) => Math.min(1, Math.max(0, t));
 const ease = (t) => 1 - Math.pow(1 - clamp01(t), 3);
@@ -225,12 +226,12 @@ export class GalaxyDirector {
       if (!rm) app.rig.shake += 0.7;
     });
     app.later(E + 1.5, () => app.audio.victory());
-    app.later(rm ? E + 4.5 : E + 6.5, () => {
-      this.whiteoutAt = this.t;
-    });
-    app.later(rm ? E + 5.5 : E + 7.7, () => {
+    // once the galaxy has gone off: the results (the win is counted there),
+    // which offer the ending as a newly unlocked storyline
+    app.later(rm ? E + 4 : E + 5.5, () => {
+      const first = !app.epilogueUnlocked();
       app.showGameOver('win');
-      this.whiteoutOff = this.t;
+      if (first) app.announceEpilogue();
     });
   }
 

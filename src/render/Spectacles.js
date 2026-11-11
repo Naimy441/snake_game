@@ -30,10 +30,11 @@ function gpuMaterial(U, { key, vertex, fragment = '', decl = '', instanced = tru
     side,
   });
   mat.defines = { USE_UV: '' };
-  const head = `uniform float uTime; uniform float uFade; varying vec3 vTint; varying float vA;\n${decl}\n`;
+  const head = `uniform float uTime; uniform float uFade; uniform float uBurn; varying vec3 vTint; varying float vA;\n${decl}\n`;
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = U.uTime;
     sh.uniforms.uFade = U.uFade;
+    sh.uniforms.uBurn = U.uBurn;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>\n${head}${instanced ? 'attribute vec4 aSeed; attribute vec3 aTint;' : ''}`)
       .replace('#include <begin_vertex>', `vec3 transformed = vec3(position); vA = 1.0; vTint = ${instanced ? 'aTint' : 'vec3(1.0)'};\n${vertex}`);
@@ -192,8 +193,15 @@ function butterflies(U, rng, count, colors) {
       vec3 fwd = vec3(-sin(a), 0.0, cos(a)) * dir;
       vec3 rt = vec3(fwd.z, 0.0, -fwd.x);
       p *= uFade * (0.8 + aSeed.z * 0.6);
+      // the world burning: they turn into sparks, small and fast, drifting
+      // up off the grass in the heat and starting again
+      p *= 1.0 - 0.55 * uBurn;
+      c.y += uBurn * fract(uTime * (0.2 + aSeed.y * 0.2) + aSeed.x) * 7.0;
+      c.xz += uBurn * vec2(sin(uTime * 3.1 + aSeed.w * 30.0), cos(uTime * 2.7 + aSeed.z * 30.0)) * 0.6;
       transformed = c + rt * p.x + vec3(0.0, 1.0, 0.0) * p.y + fwd * p.z;`,
-    fragment: `float e = length(vUv - 0.5); diffuseColor.rgb *= 1.0 - smoothstep(0.35, 0.6, e) * 0.45;`,
+    fragment: `float e = length(vUv - 0.5); diffuseColor.rgb *= 1.0 - smoothstep(0.35, 0.6, e) * 0.45;
+      float fl = 0.7 + 0.3 * sin(uTime * 30.0 + vUv.x * 9.0);
+      diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(1.0, 0.35, 0.05), vec3(1.0, 0.85, 0.35), 1.0 - e * 1.6) * 2.6 * fl, uBurn);`,
   });
   return crowd(geo, count, mat, rng, colors, 1.25);
 }
@@ -256,7 +264,8 @@ function rainbow(U, sunAzimDeg) {
     additive: true,
     fog: false,
     side: THREE.DoubleSide,
-    vertex: `transformed *= max(uFade, 0.001);`,
+    // (a world on fire has no rainbow)
+    vertex: `transformed *= max(uFade * (1.0 - uBurn), 0.001);`,
     fragment: `
       float y = vUv.y;
       vec3 rb = clamp(abs(mod(y * 5.2 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
@@ -723,7 +732,7 @@ const BUILDERS = [
 ];
 
 export function buildSpectacle(zone) {
-  const U = { uTime: { value: 0 }, uFade: { value: zone === 0 ? 1 : 0 } };
+  const U = { uTime: { value: 0 }, uFade: { value: zone === 0 ? 1 : 0 }, uBurn: { value: 0 } };
   const rng = mulberry32(900 + zone * 17);
   const { objects, updaters } = BUILDERS[zone](U, rng);
   const group = new THREE.Group();
@@ -734,6 +743,10 @@ export function buildSpectacle(zone) {
     setFade(f) {
       fade = f;
       U.uFade.value = f;
+    },
+    // 0..1: the world on fire (the epilogue's meteor storm)
+    setBurn(b) {
+      U.uBurn.value = b;
     },
     update(time, dt) {
       U.uTime.value = time;

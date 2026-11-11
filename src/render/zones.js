@@ -118,7 +118,31 @@ export const ZONES = [
     bloom: 0.85, threshold: 0.82, sat: 1.22, contrast: 1.12, tint: '#f2f0ff', lift: '#020008', exposure: 1.0, vignette: 0.42,
     envIntensity: 0.9, heaven: 1, space: 1,
   },
+  {
+    // The epilogue: a meteor apple hits Emerald Coast. Not a map of its own:
+    // the same island and props, still green, but under a smoky red sky,
+    // lit by fire, with embers drifting up.
+    name: 'Meteor Storm',
+    skyTop: '#3a0a10', skyHorizon: '#ff7a3a', skyGround: '#8a2a14',
+    sunColor: '#ffb070', sunIntensity: 3.0, sunElev: 30, sunAzim: 210, sunSize: 2.0,
+    rimColor: '#ff9a5a', rimIntensity: 1.3,
+    stars: 0, cyber: 0,
+    hemiSky: '#ffc09a', hemiGround: '#4a5a2a', hemiIntensity: 1.0,
+    fogColor: '#c0583a', fogNear: 110, fogFar: 480,
+    waterDeep: '#0c2a5e', waterShallow: '#2a6aa0', waterGlow: 0, waterGrid: 0,
+    boardA: '#74c43f', boardB: '#52a42e', boardRough: 0.88, boardGrid: 0, gridColor: '#ffffff', boardLines: 0.18,
+    strip: '#ff8a3a', wallA: '#f6f0ea', wallB: '#2a4fd0',
+    grass: '#4a9a2e', grassDark: '#36802a', cliffA: '#b8682a', cliffB: '#6a3616', cliffEdge: 0,
+    rock: '#6d5240', waterfall: '#e8d0c8', waterfallGlow: 0,
+    cloudLit: '#ff9a6a', cloudShade: '#5a2a3a', cloudOpacity: 1,
+    particle: '#ffab4a', particleSize: 0.1, particleRise: 0.8, particleTwinkle: 0.7,
+    bloom: 0.4, threshold: 1.0, sat: 1.22, contrast: 1.12, tint: '#fff0e4', lift: '#0a0200', exposure: 0.95, vignette: 0.36,
+    envIntensity: 0.85, heaven: 0, space: 0, burn: 1,
+  },
 ];
+
+// The epilogue's burning palette (not a map: it borrows Emerald Coast's props).
+export const METEOR_ZONE = 6;
 
 const isColor = (v) => typeof v === 'string' && v[0] === '#';
 
@@ -127,6 +151,7 @@ export function compileZones(THREE) {
   return ZONES.map((z) => {
     const out = {};
     for (const [k, v] of Object.entries(z)) out[k] = isColor(v) ? new THREE.Color(v) : v;
+    out.burn = z.burn ?? 0; // (only the epilogue's palette burns)
     return out;
   });
 }

@@ -122,6 +122,7 @@ export class BoardObjects {
     let nw = 0;
     const seen = new Set();
     for (const o of game.obstacles) {
+      if (o.home) continue; // the epilogue's home cell: the house stands there
       seen.add(o.id);
       const w = toWorld(o.x, o.z);
       let a = this.anim.get(o.id);

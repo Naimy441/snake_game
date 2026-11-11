@@ -818,3 +818,71 @@ button { font-family: var(--display); }
 .bonus-o { color: var(--yellow) !important; border-color: rgba(255, 210, 63, 0.55) !important; }
 .popup.gold { color: #fff3c4; font-size: 34px; text-shadow: 0 3px 0 rgba(30, 14, 0, 0.75), 0 0 16px rgba(255, 190, 40, 1); }
 .reduce-motion .bonus-apple { animation: none; }
+
+/* ---------- The ending: Homecoming ---------- */
+.title-menu .epilogue-btn { grid-column: 1 / -1; }
+.epilogue-btn .mi-label { display: inline-flex; align-items: center; gap: 8px; color: var(--orange); }
+.epilogue-btn .mi-val { color: #ffc9a0; }
+.story-o {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 12px; width: 100%; text-align: left; cursor: pointer;
+  background: linear-gradient(100deg, rgba(255, 122, 40, 0.22), rgba(255, 210, 63, 0.12)); border: 1px solid rgba(255, 150, 70, 0.7);
+  border-radius: 12px; padding: 9px 14px; color: #ffe2c8; font: inherit; animation: story-glow 2.4s ease-in-out infinite;
+}
+.story-o.hidden { display: none; }
+.story-o:hover, .story-o:focus-visible { border-color: #ffb27a; filter: brightness(1.12); }
+.story-o .story-kicker { grid-column: 1; font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--orange); }
+.story-o .story-title { grid-column: 1; display: inline-flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 900; }
+.story-o .story-go { grid-column: 2; grid-row: 1 / span 2; font-weight: 900; color: #ffc9a0; }
+@keyframes story-glow { 50% { box-shadow: 0 0 18px rgba(255, 140, 60, 0.45); } }
+.reduce-motion .story-o { animation: none; }
+.meteor-ic {
+  /* a pixel-art burning apple */
+  width: 18px; height: 18px; display: inline-block; flex: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 9' shape-rendering='crispEdges'%3E%3Cpath d='M6 0h1v1H6zM5 1h2v1H5zM7 2h1v1H7zM4 1h1v2H4z' fill='%23ffd23f'/%3E%3Cpath d='M2 2h2v1H2zM5 2h2v1H5zM1 3h7v1H1zM1 4h7v1H1zM1 5h7v1H1zM1 6h7v1H1zM2 7h5v1H2zM3 8h1v1H3zM5 8h1v1H5z' fill='%23ff3a1a'/%3E%3Cpath d='M2 3h1v2H2z' fill='%23ffd0a0'/%3E%3Cpath d='M7 5h1v2H7zM6 7h1v1H6z' fill='%23a01a08'/%3E%3C/svg%3E") center / contain no-repeat;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 0 4px rgba(255, 110, 30, 0.9));
+  animation: meteorGlow 1.2s ease-in-out infinite;
+}
+@keyframes meteorGlow { 50% { filter: drop-shadow(0 0 9px rgba(255, 140, 40, 1)); } }
+.reduce-motion .meteor-ic { animation: none; }
+
+/* letterbox bars and captions for the cutscene */
+#cine { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
+#cine .bar { position: absolute; left: 0; right: 0; height: 11vh; background: #000; transform: scaleY(0); transition: transform 0.7s cubic-bezier(.2,.8,.2,1); }
+#cine .bar.top { top: 0; transform-origin: top; }
+#cine .bar.bottom { bottom: 0; transform-origin: bottom; }
+#cine.on .bar { transform: scaleY(1); }
+#cine-cap {
+  position: absolute; left: 50%; bottom: calc(11vh + 18px); transform: translate(-50%, 8px); margin: 0; width: max-content; max-width: calc(100% - 32px);
+  font: italic 800 clamp(18px, 3.2vw, 30px)/1.2 var(--display); color: #fff; text-align: center; letter-spacing: 0.02em;
+  text-shadow: 0 2px 0 #000, 0 0 18px rgba(0, 0, 0, 0.8); opacity: 0; transition: opacity 0.6s, transform 0.6s;
+}
+#cine-cap.show { opacity: 1; transform: translate(-50%, 0); }
+#cine-cap.big { bottom: 42%; font: italic 900 clamp(44px, 9vw, 96px)/1 var(--display); letter-spacing: 0.08em; color: #fff4d8; text-shadow: var(--outline), 0 0 40px rgba(255, 200, 120, 0.9); }
+.cine-skip {
+  position: absolute; right: 16px; bottom: calc(11vh + 14px); z-index: 7; display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 12px; border-radius: 10px; border: 1px solid var(--hud-edge); background: rgba(0, 0, 0, 0.45); color: var(--muted);
+  font: italic 800 13px/1 var(--display); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+}
+.cine-skip:hover { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+.cine-skip kbd { font-size: 11px; }
+
+/* the storm's clock and lives, top centre (the combo sits below it) */
+.hud-meteors {
+  display: inline-flex; align-items: center; gap: 10px; padding: 5px 14px 5px 10px; border-radius: 12px;
+  background: linear-gradient(180deg, rgba(70, 14, 6, 0.85), rgba(30, 6, 2, 0.88)); border: 1px solid rgba(255, 120, 50, 0.5);
+  box-shadow: 0 0 18px rgba(255, 90, 20, 0.35); pointer-events: none;
+}
+.hud-meteors b { font: italic 900 24px/1 var(--display); color: #ffe2b0; text-shadow: var(--outline); font-variant-numeric: tabular-nums; min-width: 2.6em; }
+.hud-meteors .hm-lives { font: 900 20px/1 var(--display); color: #ff4f6d; text-shadow: 0 2px 0 #3a0010; letter-spacing: 2px; }
+.hud-meteors .meteor-ic { width: 20px; height: 20px; }
+.hud-meteors.urgent b { color: #ff6a5a; animation: hmPulse 0.5s ease-in-out infinite alternate; }
+@keyframes hmPulse { to { transform: scale(1.12); } }
+.hud-meteors.bump .hm-lives { animation: scoreBump 0.35s ease-out; }
+@media (max-width: 720px) {
+  .hud-meteors { padding: 4px 10px 4px 8px; }
+  .hud-meteors b { font-size: 20px; }
+  #cine .bar { height: 8vh; }
+  #cine-cap { bottom: calc(8vh + 12px); }
+  .cine-skip { bottom: calc(8vh + 10px); }
+}

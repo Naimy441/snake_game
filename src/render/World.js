@@ -31,6 +31,11 @@ export class World {
     this.levelMood = 0;
     this.pulseT = 1;
     this.sunDir = new THREE.Vector3();
+    // the epilogue: the island and its props shrink around the board's
+    // centre (the snake turns colossal) and the sea (lava by then) rises
+    this.shrink = 1;
+    this.seaLevel = null; // world y of the sea, or null for its usual place
+    this.hideSea = false; // (the epilogue's lava stands in for it)
 
     this.sky = new Sky(makeCloudTexture());
     this.scene.add(this.sky.group);
@@ -160,13 +165,19 @@ export class World {
     this.ambient.setBudget(n);
   }
 
+  // The set of props a zone shows: the epilogue's burning palette has none
+  // of its own and keeps Emerald Coast's.
+  propsOf(z) {
+    return z < this.scenery.zones.length ? z : 0;
+  }
+
   // Jump or sweep to a zone.
   setZone(z, { instant = false, duration = 3.4 } = {}) {
     if (this.trans) this.finishTransition();
     if (z === this.zone) return false;
     if (instant) {
-      this.scenery.setState(this.zone, 1, false);
-      this.scenery.setState(z, 1, true);
+      this.scenery.setState(this.propsOf(this.zone), 1, false);
+      this.scenery.setState(this.propsOf(z), 1, true);
       this.zone = z;
       this.scene.environment = this.envMaps[z];
       return true;
@@ -177,8 +188,8 @@ export class World {
 
   finishTransition() {
     const tr = this.trans;
-    this.scenery.setState(tr.from, 1, false);
-    this.scenery.setState(tr.to, 1, true);
+    this.scenery.setState(this.propsOf(tr.from), 1, false);
+    this.scenery.setState(this.propsOf(tr.to), 1, true);
     this.zone = tr.to;
     this.scene.environment = this.envMaps[tr.to];
     this.wave.visible = false;
@@ -213,20 +224,28 @@ export class World {
     this.hemi.groundColor.copy(p.hemiGround);
     this.hemi.intensity = p.hemiIntensity;
     this.scene.fog.color.copy(p.fogColor);
-    this.scene.fog.near = p.fogNear;
-    this.scene.fog.far = p.fogFar;
+    // (shrunk, the world keeps its haze: distances shrink with it)
+    this.scene.fog.near = p.fogNear * this.shrink;
+    this.scene.fog.far = p.fogFar * this.shrink;
     this.scene.environmentIntensity = p.envIntensity;
-    this.ocean.uniforms.uFogNear.value = p.fogNear * 1.6;
-    this.ocean.uniforms.uFogFar.value = p.fogFar * 1.9;
+    this.ocean.uniforms.uFogNear.value = p.fogNear * 1.6 * this.shrink;
+    this.ocean.uniforms.uFogFar.value = p.fogFar * 1.9 * this.shrink;
     for (const z of this.scenery.zones) z.uniforms.uGlowBoost.value = 1 + lf * 0.6;
-    const birds = clamp01(1 - p.stars * 1.5 - p.cyber - p.heaven);
+    // (no birds in a burning sky; the butterflies turn to sparks)
+    const birds = clamp01(1 - p.stars * 1.5 - p.cyber - p.heaven - p.burn);
+    this.scenery.zones[0].spectacle.setBurn(p.burn);
     this.ambient.apply(p, 0.45 + lf * 0.55, birds);
     // lift-off: the island and the sea sink away below the clouds
     const sink = smooth(clamp01(p.heaven)) * 170;
     this.island.group.position.y = -sink;
     this.island.group.visible = p.heaven < 0.995;
-    this.ocean.mesh.position.y = WATER_Y - sink;
-    this.ocean.mesh.visible = p.heaven < 0.995;
+    this.ocean.mesh.position.y = this.seaLevel ?? WATER_Y * this.shrink - sink;
+    // the epilogue's colossal snake: the island and its props shrink around
+    // the middle of the board (its top stays level with the board)
+    const k = this.shrink;
+    this.island.group.scale.setScalar(k);
+    for (const z of this.scenery.zones) z.group.scale.setScalar(k);
+    this.ocean.mesh.visible = p.heaven < 0.995 && !this.hideSea;
     this.heavens.apply(p, sun);
     this.space.apply(clamp01(p.space));
   }
@@ -259,9 +278,11 @@ export class World {
 
   update(dt, { level = 0, reduceMotion = false, pxScale = 400 } = {}) {
     this.time += dt;
-    const zoneStart = ZONE_STARTS[this.trans ? this.trans.to : this.zone];
-    const zoneEnd = ZONE_STARTS[(this.trans ? this.trans.to : this.zone) + 1] ?? MAX_LEVEL + 1;
-    const lfTarget = clamp01((level - zoneStart) / Math.max(1, zoneEnd - zoneStart - 1));
+    const zi = this.trans ? this.trans.to : this.zone;
+    const zoneStart = ZONE_STARTS[zi] ?? 0;
+    const zoneEnd = ZONE_STARTS[zi + 1] ?? MAX_LEVEL + 1;
+    // (the epilogue's palette isn't a map: no level mood)
+    const lfTarget = zi < ZONE_STARTS.length ? clamp01((level - zoneStart) / Math.max(1, zoneEnd - zoneStart - 1)) : 0;
     this.levelMood += (lfTarget - this.levelMood) * Math.min(1, dt * 1.2);
 
     if (this.trans) {
@@ -269,9 +290,12 @@ export class World {
       tr.t = Math.min(1, tr.t + dt / tr.dur);
       const f = smooth(clamp01((tr.t - 0.08) / 0.7));
       blendZones(this.zones[tr.from], this.zones[tr.to], f, this.p);
-      this.scenery.setState(tr.from, clamp01(tr.t * 1.3), false);
       const inT = clamp01((tr.t - 0.12) / 0.88);
-      this.scenery.setState(tr.to, inT, true);
+      // (the same props on both sides, as into the epilogue: they stay put)
+      if (this.propsOf(tr.from) !== this.propsOf(tr.to)) {
+        this.scenery.setState(this.propsOf(tr.from), clamp01(tr.t * 1.3), false);
+        this.scenery.setState(this.propsOf(tr.to), inT, true);
+      }
       if (!tr.envSwapped && tr.t > 0.45) {
         this.scene.environment = this.envMaps[tr.to];
         tr.envSwapped = true;

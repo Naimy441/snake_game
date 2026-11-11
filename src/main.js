@@ -19,6 +19,8 @@ import { AudioEngine } from './audio/Audio.js';
 import { Input } from './Input.js';
 import { BonusStage } from './bonus/BonusStage.js';
 import { BonusMusic } from './bonus/BonusMusic.js';
+import { Epilogue } from './epilogue/EpilogueDirector.js';
+import { METEOR_TOTAL } from './game/SnakeGame.js';
 import { loadSettings, saveSettings, loadBest, saveBest, loadStats, saveStats, QUALITY } from './settings.js';
 
 const $ = (id) => document.getElementById(id);
@@ -67,7 +69,10 @@ class App {
     // ?bonus opens the bonus level straight away (unlocked for this visit);
     // ?bonus=9 starts it 9 apples in, one away from the party
     this.bonusTest = qs.has('bonus') ? { apples: Math.max(0, Math.min(40, Math.floor(+qs.get('bonus') || 0))) } : null;
-    this.mode = 'main'; // or 'bonus': which level Play again / Restart replays
+    // ?epilogue plays the ending (unlocked for this visit); ?epilogue=fight
+    // skips the cutscene, straight to the meteor storm
+    this.epilogueTest = qs.has('epilogue') ? (qs.get('epilogue') === 'fight' ? 'fight' : 'full') : null;
+    this.mode = 'main'; // 'bonus' or 'epilogue': which level Play again / Restart replays
     this.canvas = $('scene');
     try {
       this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: false, stencil: false, powerPreference: 'high-performance' });
@@ -176,6 +181,7 @@ class App {
     this.demoBot = new GhostBot(this.game);
     this.demoZone = null;
     this.galaxy = new GalaxyDirector(this);
+    this.epilogue = new Epilogue(this);
     // speedrun timer: real time for the run (pauses don't count)
     this.run = { t: 0, running: false, done: false, full: false, record: false };
     this.whiteout = 0;
@@ -213,6 +219,7 @@ class App {
     window.__coil = this; // handy for debugging and automated tests
     this.renderBonusButton();
     if (this.bonusTest) this.startGame({ bonus: true });
+    else if (this.epilogueTest) this.startGame({ epilogue: this.epilogueTest });
   }
 
   // Warm up before the first frame: with every zone, pickup and pillar
@@ -865,6 +872,7 @@ class App {
       this.resume();
       return true;
     }
+    if (this.state === 'cine' && this.epilogue.skip()) return true;
     return false;
   }
 
@@ -879,6 +887,7 @@ class App {
     }
     if (this.state === 'playing' || this.state === 'countdown') this.pause();
     else if (this.state === 'paused') this.resume();
+    else if (this.state === 'cine') this.epilogue.skip();
   }
 
   onRestart() {
@@ -943,9 +952,11 @@ class App {
   }
 
   // ---------------------------------------------------------------- flow
-  startGame({ bonus } = {}) {
+  startGame({ bonus, epilogue } = {}) {
     if (bonus !== undefined) this.mode = bonus ? 'bonus' : 'main';
+    if (epilogue) this.mode = 'epilogue';
     if (this.mode === 'bonus' && !this.bonusUnlocked()) this.mode = 'main';
+    if (this.mode === 'epilogue' && !this.epilogueUnlocked()) this.mode = 'main';
     if (this.garageOpen) {
       this.garageOpen = false;
       $('garage').classList.add('hidden');
@@ -970,10 +981,22 @@ class App {
     this.board.clear();
     this.syncFood();
     if (this.mode === 'bonus') {
+      this.epilogue.clear();
       this.startBonus();
       return;
     }
+    if (this.mode === 'epilogue') {
+      // the full ending the first time from the menu (or ?epilogue);
+      // Play again / Restart go straight back into the meteor storm
+      const full = epilogue === 'full' || (epilogue === true);
+      this.pendingUnlocks = [];
+      this.showScreen(null);
+      this.epilogue.start({ full });
+      return;
+    }
+    this.epilogue.clear();
     this.exitBonusScene();
+    this.game.best = loadBest(); // (the bonus level and the storm keep scores of their own)
     const startLevel = this.startLevel();
     this.game.startAtLevel(startLevel);
     if (this.playtest && this.playtest.length > this.game.cells.length) this.game.coilTo(this.playtest.length);
@@ -1023,6 +1046,7 @@ class App {
   toMenu() {
     this.state = 'menu';
     this.mode = 'main';
+    this.epilogue.clear();
     this.exitBonusScene();
     this.renderBonusButton();
     this.galaxy.clear();
@@ -1062,6 +1086,32 @@ class App {
     return !!(this.stats.bonusUnlocked || (this.stats.wins || 0) > 0 || this.bonusTest);
   }
 
+  // The ending: once the galaxy is beaten it can be replayed from the menu.
+  epilogueUnlocked() {
+    return (this.stats.wins || 0) > 0 || !!this.epilogueTest;
+  }
+
+  renderEpilogueButton() {
+    const b = $('btn-epilogue');
+    if (!b) return;
+    const on = this.epilogueUnlocked();
+    b.classList.toggle('hidden', !on);
+    $('btn-epilogue-val').textContent = this.stats.epilogueBest ? `Best ${this.stats.epilogueBest.toLocaleString()}` : this.stats.worldSaved ? 'World saved' : 'The ending';
+  }
+
+  // The galaxy is beaten for the first time: the ending is now a storyline of its own.
+  announceEpilogue() {
+    this.audio.chainComplete();
+    this.toast({ kicker: 'New storyline unlocked', title: 'Homecoming', sub: 'Play it now, or any time from the title screen', tone: 'gold', ms: 4200 });
+  }
+
+  playEpilogue() {
+    this.unlockAudio();
+    if (!this.epilogueUnlocked()) return;
+    this.closePanel();
+    this.startGame({ epilogue: 'full' });
+  }
+
   unlockBonus() {
     this.stats.bonusUnlocked = true;
     saveStats(this.stats);
@@ -1071,6 +1121,7 @@ class App {
   }
 
   renderBonusButton() {
+    this.renderEpilogueButton();
     const on = this.bonusUnlocked();
     const b = $('btn-bonus');
     if (!b) return;
@@ -1079,6 +1130,9 @@ class App {
     $('btn-bonus-val').textContent = on ? (this.stats.bonusBest ? `Best ${this.stats.bonusBest.toLocaleString()}` : 'Party time') : `Length ${BONUS_UNLOCK_LENGTH} on map 6`;
     // after a run: offer it (or offer it again) under Play again
     $('btn-bonus-o').classList.toggle('hidden', !on || this.mode === 'bonus');
+    // after beating the galaxy: the ending, offered as the next storyline
+    const g = this.game;
+    $('btn-epilogue-o').classList.toggle('hidden', !(this.epilogueUnlocked() && this.mode === 'main' && g.won && g.space));
   }
 
   playBonus() {
@@ -1399,6 +1453,7 @@ class App {
       }
       if (!rm) this.rig.shake += 0.08;
     }
+    if (g.meteorLevel) this.epilogue.onStep(ev);
     if (ev.padsSpawned) {
       for (const p of ev.padsSpawned) {
         const w = at(p);
@@ -1424,6 +1479,16 @@ class App {
     const g = this.game;
     if (g.bonusLevel) {
       this.onBonusEat(ate);
+      return;
+    }
+    if (g.meteorLevel) {
+      this.epilogue.onEat(ate);
+      if (ate.combo > 1) {
+        const el = $('hud-combo');
+        el.classList.remove('pop');
+        void el.offsetWidth;
+        el.classList.add('pop');
+      }
       return;
     }
     const w = this.toWorld(ate.x, ate.z, ate.y);
@@ -1525,6 +1590,23 @@ class App {
       this.galaxy.startFinale();
       return;
     }
+    if (g.meteorLevel) {
+      // the storm keeps a best score of its own
+      if (g.score > (this.stats.epilogueBest || 0)) this.stats.epilogueBest = g.score;
+      if (ev.cause === 'win') this.stats.worldSaved = (this.stats.worldSaved || 0) + 1;
+      saveStats(this.stats);
+      if (ev.cause === 'win') {
+        this.epilogue.victory();
+        return;
+      }
+      if (ev.cause === 'doom') {
+        // out of time: the last meteor takes everything
+        saveStats(this.stats);
+        this.epilogue.doom();
+        return;
+      }
+      this.epilogue.onDeath();
+    }
     this.state = 'dying';
     this.stopTimer(false);
     this.t = 1; // the failed move never happened: hold the last pose
@@ -1541,7 +1623,7 @@ class App {
       const col = this.snake.trailColor || '#38f6ff';
       this.bonus.onDeath(pts, [col, '#ffffff', col, '#ffd23f']);
       if (ev.cause === 'win') this.bonus.onWin();
-    } else saveBest(g.best);
+    } else if (!g.meteorLevel) saveBest(g.best);
     this.audio.stopMusic({ fade: 1.0 });
     const hp = this.snake.headPos;
     const won = ev.cause === 'win';
@@ -1619,15 +1701,18 @@ class App {
     const g = this.game;
     this.state = 'over';
     this.overAt = performance.now();
-    const unlocked = this.recordRun();
+    // (the ending recorded the galaxy run when it began, and the storm itself isn't a run)
+    const unlocked = this.mode === 'epilogue' ? this.pendingUnlocks || [] : this.recordRun();
+    this.pendingUnlocks = [];
     $('over-unlocks').classList.toggle('hidden', !unlocked.length);
     if (unlocked.length) {
       $('over-unlocks').textContent = `Unlocked in the Garage: ${unlocked.join(', ')}!`;
       this.audio.chainComplete();
     }
     this.audio.gameOver();
-    const galaxyWon = cause === 'win' && g.space;
-    $('over-title').textContent = galaxyWon ? 'Galaxy complete!' : cause === 'win' ? 'Perfect board!' : g.bonusLevel ? (g.foodEaten >= BONUS_PARTY_AT ? 'Party over!' : 'Lights out!') : 'Wipeout!';
+    const worldSaved = cause === 'win' && g.meteorLevel;
+    const galaxyWon = (cause === 'win' && g.space) || worldSaved;
+    $('over-title').textContent = worldSaved ? 'World saved...?' : galaxyWon ? 'Galaxy complete!' : cause === 'win' ? 'Perfect board!' : g.bonusLevel ? (g.foodEaten >= BONUS_PARTY_AT ? 'Party over!' : 'Lights out!') : g.meteorLevel ? { doom: 'Too late!', crushed: 'Clanged out!' }[cause] || 'The meteors won!' : 'Wipeout!';
     $('over-cause').textContent = galaxyWon
       ? 'You filled every cell the black hole left, then it swallowed you whole, and the whole galaxy went supernova. You beat Snake Rush: 100%.'
       : {
@@ -1638,7 +1723,13 @@ class App {
         laser: 'You flew into the laser fence.',
         win: 'You filled the entire board!',
       }[cause];
-    if (galaxyWon) {
+    if (g.meteorLevel) {
+      const n = g.meteorsEaten;
+      const left = g.meteorsLeft;
+      $('over-cause').textContent = worldSaved
+        ? `You beat the galaxy, came home, ate the apple you were told not to eat, aura farmed and swallowed all ${METEOR_TOTAL} meteors. Then the Apple Men flattened your house and took your family. To be continued...`
+        : `${{ wall: 'You crashed into the wall', body: 'You tied yourself in a knot', home: 'You crashed into your own home', crushed: 'Three meteors clanged off your head', doom: 'Time ran out and one last giant meteor flattened everything' }[cause] || 'Wipeout'} after ${n} meteor${n === 1 ? '' : 's'}. ${left} left. Try again: your family believes in you!`;
+    } else if (galaxyWon) {
       const r = this.run;
       const time = this.formatRunTime(r.t);
       $('over-cause').textContent += r.full ? ` Run time ${time}${r.record ? ': a new 100% record!' : '.'}` : ` Run time ${time} (from level ${this.startLevel() + 1}; start at level 1 to set a 100% record).`;
@@ -1656,15 +1747,16 @@ class App {
     $('over-length').textContent = g.cells.length;
     $('over-combo').textContent = `x${g.maxCombo}`;
     $('over-time').textContent = this.formatTime(g.time);
-    $('over-zone').textContent = g.bonusLevel ? 'Bonus' : g.space ? `${g.zone + 1} · ${Math.floor(g.fill * 100)}%` : String(g.zone + 1);
-    $('over-chains').textContent = g.bonusLevel ? '–' : String(g.stats.chains);
-    $('over-prey').textContent = g.bonusLevel ? '–' : String(g.stats.prey);
-    $('over-pads').textContent = g.bonusLevel ? '–' : String(g.stats.pads);
+    $('over-zone').textContent = g.meteorLevel ? 'Ending' : g.bonusLevel ? 'Bonus' : g.space ? `${g.zone + 1} · ${Math.floor(g.fill * 100)}%` : String(g.zone + 1);
+    const special = g.bonusLevel || g.meteorLevel;
+    $('over-chains').textContent = special ? '–' : String(g.stats.chains);
+    $('over-prey').textContent = special ? '–' : String(g.stats.prey);
+    $('over-pads').textContent = special ? '–' : String(g.stats.pads);
     $('over-newbest').classList.toggle('hidden', !(g.newBest && g.score > 0));
     if (g.bonusLevel) {
       const n = g.foodEaten;
       if (cause !== 'win') $('over-cause').textContent = `${cause === 'body' ? 'You ran into your own body' : 'You crashed into the wall'} after ${n} golden apple${n === 1 ? '' : 's'}.${n >= BONUS_PARTY_AT ? '' : ` ${BONUS_PARTY_AT - n} more and the party starts!`}`;
-    } else $('start-best').textContent = g.best.toLocaleString();
+    } else if (!g.meteorLevel) $('start-best').textContent = g.best.toLocaleString();
     this.renderBonusButton();
     this.showScreen('screen-over');
     $('btn-again').focus({ preventScroll: true });
@@ -1680,6 +1772,9 @@ class App {
     $('btn-play').addEventListener('click', () => this.startGame({ bonus: false }));
     $('btn-bonus').addEventListener('click', () => this.playBonus());
     $('btn-bonus-o').addEventListener('click', () => this.playBonus());
+    $('btn-epilogue-o').addEventListener('click', () => this.playEpilogue());
+    $('btn-epilogue').addEventListener('click', () => this.playEpilogue());
+    $('cine-skip').addEventListener('click', () => this.epilogue.skip());
     $('btn-again').addEventListener('click', () => this.startGame());
     $('btn-resume').addEventListener('click', () => this.resume());
     $('btn-restart-p').addEventListener('click', () => this.startGame());
@@ -1992,16 +2087,16 @@ class App {
     this.setText('hud-length', String(shownLen));
     this.setText('hud-time', this.formatTime(g.time));
     if (this.settings.ghost) this.setText('hud-ghost', this.ghost.score.toLocaleString());
-    this.setText('hud-level', g.bonusLevel ? '★' : String(g.level + 1));
-    this.setText('hud-zone', g.bonusLevel ? (g.foodEaten >= BONUS_PARTY_AT ? 'Bonus · Party' : 'Bonus · Lights out') : ZONE_NAMES[g.zone]);
+    this.setText('hud-level', g.bonusLevel ? '★' : g.meteorLevel ? '☄' : String(g.level + 1));
+    this.setText('hud-zone', g.meteorLevel ? 'Meteor storm' : g.bonusLevel ? (g.foodEaten >= BONUS_PARTY_AT ? 'Bonus · Party' : 'Bonus · Lights out') : ZONE_NAMES[g.zone]);
     // progress to the next speed level and zone
     const lvl = g.level;
     const prog = g.levelProgress();
     const maxed = prog.max;
     const left = prog.need - prog.into;
     // in the Galactic Core the bar is the board filling up, in tenths
-    const segs = prog.core ? 10 : prog.need;
-    this.setText('hud-lvl-next', prog.bonus ? (maxed ? 'Party mode!' : `${left} apple${left === 1 ? '' : 's'} to the party`) : prog.core ? `${Math.floor((prog.into / prog.need) * 100)}% filled` : maxed ? 'Top speed' : `${left} apple${left === 1 ? '' : 's'} to go`);
+    const segs = prog.core ? 10 : prog.meteor ? 12 : prog.need;
+    this.setText('hud-lvl-next', prog.meteor ? `${left} meteor${left === 1 ? '' : 's'} left` : prog.bonus ? (maxed ? 'Party mode!' : `${left} apple${left === 1 ? '' : 's'} to the party`) : prog.core ? `${Math.floor((prog.into / prog.need) * 100)}% filled` : maxed ? 'Top speed' : `${left} apple${left === 1 ? '' : 's'} to go`);
     this.setStyle('hud-lvl-fill', 'transform', `scaleX(${(prog.into / prog.need).toFixed(3)})`);
     if (this.lastHud.segs !== segs) {
       this.lastHud.segs = segs;
@@ -2011,7 +2106,8 @@ class App {
     this.setClass($('hud-lvl'), 'orbit', !!prog.core);
     const nz = ZONE_STARTS.findIndex((z) => z > lvl);
     const toFw = 10 - (g.foodEaten % 10);
-    if (g.bonusLevel) this.setText('hud-zone-next', g.foodEaten >= BONUS_PARTY_AT ? `${toFw} to the next fireworks` : 'Find the golden apples');
+    if (g.meteorLevel) this.setText('hud-zone-next', 'Save the world!');
+    else if (g.bonusLevel) this.setText('hud-zone-next', g.foodEaten >= BONUS_PARTY_AT ? `${toFw} to the next fireworks` : 'Find the golden apples');
     else this.setText('hud-zone-next', g.space ? `${Math.max(0, g.coreFree())} cells left to fill` : nz < 0 ? 'Final zone' : `Next: ${ZONE_NAMES[nz]} at Lv ${ZONE_STARTS[nz] + 1}`);
     this.setStyle('hud-rush', 'transform', `scaleX(${(g.rush / 100).toFixed(3)})`);
     const rushEl = $('hud-rush-wrap');
@@ -2166,7 +2262,7 @@ class App {
         b.style.transform = `translate(calc(-50% + ${(-Math.cos(q.a) * 30).toFixed(1)}px), calc(-50% + ${(-Math.sin(q.a) * 26).toFixed(1)}px))`;
       }
     };
-    point(g.food, 'orb', true);
+    point(g.meteorLevel ? this.epilogue.nearestMeteor() : g.food, 'orb', true);
     point(g.bonus, 'prism', false);
     point(g.prey, 'prey', false);
   }
@@ -2254,6 +2350,12 @@ class App {
     };
     if (g.prey) sprite(g.prey.x, g.prey.z, ['.y.y.', 'yyyyy', 'ykyky', 'yyyyy', '.yyy.'], { y: '#ffd36a', k: '#3a2400' });
     if (g.bonus) sprite(g.bonus.x, g.bonus.z, ['..v..', '.vwv.', 'vvvvv', '.vvv.', '..v..'], { v: '#c77dff', w: '#ffffff' });
+    for (const m of g.meteors) {
+      // burning meteors, and blinking rings where the next ones will land
+      if (m.landed) sprite(m.x, m.z, ['.yoy.', 'yoroy', 'orrro', 'yoroy', '.yoy.'], { y: '#ffd23f', o: '#ff7a1a', r: '#ff2a1a' });
+      else if (blink) px(m.x, m.z, '#ff3b1a', 1);
+    }
+    if (g.home) sprite(g.home.x, g.home.z, ['..r..', '.rrr.', 'rrrrr', '.www.', '.wbw.'], { r: '#e8452c', w: '#f6ead0', b: '#7a4424' });
     if (g.food) {
       // a pixel apple; it flashes white now and then so it's easy to spot
       const flash = (t * 1.5) % 1 < 0.12;
@@ -2702,9 +2804,12 @@ class App {
     const snakeGame = pre || g;
     const snakeWorld = pre ? (x, z, y) => this.world.toWorld(x, z, y, pre.yMid, pre.size) : this.toWorld;
     const fall = this.voidFallPose();
-    this.snake.update(fall ? fall.game : snakeGame, pre || fall ? 1 : clamp01(this.t), this.simTime, fall ? fall.toWorld : snakeWorld, {
+    // (the ending's cutscene steers and draws the snake itself)
+    this.epilogue.update(dt, gdt);
+    if (!this.epilogue.drawsSnake) this.snake.update(fall ? fall.game : snakeGame, pre || fall ? 1 : clamp01(this.t), this.simTime, fall ? fall.toWorld : snakeWorld, {
       lunge: fall ? 0 : this.lunge,
-      rushGlow: this.rushGlow,
+      // (aura farming in the ending keeps the glow shell lit, in gold)
+      rushGlow: this.epilogue.active ? Math.max(this.rushGlow, this.epilogue.auraGlow || 0) : this.rushGlow,
       deathFlash: this.deathFlash,
       dt,
       // the head squashes on impact and springs back; then it sees stars
@@ -2751,10 +2856,11 @@ class App {
       const beat = this.bonusMusic.beat();
       this.bonus.update(gdt, { head: this.snake.headPos, cells: g.cells, beat: beat ? beat.beat : null, camera: this.camera, pxScale, reduceMotion: rm });
     } else {
-      if (this.world.setBoardSize(ground, { instant: rm })) this.onBoardResized(ground);
+      // (the storm's grid is laid over the lava: the island keeps its own size)
+      if (!g.meteorLevel && this.world.setBoardSize(ground, { instant: rm })) this.onBoardResized(ground);
       this.rig.setBoardSize(g.space ? g.size : ground, rm);
       this.world.update(dt, { level: this.state === 'menu' ? 0 : g.level, reduceMotion: rm, pxScale });
-      this.world.updateWalls(g, dt, this.state === 'playing');
+      if (!g.meteorLevel && !this.epilogue.active) this.world.updateWalls(g, dt, this.state === 'playing');
       arena.update(dt, this.simTime, this.world.skyAmount, this.snake.headPos, food, g.flying && this.state !== 'menu');
     }
     // Chase / first-person cameras aim along the snake's next move (a queued
@@ -2823,6 +2929,7 @@ class App {
     P.uCenter.value.set(0.5, view ? 0.56 : 0.5);
     this.holeOnScreen(P.uHole.value);
     this.renderer.toneMappingExposure = pp.exposure;
+    if (this.epilogue.active) this.epilogue.applyGrade(P);
     this.post.render(this.scene, this.camera, { threshold: pp.threshold });
   }
 
