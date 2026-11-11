@@ -21,6 +21,7 @@ const SCALES = {
 const QUALITY = {
   maj: [0, 4, 7], m: [0, 3, 7], maj7: [0, 4, 7, 11], m7: [0, 3, 7, 10], 7: [0, 4, 7, 10], 6: [0, 4, 7, 9],
   add9: [0, 4, 7, 14], m9: [0, 3, 7, 10, 14], 9: [0, 4, 7, 10, 14],
+  maj9: [0, 4, 7, 11, 14], m6: [0, 3, 7, 9],
 };
 
 // Melodies: 16 tokens per bar. Numbers are scale degrees (1 = key root,
@@ -608,9 +609,117 @@ const OVERCLOCK = {
   },
 };
 
-// Every map's songs: the original and its alternate (Neon Night also has
-// Afterglow, Cyber Overdrive Overclock).
+// "Seaglass": chiptune city-pop for the Emerald Coast, after a clip of a
+// song: 120 BPM in C major, lush sevenths and ninths on the "royal road"
+// (IVmaj7 V iii7 vi, then ii7 V7 I) changing every two beats, with a dreamy
+// top line that leans on E and D. A bar may hold two chords here, one per
+// half bar ([[5, 'maj7'], [7, '7']] is Fmaj7 then G7).
+//   I  intro: pad, arpeggio and the clip's top line as a soft bell, no drums
+//   V  the verse: a syncopated hook (E . E . D) stepping down the progression
+//   P  pre-chorus: climbing call-and-response to a borrowed Fm6 and G7
+//   C  the chorus: royal road with its E7, the hook up high and doubled
+//   B  a breakdown: drums out, the top line floating over Am9 Em7 Fmaj7
+//   R  the build: notes hammered up to a riser over Ab7, a breath...
+//   L  ...and the last chorus lands a half step up, in Db
+// Then it goes round again from the verse (the intro plays once).
+const CITY = {
+  tempo: 120, lead: 0.25, staccato: 0.8, swing: 0.08, echo: { steps: 3, gain: 0.3 }, pad: true,
+  arp: { order: [0, 1, 2, 3, 2, 1], every: 2, len: 1.2, oct: 12 },
+  stabs: '..x..x....x..x..',
+  bass: {
+    menu: 'R - - - - - - - R - - - - - - -',
+    1: 'R - - . . . R - R - - . . . R -',
+    2: 'R . O . . R O . R . O . . R O .',
+    3: 'R . O R . R O . R . O R . R O 5',
+  },
+  drums: {
+    1: { k: 'x.....x...x.....', s: '....x.......x...', h: '..x...x...x...x.' },
+    2: { k: 'x...x...x...x...', s: '....x.......x...', g: '.......x......x.', h: '..x...x...x...x.' },
+    3: { k: 'x...x...x...x...', s: '....x.......x...', g: '..x....x.x....x.', h: 'xxxxxxxxxxxxxxxx', t: '..............x.' },
+  },
+};
+const SEAGLASS_CHORUS = {
+  ...CITY, chorus: true, double: true, minTier: 2, level: 1.1,
+  chords: [
+    [[5, 'maj7'], [7, '7']], [[4, '7'], [9, 'm7']], [[2, 'm7'], [7, '7']], [[0, 'maj7'], [0, '7']],
+    [[5, 'maj7'], [7, '7']], [[4, '7'], [9, 'm7']], [[2, 'm7'], [7, '7']], [0, 'add9'],
+  ],
+  melody: [
+    '10 - - 12 - - 13 - - - 12 - 11 - 9 -', '10 - - 9 - - 7 - 8 - - - 10 - 12 -',
+    '11 - - 10 - - 11 - 12 - - 11 - 9 - -', '10 - - - - - - - . . . . 8 - 9 -',
+    '10 - - 12 - - 13 - - - 15 - 14 - 13 -', '14 - - 16 - - 17 - 15 - - - 13 - 12 -',
+    '13 - - 12 - - 11 - 12 - - 14 - - 12 -', '15 - - - - - - - 12 . 10 . 9 . 10 .',
+  ],
+  answer: [
+    '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
+    '. . . . . . . . . . . . . . . .', '. . . . . . . . 15 . 12 . . . . .',
+    '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
+    '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
+  ],
+};
+const SEAGLASS = {
+  name: 'Seaglass', key: 0, scale: 'major', tempo: 120,
+  seq: ['I', 'V', 'P', 'C', 'B', 'R', 'L'],
+  loopTo: 1,
+  I: {
+    ...CITY, lead: 0.5, mute: ['drums', 'stabs'], level: 0.85,
+    chords: [[[5, 'maj7'], [7, 'maj']], [[4, 'm7'], [9, 'm9']], [[2, 'm7'], [7, 'maj']], [0, 'add9']],
+    melody: [
+      '10 - - - - - 10 - 9 - - - - - - -', '9 - - - - - 9 - 10 - - - 8 - - -',
+      '8 - - - - - 9 - 9 - - - - - . .', '10 - - - - - - - . . 5 . 6 . 7 .',
+    ],
+  },
+  V: {
+    ...CITY,
+    chords: [
+      [[5, 'maj7'], [7, 'maj']], [[4, 'm7'], [9, 'm7']], [[2, 'm7'], [7, '7']], [0, 'maj7'],
+      [[5, 'maj7'], [7, 'maj']], [[4, 'm7'], [9, '7']], [[2, 'm7'], [7, '7']], [[0, 'maj7'], [0, '7']],
+    ],
+    melody: [
+      '10 - . 10 - . 9 - - - 9 - 7 - - -', '9 - . 9 - . 7 - - - 8 - 6 - - -',
+      '8 - . 8 - . 6 - 7 - 9 - 11 - 9 -', '10 - - - - - - - . . 8 . 9 . 10 .',
+      '10 - . 10 - . 9 - - - 9 - 7 - - -', '9 - . 9 - . 7 - 6 - - - 5 - 6 -',
+      '11 - . 11 - . 9 - 8 - 9 - 11 - 12 -', '10 - - - - - 8 - - - . . . . . .',
+    ],
+  },
+  P: {
+    ...CITY, level: 1.05,
+    chords: [[2, 'm9'], [4, 'm7'], [5, 'maj9'], [[5, 'm6'], [7, '7']]],
+    melody: [
+      '6 - 8 - 9 - - - 8 - 9 - 10 - - -', '7 - 9 - 10 - - - 9 - 10 - 12 - - -',
+      '8 - 10 - 12 - - - 11 - 12 - 13 - 12 -', '11 - - - 9 - 8 - 7 - - - 9 - 11 -',
+    ],
+  },
+  C: SEAGLASS_CHORUS,
+  B: {
+    ...CITY, mute: ['drums', 'stabs'], level: 0.85, echo: { steps: 3, gain: 0.4 },
+    chords: [[9, 'm9'], [4, 'm7'], [5, 'maj7'], [[2, 'm7'], [7, '7']]],
+    melody: [
+      '8 - - - - - 8 - 9 - - - 10 - - -', '9 - - - - - 9 - 7 - - - 5 - - -',
+      '10 - - - - - 10 - 12 - - - 14 - - -', '13 - - - - - - - 12 - - - 11 - - -',
+    ],
+  },
+  R: {
+    ...CITY, riser: true, level: 0.85, levelTo: 1.2, staccato: 0.6, tempo: 122,
+    bass: {
+      menu: 'R - - - - - - - R - - - - - - -',
+      1: 'R . R . R . R . R . R . R . R .',
+      2: 'R . R . R . R . R . R . R . R .',
+      3: 'R R R R R R R R R R R R R R R R',
+    },
+    chords: [[[2, 'm7'], [7, '7']], [[4, 'm7'], [9, '7']], [[5, 'maj7'], [7, '7']], [8, '7']],
+    melody: [
+      '9 - 9 - 11 - 11 - 12 - 12 - 14 - 14 -', '10 - 10 - 12 - 12 - 13 - 13 - 14 - 14 -',
+      '13 . 13 . 13 . 13 . 14 . 14 . 14 14 14 14', '15 15 15 15 15 15 15 15 15 15 15 15 . . . .',
+    ],
+  },
+  L: { ...SEAGLASS_CHORUS, key: 1, tempo: 122, level: 1.2 },
+};
+
+// Every map's songs: the original and its alternate (Emerald Coast also has
+// Seaglass, Neon Night Afterglow, Cyber Overdrive Overclock).
 export const TRACKS = SONGS.map((s, i) => [s, ALT_SONGS[i]]);
+TRACKS[0].push(SEAGLASS);
 TRACKS[2].push(AFTERGLOW);
 TRACKS[3].push(OVERCLOCK);
 
@@ -642,7 +751,7 @@ function parseMelody(lines) {
   return notes;
 }
 
-for (const s of [...SONGS, ...ALT_SONGS, AFTERGLOW, OVERCLOCK]) {
+for (const s of [...SONGS, ...ALT_SONGS, SEAGLASS, AFTERGLOW, OVERCLOCK]) {
   s.root = s.key > 5 ? 48 + s.key : 60 + s.key;
   for (const k of new Set(s.seq || ['A', 'B'])) {
     const sec = s[k];
@@ -1392,7 +1501,10 @@ export class AudioEngine {
     // a breath of silence before the drop
     const pos = barIdx * 16 + s;
     const hush = sec.riser && pos >= bars * 16 - 4;
-    const [cRoot, cQual] = sec.chords[barIdx % sec.chords.length];
+    // (a bar may hold two chords, one per half bar)
+    const cell = sec.chords[barIdx % sec.chords.length];
+    const split = Array.isArray(cell[0]);
+    const [cRoot, cQual] = split ? cell[s < 8 ? 0 : 1] : cell;
     const chord = QUALITY[cQual];
     const key = song.key;
     const spb = 60 / this.tempo / 4;
@@ -1479,10 +1591,10 @@ export class AudioEngine {
 
     // pad: the bar's chord held under everything, two slightly detuned voices
     // per note with a slow swell, washed in the room
-    if (song.pad && s === 0 && this.active('pad') && !(sec.riser && barIdx === bars - 1)) {
+    if (song.pad && (s === 0 || (split && s === 8)) && this.active('pad') && !(sec.riser && barIdx === bars - 1)) {
       let base = 48 + ((key + cRoot) % 12);
       if (base < 52) base += 12;
-      const dur = spb * 18; // overlaps into the next bar so chords blend
+      const dur = spb * (split ? 10 : 18); // overlaps into the next chord so chords blend
       for (const n of chord.slice(0, 4)) {
         const f = midi(base + n);
         for (const [det, wave, gain] of [[1.004, 'triangle', 0.024], [1 / 1.004, 0.5, 0.006]]) {

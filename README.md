@@ -352,7 +352,7 @@ title screen, the music follows the map the tour is showing.
 The original songs are **Seaside Sprint** (Emerald Coast), **Desert Wind**
 (Golden Canyon), **City Lights** (Neon Night), **Data Stream** (Cyber
 Overdrive), **Skyward** (Sunset Heavens) and **Last Light** (Galactic Core).
-Every map has **two songs** (Neon Night and Cyber Overdrive have three), and one is picked at random each time its music
+Every map has **two songs** (Emerald Coast, Neon Night and Cyber Overdrive have three), and one is picked at random each time its music
 starts (a new map or a new run); a small "♪ name" note says which, and on
 the title screen the song playing is shown under the map name. The second
 set is written hook first, in the same chiptune voices: a short catchy motif
@@ -362,6 +362,14 @@ Coast, **Gold Rush** (a galloping western) in Golden Canyon, **Midnight Drive**
 (octave-popping disco synth-pop) on Neon Night, **Firewall** (a harmonic-minor
 chase theme) in Cyber Overdrive, **Golden Hour** (a dreamy, soaring climb) in
 Sunset Heavens and **Supernova** (a major-key anthem of wonder) in the Galactic Core.
+Emerald Coast has a third song, **Seaglass**: chiptune city-pop after a clip
+of a song (120 BPM in C major, lush sevenths and ninths on the "royal road",
+Fmaj7 G Em7 Am then Dm7 G7 C, changing every two beats, under a dreamy top
+line that leans on E and D). A soft intro of pad, arpeggio and that top line
+as a bell, a syncopated verse hook, a pre-chorus that climbs to a borrowed
+Fm6, a chorus up high and doubled over the royal road with its E7, a drumless
+breakdown, a build over Ab7, and a last chorus a half step up, in Db. (A bar
+can hold two chords, one per half bar.)
 Neon Night has a third song, **Afterglow**: a hook transcribed from a sung
 voice recording (pitch-tracked frame by frame: a three-note E-F#-G chant in a
 3-3-2 rhythm at about 120 BPM), grown into a song that goes from the feels to
@@ -386,9 +394,9 @@ Ab6 Bbm9 Eb9, a breakdown, a build, then a long hype run a key up, in B minor
 again from the chant.
 Press **M** to skip to the map's next song (it starts from the top, and stays
 the pick for that map for the rest of the visit). To pin one while testing, run
-`__coil.audio.forceTrack = 0` (original), `1` (alternate) or `2` (Afterglow on
-Neon Night, Overclock in Cyber Overdrive) in the console, or add `track` to
-the URL: `?level=6&track=2` always plays Afterglow and `?level=9&track=2`
+`__coil.audio.forceTrack = 0` (original), `1` (alternate) or `2` (Seaglass on
+Emerald Coast, Afterglow on Neon Night, Overclock in Cyber Overdrive) in the console, or add `track` to
+the URL: `?track=2` plays Seaglass, `?level=6&track=2` always plays Afterglow and `?level=9&track=2`
 Overclock (add `&bot=1` to let the autoplay drive while you listen).
 
 ### Chase and first-person aids
