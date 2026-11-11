@@ -1219,7 +1219,7 @@ test('the autoplay beats the whole game from map 1', () => {
   }
 });
 
-import { TRACKS } from '../src/audio/Audio.js';
+import { TRACKS, SEAGLASS_ORIGINAL } from '../src/audio/Audio.js';
 
 test('every map has two or more well-formed songs', () => {
   assert.equal(TRACKS.length, 6);
@@ -1238,6 +1238,11 @@ test('every map has two or more well-formed songs', () => {
           assert.equal(song[sec].answer.length, song[sec].melody.length, `${song.name} ${sec}: answer bars`);
           for (const bar of song[sec].answer) assert.equal(bar.split(' ').length, 16, `${song.name} ${sec}: 16 answer steps in "${bar}"`);
         }
+        if (song[sec].bell) {
+          assert.equal(song[sec].bell.length, song[sec].melody.length, `${song.name} ${sec}: bell bars`);
+          for (const bar of song[sec].bell) assert.equal(bar.split(' ').length, 16, `${song.name} ${sec}: 16 bell steps in "${bar}"`);
+        }
+        if (song[sec].keys) assert.equal(song[sec].keys.length, 16, `${song.name} ${sec}: keys`);
         for (const bar of song[sec].melody) {
           const toks = bar.split(' ');
           assert.equal(toks.length, 16, `${song.name} ${sec}: 16 steps in "${bar}"`);
@@ -1250,5 +1255,18 @@ test('every map has two or more well-formed songs', () => {
         if (st.stabs) assert.equal(st.stabs.length, 16);
       }
     }
+  }
+});
+
+test('Seaglass Original is kept but not played in the game', () => {
+  assert.ok(!TRACKS.flat().includes(SEAGLASS_ORIGINAL));
+  const v2 = TRACKS[0].find((s) => s.name === 'Seaglass');
+  assert.ok(v2, 'Seaglass (v2) plays on the Emerald Coast');
+  assert.deepEqual(SEAGLASS_ORIGINAL.seq, v2.seq);
+  for (const k of new Set(v2.seq)) {
+    assert.deepEqual(SEAGLASS_ORIGINAL[k].melody, v2[k].melody, `${k}: same melody`);
+    assert.deepEqual(SEAGLASS_ORIGINAL[k].chords, v2[k].chords, `${k}: same chords`);
+    assert.ok(!SEAGLASS_ORIGINAL[k].keys && !SEAGLASS_ORIGINAL[k].bell, `${k}: no keys or bells`);
+    assert.ok(SEAGLASS_ORIGINAL[k].notes, `${k}: parsed`);
   }
 });

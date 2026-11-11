@@ -352,7 +352,7 @@ title screen, the music follows the map the tour is showing.
 The original songs are **Seaside Sprint** (Emerald Coast), **Desert Wind**
 (Golden Canyon), **City Lights** (Neon Night), **Data Stream** (Cyber
 Overdrive), **Skyward** (Sunset Heavens) and **Last Light** (Galactic Core).
-Every map has **two songs** (Emerald Coast, Neon Night and Cyber Overdrive have three), and one is picked at random each time its music
+Every map has **three songs** (the Galactic Core has two), and one is picked at random each time its music
 starts (a new map or a new run); a small "♪ name" note says which, and on
 the title screen the song playing is shown under the map name. The second
 set is written hook first, in the same chiptune voices: a short catchy motif
@@ -368,8 +368,23 @@ Fmaj7 G Em7 Am then Dm7 G7 C, changing every two beats, under a dreamy top
 line that leans on E and D). A soft intro of pad, arpeggio and that top line
 as a bell, a syncopated verse hook, a pre-chorus that climbs to a borrowed
 Fm6, a chorus up high and doubled over the royal road with its E7, a drumless
-breakdown, a build over Ab7, and a last chorus a half step up, in Db. (A bar
-can hold two chords, one per half bar.)
+breakdown, a build over Ab7, and a last chorus a half step up, in Db. The band fills out like the clip's: a clap on 2 and 4, 16th shakers,
+a syncopated kick, a funk bass that walks into each chord from a half step
+below, electric-piano comping, a glockenspiel twinkling down the chords, and
+a horn-like hit on the chorus downbeat. (A bar can hold two chords, one per
+half bar.) The first version, **Seaglass Original** (the same song with
+simpler pulse stabs, a plain bass and snare, and no clap, shakers or
+glockenspiel), is kept in the code to compare but isn't played in the game.
+Golden Canyon has a third song, **Mirage**: a sunny desert dembow in A
+phrygian dominant (the snake charmer's scale) kept bright with major chords
+(the triumphant F G A cadence, the Bb-A turn) at 112, with a clap and keys on
+the 3-3-2, a tresillo bass and a hook that coils round its note with quick
+turns. It drops fast: a four-bar call, a build, then a four-on-the-floor
+"sandstorm" chorus, before its verse, chorus and breakdown.
+Sunset Heavens has **Paper Planes**: an upbeat neo-soul glide in Eb at 112 over
+chords that slide by half steps (Abmaj7 G7 Cm7 Bbm7 Eb7), a soaring chorus
+on Abmaj9 Bb6 Gm7 Cm9 that bounces four on the floor, a drumless glide over a borrowed Dbmaj7, and a last
+chorus a half step up in E. (Phrygian dominant is now one of the scales.)
 Neon Night has a third song, **Afterglow**: a hook transcribed from a sung
 voice recording (pitch-tracked frame by frame: a three-note E-F#-G chant in a
 3-3-2 rhythm at about 120 BPM), grown into a song that goes from the feels to
@@ -394,8 +409,8 @@ Ab6 Bbm9 Eb9, a breakdown, a build, then a long hype run a key up, in B minor
 again from the chant.
 Press **M** to skip to the map's next song (it starts from the top, and stays
 the pick for that map for the rest of the visit). To pin one while testing, run
-`__coil.audio.forceTrack = 0` (original), `1` (alternate) or `2` (Seaglass on
-Emerald Coast, Afterglow on Neon Night, Overclock in Cyber Overdrive) in the console, or add `track` to
+`__coil.audio.forceTrack = 0` (original), `1` (alternate) or `2` (each map's
+third song, where it has one) in the console, or add `track` to
 the URL: `?track=2` plays Seaglass, `?level=6&track=2` always plays Afterglow and `?level=9&track=2`
 Overclock (add `&bot=1` to let the autoplay drive while you listen).
 

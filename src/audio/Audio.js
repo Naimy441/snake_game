@@ -17,6 +17,7 @@ const SCALES = {
   harmonic: [0, 2, 3, 5, 7, 8, 11],
   phrygian: [0, 1, 3, 5, 7, 8, 10],
   dorian: [0, 2, 3, 5, 7, 9, 10],
+  phrygdom: [0, 1, 4, 5, 7, 8, 10], // phrygian dominant: the snake charmer's scale
 };
 const QUALITY = {
   maj: [0, 4, 7], m: [0, 3, 7], maj7: [0, 4, 7, 11], m7: [0, 3, 7, 10], 7: [0, 4, 7, 10], 6: [0, 4, 7, 9],
@@ -622,24 +623,35 @@ const OVERCLOCK = {
 //   R  the build: notes hammered up to a riser over Ab7, a breath...
 //   L  ...and the last chorus lands a half step up, in Db
 // Then it goes round again from the verse (the intro plays once).
+// v2 adds the rest of the clip's band: a hand clap on 2 and 4, 16th shakers
+// and a syncopated kick, a funk bass that walks into each chord from a half
+// step below ('A'), electric-piano comping, a glockenspiel twinkling down the
+// chords, and a horn-like chord hit on the chorus downbeat.
 const CITY = {
   tempo: 120, lead: 0.25, staccato: 0.8, swing: 0.08, echo: { steps: 3, gain: 0.3 }, pad: true,
   arp: { order: [0, 1, 2, 3, 2, 1], every: 2, len: 1.2, oct: 12 },
-  stabs: '..x..x....x..x..',
+  keys: '..x..x....x..x.x',
   bass: {
     menu: 'R - - - - - - - R - - - - - - -',
-    1: 'R - - . . . R - R - - . . . R -',
-    2: 'R . O . . R O . R . O . . R O .',
-    3: 'R . O R . R O . R . O R . R O 5',
+    1: 'R - - . . . R A R - - . . . R A',
+    2: 'R . O . . R O A R . O . . R O A',
+    3: 'R . O R . R O A R . O R . R 5 A',
   },
   drums: {
-    1: { k: 'x.....x...x.....', s: '....x.......x...', h: '..x...x...x...x.' },
-    2: { k: 'x...x...x...x...', s: '....x.......x...', g: '.......x......x.', h: '..x...x...x...x.' },
-    3: { k: 'x...x...x...x...', s: '....x.......x...', g: '..x....x.x....x.', h: 'xxxxxxxxxxxxxxxx', t: '..............x.' },
+    1: { k: 'x.....x...x.....', s: '................', c: '....x.......x...', h: '..x...x...x...x.', sh: 'x.x.x.x.x.x.x.x.' },
+    2: { k: 'x..x..x...x..x..', s: '....x.......x...', c: '....x.......x...', g: '.......x......x.', h: '..x...x...x...x.', sh: 'xxxxxxxxxxxxxxxX' },
+    3: { k: 'x.xx...x..xx...x', s: '....x.......x...', c: '....x.......x...', g: '..x....x.x....x.', h: '..x...x...x...x.', sh: 'xxxxxxxxxxxxxxxx', t: '..............x.' },
   },
 };
+// the chorus goes four on the floor, the kick skipping into the last beat
+const CITY_FLOOR = {
+  1: { k: 'x...x...x...x...', s: '....x.......x...', c: '....x.......x...', h: '..x...x...x...x.', sh: 'xxxxxxxxxxxxxxxx' },
+  2: { k: 'x...x...x...x...', s: '....x.......x...', c: '....x.......x...', g: '.........x....x.', h: '..x...x...x...x.', sh: 'xxxxxxxxxxxxxxxX' },
+  3: { k: 'x...x..xx...x.x.', s: '....x.......x...', c: '....x.......x...', g: '.........x....x.', h: '..x...x...x...x.', sh: 'xxxxxxxxxxxxxxxx', t: '...........x..xx' },
+};
 const SEAGLASS_CHORUS = {
-  ...CITY, chorus: true, double: true, minTier: 2, level: 1.1,
+  ...CITY, chorus: true, double: true, minTier: 2, level: 1.1, hit: true, drums: CITY_FLOOR,
+  keys: 'L..x..x.L..x..x.',
   chords: [
     [[5, 'maj7'], [7, '7']], [[4, '7'], [9, 'm7']], [[2, 'm7'], [7, '7']], [[0, 'maj7'], [0, '7']],
     [[5, 'maj7'], [7, '7']], [[4, '7'], [9, 'm7']], [[2, 'm7'], [7, '7']], [0, 'add9'],
@@ -655,6 +667,13 @@ const SEAGLASS_CHORUS = {
     '. . . . . . . . . . . . . . . .', '. . . . . . . . 15 . 12 . . . . .',
     '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
     '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
+  ],
+  // the glockenspiel twinkling down each chord in eighths
+  bell: [
+    '6 . 3 . 1 . 3 . 7 . 5 . 2 . 5 .', '7 . 3 . 2 . 3 . 6 . 3 . 1 . 3 .',
+    '4 . 2 . 6 . 2 . 4 . 2 . 7 . 5 .', '3 . 1 . 5 . 1 . 3 . . . . . . .',
+    '6 . 3 . 1 . 3 . 7 . 5 . 2 . 5 .', '7 . 3 . 2 . 3 . 6 . 3 . 1 . 3 .',
+    '4 . 2 . 6 . 2 . 4 . 2 . 7 . 5 .', '8 . 5 . 3 . 1 . . . . . . . . .',
   ],
 };
 const SEAGLASS = {
@@ -681,6 +700,12 @@ const SEAGLASS = {
       '10 - . 10 - . 9 - - - 9 - 7 - - -', '9 - . 9 - . 7 - 6 - - - 5 - 6 -',
       '11 - . 11 - . 9 - 8 - 9 - 11 - 12 -', '10 - - - - - 8 - - - . . . . . .',
     ],
+    bell: [
+      '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
+      '. . . . . . . . . . . . . . . .', '. . . . 5 . 3 . . . . . . . . .',
+      '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
+      '. . . . . . . . . . . . . . . .', '. . . . . . . . . 5 . 3 . 1 . .',
+    ],
   },
   P: {
     ...CITY, level: 1.05,
@@ -697,6 +722,10 @@ const SEAGLASS = {
     melody: [
       '8 - - - - - 8 - 9 - - - 10 - - -', '9 - - - - - 9 - 7 - - - 5 - - -',
       '10 - - - - - 10 - 12 - - - 14 - - -', '13 - - - - - - - 12 - - - 11 - - -',
+    ],
+    bell: [
+      '6 . 1 . 3 . 7 . . . . . . . . .', '7 . 3 . 5 . 2 . . . . . . . . .',
+      '6 . 3 . 1 . 3 . . . . . . . . .', '4 . 6 . . . . . 5 . 7 . 2 . . .',
     ],
   },
   R: {
@@ -716,12 +745,261 @@ const SEAGLASS = {
   L: { ...SEAGLASS_CHORUS, key: 1, tempo: 122, level: 1.2 },
 };
 
-// Every map's songs: the original and its alternate (Emerald Coast also has
-// Seaglass, Neon Night Afterglow, Cyber Overdrive Overclock).
+// "Mirage": a sunny desert dembow for the Golden Canyon. A phrygian dominant
+// (the snake charmer's scale, a flat second leaning on the root) kept bright:
+// major chords throughout, climbing the triumphant bVI-bVII-I cadence (F G
+// A) and the bII-I turn (Bb A), at 112 over a reggaeton-style dembow: kick
+// on the beat, clap and keys on the 3-3-2, 16th shakers, a tresillo bass that
+// walks into each chord. The hook coils round a note with quick turns.
+// It gets to the drop fast: a four-bar call, a four-bar build, then the
+// sandstorm (the chorus, four on the floor). After that it plays its verse,
+// chorus and breakdown, builds again, drops again, and goes round from the
+// verse.
+// "Seaglass Original": Seaglass as first written, before the rest of the
+// clip's band joined: the same song (melody, chords, sections, tempo), with
+// three-note pulse stabs instead of the electric piano, a kick that goes four
+// on the floor as the game heats up, 16th hats, a plain bass, a snare instead
+// of the clap, and no shakers, glockenspiel or chorus hit. Kept to compare;
+// it isn't one of the map's songs.
+const CITY_ORIGINAL = {
+  stabs: '..x..x....x..x..', keys: undefined, bell: undefined, hit: false,
+  bass: {
+    menu: 'R - - - - - - - R - - - - - - -',
+    1: 'R - - . . . R - R - - . . . R -',
+    2: 'R . O . . R O . R . O . . R O .',
+    3: 'R . O R . R O . R . O R . R O 5',
+  },
+  drums: {
+    1: { k: 'x.....x...x.....', s: '....x.......x...', h: '..x...x...x...x.' },
+    2: { k: 'x...x...x...x...', s: '....x.......x...', g: '.......x......x.', h: '..x...x...x...x.' },
+    3: { k: 'x...x...x...x...', s: '....x.......x...', g: '..x....x.x....x.', h: 'xxxxxxxxxxxxxxxx', t: '..............x.' },
+  },
+};
+export const SEAGLASS_ORIGINAL = { ...SEAGLASS, name: 'Seaglass Original' };
+for (const k of new Set(SEAGLASS.seq)) {
+  // (the build keeps its own driving bass)
+  SEAGLASS_ORIGINAL[k] = { ...SEAGLASS[k], ...CITY_ORIGINAL, ...(k === 'R' ? { bass: SEAGLASS.R.bass } : {}) };
+}
+
+// the same drum pattern whatever the intensity
+const allTiers = (d) => ({ 1: d, 2: d, 3: d });
+const DUNE = {
+  tempo: 112, lead: 0.25, staccato: 0.75, echo: { steps: 3, gain: 0.3 }, clap: 0.6,
+  arp: { order: [0, 2, 1, 2], every: 2, len: 0.6, oct: 12 },
+  keys: '...x..x....x..x.',
+  bass: {
+    menu: 'R - - - - - - - R - - - - - - -',
+    1: 'R - - R - - R - R - - R - - R A',
+    2: 'R . . R . O R . R . . R . O R A',
+    3: 'R . O R . O R O R . O R . O 5 A',
+  },
+  drums: {
+    1: { k: 'x.......x.......', s: '................', c: '...x..x....x..x.', h: '................', sh: 'x.x.x.x.x.x.x.x.' },
+    2: { k: 'x...x...x...x...', s: '................', c: '...x..x....x..x.', h: '..x...x...x...x.', sh: 'xxxxxxxxxxxxxxxX' },
+    3: { k: 'x...x...x...x...', s: '......x.......x.', c: '...x..x....x..x.', g: '.x.......x......', h: '..x...x...x...x.', sh: 'xxxxxxxxxxxxxxxx', t: '..............xx' },
+  },
+};
+const MIRAGE_CHORUS = {
+  ...DUNE, chorus: true, double: true, hit: true, minTier: 3, level: 1.1,
+  chords: [[8, 'maj'], [10, 'maj'], [0, 'maj'], [0, 'maj'], [8, 'maj'], [10, 'maj'], [1, 'maj'], [0, 'maj']],
+  melody: [
+    '8 - - 13 - - 15 - - - 13 - 15 - - -', '7 - - 11 - - 14 - - - 11 - 14 - - -',
+    '15 - - 12 - - 10 - 12 - 15 - 17 15 12 -', '15 - - - - - - - 12 . 15 . 17 - - -',
+    '15 - - 13 - - 8 - - - 13 - 15 - - -', '14 - - 11 - - 7 - - - 11 - 14 - - -',
+    '13 - 14 13 11 - 9 - 11 - 13 - 16 - - -', '15 - - - - - - - 12 . 10 . 9 . 8 .',
+  ],
+  bell: [
+    '6 . 8 . 13 . 8 . 6 . 8 . 13 . 8 .', '7 . 11 . 14 . 11 . 7 . 11 . 14 . 11 .',
+    '1 . 3 . 5 . 3 . 1 . 3 . 5 . 8 .', '5 . 3 . 1 . . . . . . . . . . .',
+    '6 . 8 . 13 . 8 . 6 . 8 . 13 . 8 .', '7 . 11 . 14 . 11 . 7 . 11 . 14 . 11 .',
+    '2 . 4 . 6 . 4 . 2 . 4 . 6 . 9 .', '8 . 5 . 3 . 1 . . . . . . . . .',
+  ],
+};
+const MIRAGE = {
+  name: 'Mirage', key: 9, scale: 'phrygdom', tempo: 112,
+  seq: ['I', 'R', 'S', 'V', 'C', 'K', 'R', 'S'],
+  loopTo: 3,
+  I: {
+    ...DUNE, lead: 0.5, mute: ['stabs'], level: 0.85,
+    drums: allTiers({ k: 'x...x...x...x...', s: '................', c: '................', h: '..x...x...x...x.', sh: 'xxxxxxxxxxxxxxxx' }),
+    chords: [[0, 'maj'], [1, 'maj'], [10, 'maj'], [0, 'maj']],
+    melody: [
+      '8 - - - - - - - 9 8 - - - - - -', '9 - - - - - - - 11 9 - - - - - -',
+      '7 - - - - - - - 11 7 - - - - - -', '8 - - - - - - - . . 10 . 11 . 12 .',
+    ],
+  },
+  V: {
+    ...DUNE,
+    chords: [[0, 'maj'], [1, 'maj'], [10, 'maj'], [0, 'maj'], [0, 'maj'], [1, 'maj'], [[8, 'maj'], [10, 'maj']], [0, 'maj']],
+    melody: [
+      '12 - 13 12 10 - - - 12 - 10 9 8 - - -', '13 - 14 13 11 - - - 13 - 11 10 9 - - -',
+      '14 - 15 14 11 - - - 7 - 11 - 14 - - -', '15 - - - 12 - - - 10 - 12 - 10 9 8 -',
+      '12 - 13 12 10 - - - 12 - 10 9 8 - - -', '13 - 14 13 11 - - - 13 - 11 10 9 - - -',
+      '13 - 15 - 13 - 8 - 14 - 11 - 7 - 11 -', '8 - - - - - - - . . 10 . 11 . 12 .',
+    ],
+    bell: [
+      '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
+      '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
+      '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
+      '. . . . . . . . . . . . . . . .', '. . . . 5 . 3 . . . . . . . . .',
+    ],
+  },
+  C: MIRAGE_CHORUS,
+  K: {
+    ...DUNE, mute: ['arp', 'stabs'], level: 0.9,
+    drums: allTiers({ k: 'x.......x.......', s: '................', c: '...x..x....x..x.', h: '................', sh: '..x...x...x...x.' }),
+    minTier: 1,
+    chords: [[0, 'maj'], [1, 'maj'], [0, 'maj'], [1, 'maj']],
+    melody: [
+      '12 - 13 12 10 - - - . . . . . . . .', '. . . . . . . . 13 - 14 13 11 - - -',
+      '12 - 13 12 10 - - - . . . . . . . .', '. . . . . . . . 13 - 14 13 16 - - -',
+    ],
+  },
+  R: {
+    ...DUNE, riser: true, level: 0.85, levelTo: 1.2, staccato: 0.6,
+    bass: {
+      menu: 'R - - - - - - - R - - - - - - -',
+      1: 'R . R . R . R . R . R . R . R .',
+      2: 'R . R . R . R . R . R . R . R .',
+      3: 'R R R R R R R R R R R R R R R R',
+    },
+    chords: [[8, 'maj'], [10, 'maj'], [1, 'maj'], [1, 'maj']],
+    melody: [
+      '8 - 8 - 13 - 13 - 15 - 15 - 13 - 13 -', '11 - 11 - 14 - 14 - 18 - 18 - 14 - 14 -',
+      '13 . 13 . 13 . 13 . 16 . 16 . 16 16 16 16', '18 18 18 18 18 18 18 18 18 18 18 18 . . . .',
+    ],
+  },
+  // the sandstorm: four on the floor under the dembow clap
+  S: {
+    ...MIRAGE_CHORUS, tempo: 118, level: 1.2,
+    drums: {
+      1: { k: 'x...x...x...x...', s: '....x.......x...', c: '...x..x....x..x.', h: '..x...x...x...x.', sh: 'xxxxxxxxxxxxxxxx' },
+      2: { k: 'x...x...x...x...', s: '....x.......x...', c: '...x..x....x..x.', h: '..x...x...x...x.', sh: 'xxxxxxxxxxxxxxxx' },
+      3: { k: 'x...x...x...x..x', s: '....x.......x...', c: '...x..x....x..x.', g: '.x.......x......', h: '..x...x...x...x.', sh: 'xxxxxxxxxxxxxxxx', t: '..............xx' },
+    },
+  },
+};
+
+// "Paper Planes": an upbeat neo-soul glide for the Sunset Heavens, in Eb at
+// 112 with a light shuffle. Lush chords that slide by half steps (Abmaj7 G7
+// Cm7 Bbm7 Eb7), a clap on 2 and 4, swung shakers and electric-piano
+// chords, a bass that walks into every change, and a glockenspiel catching
+// the light. The verse chats and glides; the chorus soars on Abmaj9 Bb6 Gm7
+// Cm9 Fm9 Bb7, with a band answering in the gaps.
+//   I  keys and bells, no drums
+//   V  the verse
+//   C  the chorus
+//   G  the glide: drums out, floating over Abmaj7 Dbmaj7 (a borrowed chord)
+//   R  a build over Fm7 Bb7 to a B7 that tips the key...
+//   L  ...so the last chorus lands a half step up, in E
+const GLIDE = {
+  tempo: 112, lead: 0.25, leadOct: -12, staccato: 0.75, swing: 0.12, echo: { steps: 3, gain: 0.3 }, pad: true, clap: 0.6,
+  arp: { order: [0, 1, 2, 3, 2, 1], every: 1, len: 0.8, oct: 12 },
+  keys: '..x..x.x..x..x.x',
+  bass: {
+    menu: 'R - - - - - - - 5 - - - - - - -',
+    1: 'R - . O . . 5 A R - . O . . 5 A',
+    2: 'R . O R . O 5 A R . O R . O 5 A',
+    3: 'R O . R O . 5 A R O . R O 3 5 A',
+  },
+  drums: {
+    1: { k: 'x.....x...x.....', s: '................', c: '....x.......x...', h: 'x.x.x.x.x.x.x.x.', sh: 'xxxxxxxxxxxxxxxx' },
+    2: { k: 'x.....x.x.x.....', s: '....x.......x...', c: '....x.......x...', g: '.......x.....x..', h: 'x.x.x.x.x.x.x.x.', sh: 'xxxxxxxxxxxxxxxX' },
+    3: { k: 'x..x..x.x.x..x..', s: '....x.......x...', c: '....x.......x...', g: '..x....x.....x.x', h: 'x.x.x.x.x.x.x.x.', sh: 'xxxxxxxxxxxxxxxx', t: '..............xx' },
+  },
+};
+// the chorus bounces four on the floor
+const GLIDE_FLOOR = {
+  1: { k: 'x...x...x...x...', s: '....x.......x...', c: '....x.......x...', h: '..x...x...x...x.', sh: 'xxxxxxxxxxxxxxxx' },
+  2: { k: 'x...x...x...x...', s: '....x.......x...', c: '....x.......x...', g: '.......x......x.', h: '..x...x...x...x.', sh: 'xxxxxxxxxxxxxxxX' },
+  3: { k: 'x...x...x..xx...', s: '....x.......x...', c: '....x.......x...', g: '.......x......x.', h: '..x...x...x...x.', sh: 'xxxxxxxxxxxxxxxx', t: '..............xx' },
+};
+const PLANES_CHORUS = {
+  ...GLIDE, chorus: true, double: true, hit: true, minTier: 2, level: 1.1, drums: GLIDE_FLOOR,
+  chords: [[5, 'maj9'], [7, '6'], [4, 'm7'], [9, 'm9'], [2, 'm9'], [7, '7'], [0, 'maj7'], [0, 'maj7']],
+  melody: [
+    '15 - - 13 - - 12 - - - 13 - 15 - - 17', '- - - 16 - - 14 - - - 12 - 14 - - -',
+    '10 - - 12 - - 14 - - - 16 - 17 - - -', '15 - - - 14 - 13 - - - - - . . 15 16',
+    '16 - - 15 - - 13 - - - 11 - 13 - - 16', '- - - 14 - - 12 - - - 11 - 9 - - -',
+    '10 - - 12 - - 15 - - - 14 - 15 - 17 -', '15 - - - - - - - . . 12 . 13 . 14 .',
+  ],
+  answer: [
+    '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
+    '. . . . . . . . . . . . . . . .', '. . . . . . . . 17 15 13 . . . . .',
+    '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
+    '. . . . . . . . . . . . . . . .', '. . . . 17 . 15 . . . . . . . . .',
+  ],
+  bell: [
+    '. . . . . . . . 3 . 6 . 8 . . .', '. . . . . . . . 2 . 5 . 7 . . .',
+    '. . . . . . . . 3 . 5 . 7 . . .', '. . . . . . . . . . . . . . . .',
+    '. . . . . . . . 4 . 6 . 8 . . .', '. . . . . . . . 2 . 4 . 5 . . .',
+    '. . . . . . . . 3 . 5 . 8 . . .', '. . . . . . . . . . . . . . . .',
+  ],
+};
+const PAPER_PLANES = {
+  name: 'Paper Planes', key: 3, scale: 'major', tempo: 112,
+  seq: ['I', 'V', 'C', 'G', 'R', 'L'],
+  loopTo: 1,
+  I: {
+    ...GLIDE, mute: ['drums'], level: 0.85,
+    chords: [[5, 'maj7'], [4, '7'], [9, 'm7'], [[7, 'm7'], [0, '7']]],
+    melody: [
+      '. . . . . . . . 10 - 11 - 13 - - -', '14 - - - 10 - - - 9 - - - 7 - - -',
+      '13 - - - 12 - - - 10 - - - . . . .', '12 - - - 11 - - - 10 - - - . . . .',
+    ],
+    bell: [
+      '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
+      '. . . . . . . . . . . . 3 . 6 .', '. . . . . . . . . . . . 3 . 5 .',
+    ],
+  },
+  V: {
+    ...GLIDE,
+    chords: [[5, 'maj7'], [4, '7'], [9, 'm7'], [[7, 'm7'], [0, '7']], [5, 'maj7'], [4, '7'], [9, 'm7'], [[2, 'm7'], [7, '7']]],
+    melody: [
+      '10 - 11 - 13 - - - 11 - 10 - 8 - - -', '10 - 9 - 7 - - - 9 - 10 - 14 - - -',
+      '13 - 12 - 10 - - - 12 - 13 - 15 - - -', '12 - 11 - 9 - - - 8 - 10 - 12 - - -',
+      '10 - 11 - 13 - - - 11 - 10 - 8 - - -', '10 - 9 - 7 - 9 - 10 - - - . . . .',
+      '13 - 15 - 17 - - - 15 - 13 - 12 - - -', '11 - 9 - 13 - - - 12 - - - 14 - 12 -',
+    ],
+  },
+  C: PLANES_CHORUS,
+  G: {
+    ...GLIDE, mute: ['drums'], level: 0.85, echo: { steps: 3, gain: 0.4 },
+    chords: [[5, 'maj7'], [10, 'maj7'], [5, 'maj7'], [7, '7']],
+    melody: [
+      '13 - - - - - 11 - 10 - - - 8 - - -', '9 - - - - - 11 - 13 - - - 15 - - -',
+      '17 - - - - - 15 - 13 - - - 11 - - -', '12 - - - - - - - 14 - - - 16 - - -',
+    ],
+    bell: [
+      '6 . 8 . 10 . 11 . . . . . . . . .', '2 . 4 . 6 . 8 . . . . . . . . .',
+      '10 . 8 . 6 . 4 . . . . . . . . .', '5 . 7 . 9 . 11 . . . . . . . . .',
+    ],
+  },
+  R: {
+    ...GLIDE, riser: true, swing: 0.06, level: 0.85, levelTo: 1.2, staccato: 0.6,
+    bass: {
+      menu: 'R - - - - - - - R - - - - - - -',
+      1: 'R . R . R . R . R . R . R . R .',
+      2: 'R . R . R . R . R . R . R . R .',
+      3: 'R R R R R R R R R R R R R R R R',
+    },
+    chords: [[2, 'm7'], [7, '7'], [[2, 'm7'], [7, '7']], [8, '7']],
+    melody: [
+      '9 - 9 - 11 - 11 - 13 - 13 - 15 - 15 -', '12 - 12 - 14 - 14 - 16 - 16 - 18 - 18 -',
+      '13 . 13 . 13 . 13 . 14 . 14 . 14 14 14 14', '15 15 15 15 15 15 15 15 15 15 15 15 . . . .',
+    ],
+  },
+  L: { ...PLANES_CHORUS, key: 4, tempo: 116, level: 1.2 },
+};
+
+// Every map's songs: the original, its alternate, and a third (Seaglass,
+// Mirage, Afterglow, Overclock, Paper Planes; the Galactic Core has two).
 export const TRACKS = SONGS.map((s, i) => [s, ALT_SONGS[i]]);
 TRACKS[0].push(SEAGLASS);
+TRACKS[1].push(MIRAGE);
 TRACKS[2].push(AFTERGLOW);
 TRACKS[3].push(OVERCLOCK);
+TRACKS[4].push(PAPER_PLANES);
 
 const SONG_STARTS = [0, 3, 6, 9, 12, 14]; // first level of each zone
 
@@ -751,13 +1029,14 @@ function parseMelody(lines) {
   return notes;
 }
 
-for (const s of [...SONGS, ...ALT_SONGS, SEAGLASS, AFTERGLOW, OVERCLOCK]) {
+for (const s of [...SONGS, ...ALT_SONGS, SEAGLASS, SEAGLASS_ORIGINAL, MIRAGE, AFTERGLOW, OVERCLOCK, PAPER_PLANES]) {
   s.root = s.key > 5 ? 48 + s.key : 60 + s.key;
   for (const k of new Set(s.seq || ['A', 'B'])) {
     const sec = s[k];
     sec.notes = parseMelody(sec.melody);
     sec.bars = sec.melody.length;
     if (sec.answer) sec.answerNotes = parseMelody(sec.answer);
+    if (sec.bell) sec.bellNotes = parseMelody(sec.bell);
     // a sequenced song's sections carry their own style over the song's key
     // (a section may change key: a lift for a last chorus)
     if (s.seq) {
@@ -1523,7 +1802,9 @@ export class AudioEngine {
         let len = 1;
         while (pat[s + len] === '-') len++;
         const base = 36 + ((key + cRoot) % 12);
-        const off = tok === 'R' ? 0 : tok === 'O' ? 12 : tok === '5' ? 7 : tok === '7' ? chord[3] ?? 10 : chord[1];
+        // 'A' approaches the next chord's root from a half step below
+        const off = tok === 'A' ? 36 + ((key + this.nextChordRoot(sec, barIdx, s)) % 12) - 1 - base
+          : tok === 'R' ? 0 : tok === 'O' ? 12 : tok === '5' ? 7 : tok === '7' ? chord[3] ?? 10 : chord[1];
         const f = midi(base + off);
         this.voice(f, { t, dur: spb * len * 0.92, gain: 0.34, wave: 'triangle', dest: L.bass.gain, release: 0.03 });
         if (tier >= 2) this.voice(f * 2, { t, dur: spb * len * 0.7, gain: 0.035, wave: 0.5, dest: L.bass.gain, release: 0.03 });
@@ -1585,6 +1866,9 @@ export class AudioEngine {
       if (d.s[s] === 'x') this.snare(t, L.drums.gain, this.fill ? 0.06 + (s / 16) * 0.12 : 0.16);
       else if (!this.fill && d.g && d.g[s] === 'x') this.snare(t, L.drums.gain, 0.04); // ghost notes
       if (d.h[s] === 'x') this.hat(t, L.drums.gain, s % 4 === 2 ? 0.07 : 0.045, tier === 3 && s % 8 === 6);
+      if (d.c && d.c[s] === 'x' && !this.fill) this.clap(t, L.drums.gain, song.clap ?? 1);
+      // shaker: 16ths, louder on the offbeat eighths ('X' accents one)
+      if (d.sh && d.sh[s] !== '.') this.hat(t, L.drums.gain, d.sh[s] === 'X' ? 0.18 : s % 4 === 2 ? 0.14 : s % 2 ? 0.07 : 0.1, false, 6000);
       if (d.t && d.t[s] === 'x') this.voice(midi(45 + (s % 4 === 3 ? -5 : 0)), { t, dur: 0.14, gain: 0.2, wave: 'triangle', slide: 0.5, dest: L.drums.gain });
       if (this.fill && s >= 8 && s % 2 === 0) this.voice(midi(50 - (s - 8)), { t, dur: 0.12, gain: 0.22, wave: 'triangle', slide: 0.5, dest: L.drums.gain });
     } else if (s === 0) this.crash = this.boom = false;
@@ -1623,8 +1907,26 @@ export class AudioEngine {
       this.voice(midi(n), { t, dur: spb * arp.every * arp.len, gain: tier === 0 ? 0.05 : 0.04, wave: 0.125, dest: arpDest, release: Math.min(0.2, spb * arp.every * arp.len * 0.4) });
     }
 
-    // offbeat chord stabs
-    if (this.active('stabs') && !hush && (song.stabs ? song.stabs[s] === 'x' : s % 4 === 2)) {
+    // a section can open on a big chord hit, like a horn stab
+    if (song.hit && pos === 0 && !this.state.menu && tier >= 2) {
+      for (const n of chord.slice(0, 4)) {
+        for (const [o, w, g] of [[0, 0.25, 0.035], [12, 0.5, 0.018]]) this.voice(midi(60 + ((key + cRoot) % 12) + n + o), { t, dur: spb * 3, gain: g, wave: w, dest: L.lead.gain, release: 0.25, slide: 0 });
+      }
+    }
+
+    // electric-piano comping: a four-note voicing ('x' short, 'L' held)
+    if (song.keys) {
+      const k = song.keys[s];
+      if (this.active('stabs') && !hush && k !== '.') {
+        const r = (key + cRoot) % 12;
+        const dur = spb * (k === 'L' ? 3 : 1.2);
+        for (const n of chord.slice(0, 4)) {
+          const f = midi(55 + ((r + n + 5) % 12)); // voiced between G3 and F#4
+          this.voice(f, { t, dur, gain: 0.03, wave: 'triangle', dest: L.stabs.gain, release: 0.12 });
+          this.voice(f * 2, { t, dur: dur * 0.5, gain: 0.008, wave: 0.25, dest: L.stabs.gain, release: 0.08 });
+        }
+      }
+    } else if (this.active('stabs') && !hush && (song.stabs ? song.stabs[s] === 'x' : s % 4 === 2)) {
       for (let k = 0; k < 3; k++) {
         const n = 60 + ((key + cRoot) % 12) + chord[k];
         this.voice(midi(n), { t, dur: spb * 0.9, gain: 0.03, wave: 0.5, dest: L.stabs.gain, release: 0.04 });
@@ -1658,6 +1960,15 @@ export class AudioEngine {
     if (ans && this.active('lead')) {
       const dur = spb * ans.len * 0.7;
       this.voice(midi(song.root + degreeToSemis(song.scale, ans.deg)), { t, dur, gain: 0.05, wave: 0.125, dest: L.lead.gain, release: Math.min(0.06, dur * 0.3), pan: 0.35 });
+    }
+
+    // bells: a glockenspiel line two octaves above the lead, ringing out
+    const bell = sec.bellNotes && sec.bellNotes[barIdx * 16 + s];
+    if (bell && this.active('arp') && !hush) {
+      const f = midi(song.root + 24 + degreeToSemis(song.scale, bell.deg));
+      const pan = s % 4 < 2 ? -0.4 : 0.4;
+      this.voice(f, { t, dur: spb * 1.6, gain: 0.03, wave: 0.125, dest: L.arp.gain, release: spb * 1.2, pan });
+      this.voice(f * 2, { t, dur: spb * 0.8, gain: 0.012, wave: 'sine', dest: L.arp.gain, release: spb * 0.6, pan });
     }
 
     // rush sparkle: fast high arpeggio
@@ -1706,7 +2017,22 @@ export class AudioEngine {
     this.voice(190, { t, dur: 0.06, gain: gain * 0.9, wave: 'triangle', slide: 0.6, dest });
   }
 
-  hat(t, dest, gain, open = false) {
-    this.noiseHit({ t, dur: open ? 0.14 : 0.035, gain, freq: 8000, type: 'highpass', q: 0.7, dest });
+  hat(t, dest, gain, open = false, freq = 8000) {
+    this.noiseHit({ t, dur: open ? 0.14 : 0.035, gain, freq, type: 'highpass', q: 0.7, dest });
+  }
+
+  // a hand clap: three quick bursts and a short room tail
+  // (level: a song can set its own, its 'clap' style field)
+  clap(t, dest, level = 1) {
+    for (let i = 0; i < 3; i++) this.noiseHit({ t: t + i * 0.011, dur: 0.025, gain: 1.3 * level, freq: 1500, q: 1.1, dest });
+    this.noiseHit({ t: t + 0.033, dur: 0.2, gain: 1.0 * level, freq: 1400, q: 0.8, dest });
+  }
+
+  // the root of the chord after this one (the next half bar's, or next bar's)
+  nextChordRoot(sec, barIdx, s) {
+    const cell = sec.chords[barIdx % sec.chords.length];
+    if (Array.isArray(cell[0]) && s < 8) return cell[1][0];
+    const nc = sec.chords[(barIdx + 1) % sec.chords.length];
+    return Array.isArray(nc[0]) ? nc[0][0] : nc[0];
   }
 }
