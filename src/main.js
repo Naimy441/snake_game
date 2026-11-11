@@ -109,6 +109,10 @@ class App {
     this.scene.add(this.board.group);
 
     this.audio = new AudioEngine();
+    // ?track=2 pins which of each map's songs plays (0 the original, 1 the
+    // alternate, 2 Afterglow on Neon Night / Overclock in Cyber Overdrive;
+    // a map without that song plays its original)
+    if (/^\d+$/.test(qs.get('track') || '')) this.audio.forceTrack = +qs.get('track');
     this.audio.setVolumes({ sfx: this.settings.sfx, music: this.settings.music, muted: this.settings.muted });
 
     this.state = 'menu';
@@ -144,6 +148,7 @@ class App {
       pause: (k) => this.onPause(k),
       restart: () => this.onRestart(),
       mute: () => this.toggleMute(),
+      song: () => this.cycleSong(),
     });
     this.input.bindTouchButtons($('t-left'), $('t-right'), $('t-rush'), $('t-up'), $('t-down'));
 
@@ -888,6 +893,14 @@ class App {
     this.toast({ kicker: 'Sound', title: this.settings.muted ? 'Muted' : 'On' });
   }
 
+  // M: skip to the map's next song (it sticks for that map this visit).
+  // While playing, onTrack already shows "Now playing"; elsewhere say it here.
+  cycleSong() {
+    this.unlockAudio();
+    const song = this.audio.nextSong();
+    if (song && this.state !== 'playing' && this.state !== 'countdown') this.toast({ kicker: 'Now playing', title: song.name, tone: 'music', ms: 2600 });
+  }
+
   unlockAudio() {
     this.audio.unlock();
     // (the title music starts with the first gesture that unlocks sound, and
@@ -1088,9 +1101,7 @@ class App {
     this.bonus = new BonusStage({ renderer: this.renderer, glowTex: this.glowTex, quality: this.activeQuality });
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     this.bonus.resize(size.x, size.y);
-    // ?bonusmix=classic plays the original party drop instead of the hype one
-    const mix = new URLSearchParams(location.search).get('bonusmix');
-    this.bonusMusic = new BonusMusic(this.audio, { version: mix === 'classic' ? 'classic' : 'hype' });
+    this.bonusMusic = new BonusMusic(this.audio);
     this.bonus.onEvent = (name, d) => {
       if (name === 'lightOn') this.audio.lightOn(d.big);
       else if (name === 'rimOn') this.audio.rimOn();

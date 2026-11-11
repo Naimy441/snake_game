@@ -118,6 +118,9 @@ export class Input {
         if (!e.repeat) this.h.restart();
         break;
       case 'KeyM':
+        if (!e.repeat && this.h.song) this.h.song();
+        break;
+      case 'KeyN':
         if (!e.repeat) this.h.mute();
         break;
       case 'KeyG':

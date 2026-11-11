@@ -54,7 +54,8 @@ your own body. The board is always clear: there are no obstacles on it.
 | Cycle camera | C (overhead → chase → first-person) | C |
 | Pause / resume | P or Esc | same |
 | Restart | R | same |
-| Mute | M | same |
+| Next song (on this map) | M | same |
+| Mute | N | same |
 | Speedrun timer on / off | T | same |
 | Ghost guide on / off | G | same |
 | Climb / dive (Sunset Heavens) | ↑ / ↓ (the other key levels out) | same |
@@ -275,8 +276,7 @@ in the same game, with the same HUD, cameras, Rush, pause and results screens.
   winds up with a snare roll and a beat of silence before the hook comes back,
   harmonised. A crash winds it down like a record losing power.
 - **Playtesting:** open `?bonus` to start the bonus level straight away (it's
-  unlocked for that visit), or `?bonus=9` to start nine apples in. Add
-  `&bonusmix=classic` to hear the original drop (verse first) instead.
+  unlocked for that visit), or `?bonus=9` to start nine apples in.
 
 ### Controls that feel instant
 
@@ -352,7 +352,7 @@ title screen, the music follows the map the tour is showing.
 The original songs are **Seaside Sprint** (Emerald Coast), **Desert Wind**
 (Golden Canyon), **City Lights** (Neon Night), **Data Stream** (Cyber
 Overdrive), **Skyward** (Sunset Heavens) and **Last Light** (Galactic Core).
-Every map has **two songs**, and one is picked at random each time its music
+Every map has **two songs** (Neon Night and Cyber Overdrive have three), and one is picked at random each time its music
 starts (a new map or a new run); a small "♪ name" note says which, and on
 the title screen the song playing is shown under the map name. The second
 set is written hook first, in the same chiptune voices: a short catchy motif
@@ -362,8 +362,34 @@ Coast, **Gold Rush** (a galloping western) in Golden Canyon, **Midnight Drive**
 (octave-popping disco synth-pop) on Neon Night, **Firewall** (a harmonic-minor
 chase theme) in Cyber Overdrive, **Golden Hour** (a dreamy, soaring climb) in
 Sunset Heavens and **Supernova** (a major-key anthem of wonder) in the Galactic Core.
-To pin one while testing, run
-`__coil.audio.forceTrack = 0` (original) or `1` (alternate) in the console.
+Neon Night has a third song, **Afterglow**: a hook transcribed from a sung
+voice recording (pitch-tracked frame by frame: a three-note E-F#-G chant in a
+3-3-2 rhythm at about 120 BPM), grown into a song that goes from the feels to
+a banger and back. It plays its sections in order: the hook at the 120 BPM it
+was sung, over bittersweet maj7, add9 and m9 chords with a reverb-washed pad
+and an arpeggio that pump with the kick (verse, then chorus); a four-bar
+build (a noise riser, a doubling snare roll, the mix sweeping open under a
+filter, then a beat of silence); and the drop at 124, a four-on-the-floor
+groove with the bass, toms and stabs locked to the hook's rhythm, whose chorus
+lifts the hook an octave over Em Am7 Cmaj7 B7. The drop plays twice, then it
+falls back to the feels. (Songs can be sequenced like this: `seq` lists the
+sections in order, and each section can carry its own tempo and style.)
+Cyber Overdrive has a third song, **Overclock**, grown from the best part of
+an earlier jam on a second sung voice memo: a deep three-note chant (Bb C Db,
+the 1, 2 and b3 of Bb dorian) over a Bbm7 / Eb9 funk vamp, played as a
+half-time shuffle with ghost-note snares, clav chops and a walking bass. It's
+a tight song that gets to the hype fast and stays there: an intro on the slow
+call it grew from, the chant as sung with the band answering each phrase, a
+pre-chorus that walks it up, a chorus that throws it an octave up over Gbmaj7
+Ab6 Bbm9 Eb9, a breakdown, a build, then a long hype run a key up, in B minor
+(the chorus, a climbing hype section, the chorus again). Then it goes round
+again from the chant.
+Press **M** to skip to the map's next song (it starts from the top, and stays
+the pick for that map for the rest of the visit). To pin one while testing, run
+`__coil.audio.forceTrack = 0` (original), `1` (alternate) or `2` (Afterglow on
+Neon Night, Overclock in Cyber Overdrive) in the console, or add `track` to
+the URL: `?level=6&track=2` always plays Afterglow and `?level=9&track=2`
+Overclock (add `&bot=1` to let the autoplay drive while you listen).
 
 ### Chase and first-person aids
 

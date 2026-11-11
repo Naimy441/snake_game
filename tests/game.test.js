@@ -1221,26 +1221,34 @@ test('the autoplay beats the whole game from map 1', () => {
 
 import { TRACKS } from '../src/audio/Audio.js';
 
-test('every map has two well-formed songs', () => {
+test('every map has two or more well-formed songs', () => {
   assert.equal(TRACKS.length, 6);
   const names = new Set();
   for (const pair of TRACKS) {
-    assert.equal(pair.length, 2);
+    assert.ok(pair.length >= 2);
     for (const song of pair) {
       assert.ok(!names.has(song.name), `${song.name} is unique`);
       names.add(song.name);
-      for (const sec of ['A', 'B']) {
-        assert.equal(song[sec].chords.length, 4);
-        assert.equal(song[sec].melody.length, 8, `${song.name} ${sec}: 8 bars`);
+      for (const sec of new Set(song.seq || ['A', 'B'])) {
+        assert.ok(song[sec], `${song.name}: section ${sec} exists`);
+        assert.ok([4, 8].includes(song[sec].chords.length), `${song.name} ${sec}: 4 or 8 chords`);
+        assert.ok([4, 8].includes(song[sec].melody.length), `${song.name} ${sec}: 4 or 8 bars`);
+        if (!song.seq) assert.equal(song[sec].melody.length, 8, `${song.name} ${sec}: 8 bars`);
+        if (song[sec].answer) {
+          assert.equal(song[sec].answer.length, song[sec].melody.length, `${song.name} ${sec}: answer bars`);
+          for (const bar of song[sec].answer) assert.equal(bar.split(' ').length, 16, `${song.name} ${sec}: 16 answer steps in "${bar}"`);
+        }
         for (const bar of song[sec].melody) {
           const toks = bar.split(' ');
           assert.equal(toks.length, 16, `${song.name} ${sec}: 16 steps in "${bar}"`);
           for (const t of toks) assert.ok(t === '-' || t === '.' || Number(t) >= 1, `${song.name}: bad token ${t}`);
         }
       }
-      for (const pat of Object.values(song.bass || {})) assert.equal(pat.split(' ').length, 16, `${song.name} bass`);
-      for (const d of Object.values(song.drums || {})) for (const lane of Object.values(d)) assert.equal(lane.length, 16, `${song.name} drums`);
-      if (song.stabs) assert.equal(song.stabs.length, 16);
+      for (const st of [song, ...(song.seq || []).map((k) => song[k])]) {
+        for (const pat of Object.values(st.bass || {})) assert.equal(pat.split(' ').length, 16, `${song.name} bass`);
+        for (const d of Object.values(st.drums || {})) for (const lane of Object.values(d)) assert.equal(lane.length, 16, `${song.name} drums`);
+        if (st.stabs) assert.equal(st.stabs.length, 16);
+      }
     }
   }
 });

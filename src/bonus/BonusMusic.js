@@ -12,13 +12,11 @@
 //    hook in a bright square lead, crowd "HEY!"s, a crash every 8 bars.
 //    Every 10 apples after that it lifts a semitone, after a fill.
 //
-// Two versions of the party half share the same build:
-//  - 'hype' (the default): the lights flip the song from the build's dark
-//    C minor into bright E-flat major. A stuttered, chanted sing-along hook
-//    ("la-la-la-LAA") over oom-pah bass and offbeat chord stabs, then a
-//    rapid-fire eighth-note verse that winds up with a snare roll and a beat
-//    of silence before the hook comes back, harmonised.
-//  - 'classic': the original drop (verse first, then the chorus).
+// The party flips the song from the build's dark C minor into bright E-flat
+// major: a stuttered, chanted sing-along hook ("la-la-la-LAA") over oom-pah
+// bass and offbeat chord stabs, then a rapid-fire eighth-note verse that
+// winds up with a snare roll and a beat of silence before the hook comes
+// back, harmonised.
 //
 // It plugs into AudioEngine as a custom track (startMusic({ custom })), so it
 // plays through the game's music bus: pause, slow motion and volume apply.
@@ -33,8 +31,6 @@ const BASS_ROOT = 36; // C2
 const MAJ = [0, 4, 7];
 const MIN = [0, 3, 7];
 const BUILD_CHORDS = [[0, MIN], [-4, MAJ], [-2, MAJ], [-5, MAJ]]; // Cm Ab Bb G
-const A_CHORDS = [[0, MIN], [-4, MAJ], [3, MAJ], [-2, MAJ]]; // Cm Ab Eb Bb
-const B_CHORDS = [[-4, MAJ], [-2, MAJ], [0, MIN], [-5, MAJ]]; // Ab Bb Cm G
 
 // Melodies: 16 tokens per bar. Numbers are scale degrees (1 = C, 8 = the C
 // above), '#' raises a semitone, '-' holds, '.' rests.
@@ -48,17 +44,6 @@ const HOOK_A = [
   '12 - - - 10 - 9 . 10 - 12 - 14 - - -',
   '11 - - - 9 . 9 . 11 . 9 . 8 . 7 .',
 ];
-const HOOK_B = [
-  '10 . . 10 . . 8 . . . . . 6 . 8 .',
-  '11 . . 11 . . 9 . . . . . 7 . 9 .',
-  '12 . . 12 . . 10 . . . 12 . 15 . . .',
-  '12 - - - 11 - - - 9 - - - 14# - 12 -',
-  '10 . . 10 . . 8 . . . . . 6 . 8 .',
-  '11 . . 11 . . 9 . . . . . 7 . 9 .',
-  '12 . . 12 . . 10 . . . 12 . 15 . . .',
-  '12 - 14# - 15 - - - 14# - 12 - 11 - 9 -',
-];
-
 // The 'hype' party, in E-flat major (the same notes as C minor, so the
 // degrees below still count from C: 3 = Eb, 5 = G, 7 = Bb, 10 = Eb up).
 // Hook: Eb Bb Cm Ab | Eb Bb Ab Bb. Verse: Cm Ab Eb Bb | Cm Ab Ab Bb.
@@ -106,16 +91,14 @@ function parse(bars) {
   return notes;
 }
 const NOTES_A = parse(HOOK_A);
-const NOTES_B = parse(HOOK_B);
 // the hook's opening phrase alone, for the build
 const NOTES_TEASE = parse(HOOK_A.slice(0, 4));
 const NOTES_HOOK = parse(HYPE_HOOK);
 const NOTES_RAP = parse(HYPE_RAP);
 
 export class BonusMusic {
-  constructor(audio, { version = 'hype' } = {}) {
+  constructor(audio) {
     this.audio = audio; // the game's AudioEngine (its context must be unlocked)
-    this.version = version === 'classic' ? 'classic' : 'hype';
     this.tempo = BONUS_TEMPO;
     this.spb = 60 / this.tempo / 4; // seconds per 16th
     this.mode = 'build';
@@ -161,7 +144,6 @@ export class BonusMusic {
     this.bar = 0;
     this.t0 = at;
     this.nextTime = at;
-    this.fill = false;
     this.crash = false;
     this.section = 'A';
     this.loops = 0;
@@ -200,17 +182,14 @@ export class BonusMusic {
     this.bar = 0;
     this.t0 = now;
     this.nextTime = now;
-    this.fill = false;
     this.crash = true;
     const f = this.filter.frequency;
     f.cancelScheduledValues(now);
     f.setValueAtTime(f.value, now);
     f.exponentialRampToValueAtTime(18000, now + 0.08);
     this.impact(now);
-    if (this.version === 'hype') {
-      this.section = 'H';
-      this.bigHit(now);
-    }
+    this.section = 'H';
+    this.bigHit(now);
   }
 
   // Lift the song a semitone, on the next bar after a fill (every 10 apples).
@@ -257,33 +236,18 @@ export class BonusMusic {
       if (this.bar >= 4) this.bar = 0;
       return;
     }
-    if (this.version === 'hype') {
-      if (this.bar >= 8) {
-        this.bar = 0;
-        this.section = this.section === 'H' ? 'R' : 'H';
-        if (this.section === 'H') this.loops++;
-        this.key = this.pendingKey; // a lift lands on the next section
-      }
-      if (this.bar === 0 || (this.section === 'H' && this.bar === 4)) this.crash = true;
-      return;
-    }
-    if (this.fill) {
-      this.fill = false;
-      this.crash = true;
-      if (this.pendingKey !== this.key) this.key = this.pendingKey;
-    }
     if (this.bar >= 8) {
       this.bar = 0;
-      this.crash = true;
-      this.section = this.section === 'A' ? 'B' : 'A';
-      if (this.section === 'A') this.loops++;
-    } else if (this.bar === 7 || (this.pendingKey !== this.key && this.bar % 4 === 3)) this.fill = true;
+      this.section = this.section === 'H' ? 'R' : 'H';
+      if (this.section === 'H') this.loops++;
+      this.key = this.pendingKey; // a lift lands on the next section
+    }
+    if (this.bar === 0 || (this.section === 'H' && this.bar === 4)) this.crash = true;
   }
 
   playStep(t) {
     if (this.mode === 'build') this.playBuild(t);
-    else if (this.version === 'hype') this.playHype(t);
-    else this.playParty(t);
+    else this.playHype(t);
   }
 
   hey(t) {
@@ -373,70 +337,6 @@ export class BonusMusic {
 
   power(t, root, gain) {
     for (const k of [0, 7, 12]) this.audio.voice(midi(48 + root + this.key + k), { t, dur: this.spb * 0.9, gain, wave: 0.5, dest: this.bus.stabs, release: 0.04 });
-  }
-
-  playParty(t) {
-    const a = this.audio;
-    const s = this.step;
-    const spb = this.spb;
-    const B = this.bus;
-    const key = this.key;
-    const isB = this.section === 'B';
-    const [cRoot, chord] = (isB ? B_CHORDS : A_CHORDS)[this.bar % 4];
-    const root = cRoot + key;
-
-    // drums: four on the floor, claps on 2 and 4, open hats on the offbeat
-    if (this.crash && s === 0) {
-      a.noiseHit({ t, dur: 1.3, gain: 0.15, freq: 5000, type: 'highpass', dest: B.drums });
-      this.crash = false;
-    }
-    if (this.fill) {
-      if (s < 8 && s % 4 === 0) a.kick(t, B.drums);
-      if (s >= 8 || s % 2 === 0) a.snare(t, B.drums, 0.06 + (s / 16) * 0.12);
-      if (s >= 8 && s % 2 === 0) a.voice(midi(52 - (s - 8)), { t, dur: 0.12, gain: 0.2, wave: 'triangle', slide: 0.5, dest: B.drums });
-    } else {
-      if (s % 4 === 0) a.kick(t, B.drums);
-      if (s === 4 || s === 12) {
-        a.snare(t, B.drums, 0.17);
-        a.noiseHit({ t: t + 0.012, dur: 0.09, gain: 0.08, freq: 1300, q: 1.2, dest: B.drums }); // clap layer
-      }
-      if (s % 4 === 2) a.hat(t, B.drums, 0.075, true);
-      else a.hat(t, B.drums, s % 2 ? 0.025 : 0.035);
-    }
-
-    // bass: the disco octave pump
-    if (s % 2 === 0) {
-      const up = s % 4 === 2;
-      const f = midi(BASS_ROOT + root + (up ? 12 : 0));
-      a.voice(f, { t, dur: spb * (up ? 1.2 : 1.7), gain: 0.32, wave: 'triangle', dest: B.bass, release: 0.03 });
-      a.voice(f * 2, { t, dur: spb * 1.1, gain: 0.04, wave: 0.25, dest: B.bass, release: 0.03 });
-    }
-
-    // arpeggio, sparkling an octave up in the B section
-    {
-      const order = [0, 1, 2, 1, 2, 0, 2, 1];
-      const note = 72 + root + chord[order[s % 8]] + (s % 4 === 3 ? 12 : 0) + (isB ? 12 : 0);
-      a.voice(midi(note), { t, dur: spb * 0.7, gain: isB ? 0.026 : 0.032, wave: 0.125, dest: B.arp, release: 0.03 });
-    }
-
-    // power-chord stabs on a pushing, syncopated pattern
-    if (!this.fill && (s === 0 || s === 3 || s === 6 || s === 10 || s === 12)) this.power(t, root, s === 0 ? 0.032 : 0.024);
-
-    // crowd shouts in the chorus
-    if (isB && !this.fill && s === 12 && this.bar % 2 === 1) this.hey(t);
-
-    // the hook
-    const notes = isB ? NOTES_B : NOTES_A;
-    const nt = notes[this.bar * 16 + s];
-    if (nt) {
-      const dur = spb * nt.len * (nt.len === 1 ? 0.7 : 0.94);
-      const n = ROOT + key + nt.semis;
-      const rel = Math.min(0.07, dur * 0.3);
-      a.voice(midi(n), { t, dur, gain: 0.085, wave: 0.5, dest: B.lead, release: rel, vibrato: nt.len >= 3 ? 0.01 : 0 });
-      // the chorus (and every second time round) doubles an octave up
-      if (isB || this.loops % 2 === 1) a.voice(midi(n + 12), { t, dur, gain: 0.035, wave: 0.125, dest: B.lead, release: rel });
-      else a.voice(midi(n - 12), { t, dur, gain: 0.03, wave: 0.25, dest: B.lead, release: rel });
-    }
   }
 
   // ------------------------------------------------------------ 'hype' party

@@ -16,8 +16,12 @@ const SCALES = {
   lydian: [0, 2, 4, 6, 7, 9, 11],
   harmonic: [0, 2, 3, 5, 7, 8, 11],
   phrygian: [0, 1, 3, 5, 7, 8, 10],
+  dorian: [0, 2, 3, 5, 7, 9, 10],
 };
-const QUALITY = { maj: [0, 4, 7], m: [0, 3, 7], maj7: [0, 4, 7, 11], m7: [0, 3, 7, 10], 7: [0, 4, 7, 10], 6: [0, 4, 7, 9] };
+const QUALITY = {
+  maj: [0, 4, 7], m: [0, 3, 7], maj7: [0, 4, 7, 11], m7: [0, 3, 7, 10], 7: [0, 4, 7, 10], 6: [0, 4, 7, 9],
+  add9: [0, 4, 7, 14], m9: [0, 3, 7, 10, 14], 9: [0, 4, 7, 10, 14],
+};
 
 // Melodies: 16 tokens per bar. Numbers are scale degrees (1 = key root,
 // 8 = an octave up), '-' holds the previous note, '.' is a rest.
@@ -161,7 +165,9 @@ const SONGS = [
 //   stabs: a 16-step pattern, swing: delay of the off 16ths (0..0.5 of a
 //   step), echo: { steps, gain } repeats held lead notes, staccato: shortens
 //   short lead notes, leadOct: semitones added to the lead,
-//   double: the chorus lead is doubled an octave up.
+//   double: the chorus lead is doubled an octave up, pad: a sustained chord
+//   pad under every bar, pump: the pad and arp duck on each kick and swell
+//   back (sidechain). A section may have 4 or 8 chords (one per bar).
 const ALT_SONGS = [
   {
     // sunny and anthemic: a bouncing turn-and-leap hook climbing G D Em C
@@ -356,8 +362,257 @@ const ALT_SONGS = [
   },
 ];
 
-// Every map's two songs: the original and its alternate.
+// "Afterglow": a hook transcribed from a sung voice memo, grown into a song
+// that goes from the feels to a banger and back. Pitch-tracked frame by
+// frame (10 ms YIN frames), the singing sits on three notes, E F# G, at about
+// 120 BPM in one-bar phrases, and two shapes came back over and over:
+//   the chant  F# F# . F# F# . F# - E - F# - G - - -   (3-3-2 syncopation)
+//   the turn   F# . F# F# F# E - . F# G - - - F# . G
+// It's a sequenced song, five sections played in order and looped:
+//   A  the feels: at the 120 BPM it was sung, the chant floats over the
+//      bittersweet VI-III-VII-i turn (Cmaj7 G D Em9) and every hook is
+//      answered by a sigh back down to E. A reverb-washed pad and a ringing
+//      arpeggio breathe with the kick; the drums start half-time.
+//   B  its chorus: the hook an octave up over Cmaj7 D Bm7 Em9, climbing to a
+//      B7 whose C aches against it.
+//   R  the build: four bars, the hook chanted up an octave then hammered on
+//      F# and B over B7, a noise riser and a doubling snare roll, the mix
+//      dipping under a low-pass and opening up, then a beat of silence...
+//   C  the drop, at 124: the hook exactly as sung, now a four-on-the-floor
+//      groove over Em C G D, the bass, toms and stabs locked to its 3-3-2.
+//   D  the drop's chorus: the hook lifted an octave and walked up a step a
+//      bar (F#, A, C) over Em Am7 Cmaj7 B7, doubled.
+// The drop plays twice (C D C D), then falls back to the feels.
+const FEELS = {
+  tempo: 120, level: 0.8, lead: 0.5, staccato: 0.85, double: true, echo: { steps: 3, gain: 0.35 }, pad: true, pump: true,
+  arp: { order: [0, 1, 2, 3, 2, 1], every: 2, len: 1.6, oct: 12 },
+  stabs: '...x..x...x.....',
+  bass: {
+    menu: 'R - - - - - - - 5 - - - - - - -',
+    1: 'R - - - - - R - - - R - - - - -',
+    2: 'R - - R - - R - - - R - O - - -',
+    3: 'R - O R - O R - R - O R - O 5 -',
+  },
+  drums: {
+    1: { k: 'x.........x.....', s: '........x.......', h: '..x...x...x...x.' },
+    2: { k: 'x...x...x...x...', s: '....x.......x...', h: '..x...x...x...x.', t: '...x..x.........' },
+    3: { k: 'x...x...x...x...', s: '....x.......x...', h: 'x.xxx.xxx.xxx.xx', t: '...x..x....x..x.' },
+  },
+};
+const GROOVE = {
+  tempo: 124, level: 1.15, lead: 0.25, staccato: 0.8, double: true, echo: { steps: 3, gain: 0.3 }, drop: true, minTier: 3,
+  stabs: '...x..x...x...x.',
+  bass: {
+    menu: 'R - - - - - - - 5 - - - - - - -',
+    1: 'R - - R - - R - R - - R - - O -',
+    2: 'R . O R . O R . R . O R . O 5 .',
+    3: 'R O R R O R R O R O R R O R 5 O',
+  },
+  drums: {
+    1: { k: 'x...x...x...x...', s: '....x.......x...', h: '..x...x...x...x.' },
+    2: { k: 'x...x...x...x...', s: '....x.......x...', h: 'x.xxx.xxx.xxx.xx', t: '...x..x.........' },
+    3: { k: 'x...x...x...x..x', s: '....x.......x.x.', h: 'xxxxxxxxxxxxxxxx', t: '...x..x....x..x.' },
+  },
+};
+const AFTERGLOW = {
+  name: 'Afterglow', key: 4, scale: 'minor', tempo: 120,
+  seq: ['A', 'B', 'R', 'C', 'D', 'C', 'D'],
+  A: {
+    ...FEELS,
+    chords: [[8, 'maj7'], [3, 'add9'], [10, 'maj'], [0, 'm9'], [8, 'maj7'], [3, 'add9'], [5, 'm7'], [11, '7']],
+    melody: [
+      '2 2 . 2 2 . 2 - 1 - 2 - 3 - - -', '- - - - . . . . 5 - 3 - 2 - 1 -',
+      '2 2 . 2 2 . 2 - 1 - 2 - 3 - 4 -', '5 - - - - - - - . . . . . . 2 3',
+      '2 . 2 2 2 1 - . 2 3 - - - 2 . 3', '- - - - 5 - - - 3 - 2 - 1 - - -',
+      '2 2 . 2 2 . 2 - 1 - 2 - 3 - - -', '5 - - - 4 - - - 2 - - - 4 . 5 .',
+    ],
+  },
+  B: {
+    ...FEELS, chorus: true,
+    chords: [[8, 'maj7'], [10, 'maj'], [7, 'm7'], [0, 'm9'], [8, 'maj7'], [10, 'maj'], [3, 'add9'], [11, '7']],
+    melody: [
+      '9 9 . 9 9 . 9 - 8 - 9 - 10 - - -', '- - - - 12 - - - 11 - 10 - 9 - - -',
+      '9 9 . 9 9 . 9 - 8 - 9 - 10 - 12 -', '12 - - - - - - - 10 - 9 - 8 - - -',
+      '9 9 . 9 9 . 9 - 8 - 9 - 10 - - -', '- - - - 12 - - - 13 - - - 12 - 11 -',
+      '12 12 . 12 12 . 12 - 11 - 12 - 14 - - -', '13 - - - 12 - - - 11 - - - 9 - - -',
+    ],
+  },
+  R: {
+    tempo: 122, level: 0.8, levelTo: 1.2, lead: 0.25, staccato: 0.7, pad: true, pump: true, riser: true,
+    arp: { order: [0, 1, 2, 3], every: 1, len: 0.8, oct: 12 },
+    bass: {
+      menu: 'R - - - - - - - 5 - - - - - - -',
+      1: 'R . R . R . R . R . R . R . R .',
+      2: 'R . R . R . R . R . R . R . R .',
+      3: 'R R R R R R R R R R R R R R R R',
+    },
+    chords: [[8, 'maj7'], [10, 'maj'], [11, '7'], [11, '7']],
+    melody: [
+      '2 2 . 2 2 . 2 - 1 - 2 - 3 - - -', '9 9 . 9 9 . 9 - 8 - 9 - 10 - - -',
+      '9 . 9 . 9 . 9 . 9 9 9 9 9 9 9 9', '12 12 12 12 12 12 12 12 12 12 12 12 . . . .',
+    ],
+  },
+  C: {
+    ...GROOVE,
+    chords: [[0, 'm'], [8, 'maj'], [3, 'maj'], [10, 'maj']],
+    melody: [
+      '2 2 . 2 2 . 2 - 1 - 2 - 3 - - -', '2 2 . 2 2 . 2 - 1 - 2 - 3 - 5 -',
+      '2 2 . 2 2 . 2 - 1 - 2 - 3 - - -', '2 . 2 2 2 1 - . 2 3 - - - 2 . 3',
+      '2 2 . 2 2 . 2 - 1 - 2 - 3 - - -', '2 2 . 2 2 . 2 - 1 - 2 - 3 - 5 -',
+      '2 2 . 2 2 . 2 - 1 - 2 - 3 - 5 -', '7 - - - 5 - - - 3 . 4 . 5 . 7 .',
+    ],
+  },
+  D: {
+    ...GROOVE, chorus: true,
+    chords: [[0, 'm'], [5, 'm7'], [8, 'maj7'], [11, '7']],
+    melody: [
+      '9 9 . 9 9 . 9 - 8 - 9 - 10 - - -', '11 11 . 11 11 . 11 - 10 - 11 - 12 - - -',
+      '13 13 . 13 13 . 13 - 12 - 13 - 14 - 12 -', '12 - - - 11 - - - 9 - - - . . . .',
+      '9 9 . 9 9 . 9 - 8 - 9 - 10 - 12 -', '11 11 . 11 11 . 11 - 10 - 11 - 12 - 14 -',
+      '13 13 . 13 13 . 13 - 12 - 13 - 14 - - -', '12 - - - - - - - 9 . 8 9 . 8 9 .',
+    ],
+  },
+};
+
+// "Overclock": built from the best 26 seconds of an earlier jam on a second
+// sung voice memo: a deep chant on a steady 160 pulse that lives on three
+// notes, Bb C Db (the 1, 2 and b3 of Bb dorian, the funky minor):
+//   the chant  1 - - - 3 - 2 - 1 - 2 - 3 - 3 -  (Bb . Db C Bb C Db Db)
+// over a Bbm7 / Eb9 vamp, then thrown an octave up over Gbmaj7 Ab Bbm.
+// Played as a half-time funk shuffle (backbeat on 3, ghost-note snares,
+// clav chops, a bass that walks the chord), it's a tight song that gets
+// to the hype fast and stays there:
+//   I  intro: the slow call it grew from, just bass, drums and an airy lead
+//   V  the chant, exactly as sung, and the band answers every phrase
+//   P  a pre-chorus that walks the chant up a step at a time (Gbmaj7 Ab Fm7)
+//   C  the chorus: the chant an octave up, doubled, over Gbmaj7 Ab6 Bbm9
+//      Eb9, the band throwing licks back in the gaps
+//   K  a breakdown to bass, drums and a whisper of the chant
+//   R  the build: the chant hammered up an octave over Gb7, a riser, a
+//      snare roll and a breath of silence...
+//   L  ...and the last chorus lands a key up, in B minor
+//   H  the hype keeps going: the chant tighter and climbing, licks every bar
+//   L  the key-up chorus once more, ending on its turnaround
+// Then it goes round again from the chant (the intro only plays once).
+const FUNK = {
+  tempo: 160, lead: 0.25, staccato: 0.75, swing: 0.22, echo: { steps: 3, gain: 0.2 }, minTier: 2,
+  stabs: '..x...x.x.x...x.',
+  bass: {
+    menu: 'R - - - - - - - 5 - - - - - - -',
+    1: 'R - - R - - O - R - - 5 - 7 O -',
+    2: 'R - . R . . O R - . 3 . 5 . 7 O',
+    3: 'R . O R . O 7 R . R 3 . 5 O 7 O',
+  },
+  drums: {
+    1: { k: 'x.....x...x.....', s: '........x.......', h: 'x.x.x.x.x.x.x.x.' },
+    2: { k: 'x.....x...x...x.', s: '........x.......', g: '...x.......x.x..', h: 'x.x.x.x.x.x.x.x.' },
+    3: { k: 'x.x...x...x...x.', s: '........x.......', g: '..x..x.....x.x.x', h: 'x.xxx.x.x.xxx.x.', t: '..............x.' },
+  },
+};
+const VAMP = [[0, 'm7'], [0, 'm7'], [5, '9'], [5, '9']];
+const CHANT = [
+  '1 - - - 3 - 2 - 1 - 2 - 3 - 3 -', '1 - 1 - 3 - 3 - 1 - 2 - 3 - - -',
+  '3 - 2 - 3 - - - 2 - - - 3 - 2 -', '2 - - - 3 - - - 2 - - 5 4 3 2 1',
+  '1 - - - 3 - 2 - 1 - 2 - 3 - 3 -', '1 - 1 - 3 - 3 - 1 - 2 - 3 - - -',
+  '3 - 3 - . . . . 1 - - - 1 - - -', '3 - - - 3 - 2 - 1 - . 8 7 5 4 3',
+];
+const CHORUS = {
+  ...FUNK, chorus: true, double: true, minTier: 3, level: 1.1,
+  chords: [[8, 'maj7'], [10, '6'], [0, 'm9'], [5, '9']],
+  melody: [
+    '8 - - - 10 - 9 - 8 - 9 - 10 - 10 -', '8 - 8 - 10 - 10 - 8 - 9 - 10 - - -',
+    '10 - 9 - 10 - - - 9 - - - 10 - 9 -', '9 - - - 10 - - - 12 - 11 - 10 - 9 -',
+    '8 - - - 10 - 9 - 8 - 9 - 10 - 10 -', '8 - 8 - 10 - 10 - 12 - 11 - 10 - - -',
+    '10 - 10 - . . . . 8 - - - 8 - - -', '10 - - - 10 - 9 - 8 - 7 - 5 - 6 7',
+  ],
+  answer: [
+    '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . 15 . 13 12',
+    '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
+    '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . 15 . 14 15',
+    '. . . . 15 14 12 11 . . . . . . . .', '. . . . . . . . . . . . . . . .',
+  ],
+};
+const OVERCLOCK = {
+  name: 'Overclock', key: 10, scale: 'dorian', tempo: 160,
+  seq: ['I', 'V', 'P', 'C', 'K', 'R', 'L', 'H', 'L'],
+  loopTo: 1, // round again from the chant: the intro plays once
+  I: {
+    ...FUNK, lead: 0.5, echo: { steps: 3, gain: 0.35 }, mute: ['stabs', 'arp'], level: 0.85,
+    chords: VAMP,
+    melody: [
+      '2 - - - 1 - - - - - - - . . . .', '1 - - - - - - - 2 - - - . . . .',
+      '2 - - - - - - - - - - - 3 - - -', '3 - - - 2 - - - 1 - - - . . 2 3',
+    ],
+  },
+  V: {
+    ...FUNK,
+    chords: VAMP,
+    melody: CHANT,
+    answer: [
+      '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . 12 . 11 10',
+      '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
+      '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . 15 . 14 12',
+      '. . . . 12 11 10 9 . . . . . . . .', '. . . . . . . . . . . . . . . .',
+    ],
+  },
+  P: {
+    ...FUNK, level: 1.05,
+    chords: [[8, 'maj7'], [10, 'maj'], [7, 'm7'], [7, 'm7']],
+    melody: [
+      '3 - - - 4 - 3 - 2 - 3 - 4 - 4 -', '4 - 4 - 5 - 5 - 4 - 3 - 4 - - -',
+      '5 - 4 - 5 - - - 6 - - - 7 - 6 -', '5 - - - . . . . 5 . 6 . 7 . 7 .',
+    ],
+  },
+  C: CHORUS,
+  K: {
+    ...FUNK, minTier: 3, mute: ['arp', 'stabs'], level: 0.9,
+    chords: [[0, 'm7'], [0, 'm7'], [5, '9'], [5, '9']],
+    melody: [
+      '1 - - - 3 - 2 - 1 - 2 - 3 - 3 -', '. . . . . . . . . . . . . . . .',
+      '1 - 1 - 3 - 3 - 1 - 2 - 3 - - -', '. . . . . . . . . . . . . . . .',
+    ],
+  },
+  R: {
+    ...FUNK, tempo: 162, riser: true, level: 0.85, levelTo: 1.2, staccato: 0.6,
+    bass: {
+      menu: 'R - - - - - - - 5 - - - - - - -',
+      1: 'R . R . R . R . R . R . R . R .',
+      2: 'R . R . R . R . R . R . R . R .',
+      3: 'R R R R R R R R R R R R R R R R',
+    },
+    chords: [[8, 'maj7'], [10, 'maj'], [8, '7'], [8, '7']],
+    melody: [
+      '8 - 8 - 10 - 10 - 8 - 9 - 10 - - -', '9 - 9 - 11 - 11 - 9 - 10 - 11 - - -',
+      '10 . 10 . 10 . 10 . 10 10 10 10 10 10 10 10', '15 15 15 15 15 15 15 15 15 15 15 15 . . . .',
+    ],
+  },
+  L: { ...CHORUS, key: 11, tempo: 162, level: 1.2 },
+  // the hype keeps going: still a key up, the chant tighter and climbing,
+  // the band firing licks back every bar, before the last chorus comes round
+  // (it runs straight into the last chorus, no drum fill: the groove keeps
+  // driving and the crash marks the downbeat)
+  H: {
+    ...CHORUS, key: 11, tempo: 162, level: 1.2, fill: false,
+    melody: [
+      '8 - 8 - 10 - 9 - 8 - 9 - 10 - 10 -', '8 - 8 - 10 - 10 - 12 - 11 - 10 - - -',
+      '10 - 10 - 12 - 11 - 10 - 9 - 10 - 12 -', '13 - - - 12 - - - 10 - - - . . . .',
+      '8 - 8 - 10 - 9 - 8 - 9 - 10 - 10 -', '8 - 8 - 10 - 10 - 12 - 11 - 10 - - -',
+      '12 - 12 - 10 - 12 - 15 - - - 14 - 12 -', '14 - - - 12 - 11 - 12 - - - 10 . 9 .',
+    ],
+    answer: [
+      '. . . . . . . . . . . . . . 12 14', '. . . . . . . . . . . . 15 . 13 12',
+      '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . 15 14 12 10',
+      '. . . . . . . . . . . . . . 12 14', '. . . . . . . . . . . . 15 . 14 15',
+      '. . . . . . . . . . . . . . . .', '. . . . . . . . . . . . . . . .',
+    ],
+  },
+};
+
+// Every map's songs: the original and its alternate (Neon Night also has
+// Afterglow, Cyber Overdrive Overclock).
 export const TRACKS = SONGS.map((s, i) => [s, ALT_SONGS[i]]);
+TRACKS[2].push(AFTERGLOW);
+TRACKS[3].push(OVERCLOCK);
 
 const SONG_STARTS = [0, 3, 6, 9, 12, 14]; // first level of each zone
 
@@ -387,10 +642,20 @@ function parseMelody(lines) {
   return notes;
 }
 
-for (const s of [...SONGS, ...ALT_SONGS]) {
-  s.A.notes = parseMelody(s.A.melody);
-  s.B.notes = parseMelody(s.B.melody);
+for (const s of [...SONGS, ...ALT_SONGS, AFTERGLOW, OVERCLOCK]) {
   s.root = s.key > 5 ? 48 + s.key : 60 + s.key;
+  for (const k of new Set(s.seq || ['A', 'B'])) {
+    const sec = s[k];
+    sec.notes = parseMelody(sec.melody);
+    sec.bars = sec.melody.length;
+    if (sec.answer) sec.answerNotes = parseMelody(sec.answer);
+    // a sequenced song's sections carry their own style over the song's key
+    // (a section may change key: a lift for a last chorus)
+    if (s.seq) {
+      const key = sec.key ?? s.key;
+      sec.style = { name: s.name, scale: s.scale, ...sec, key, root: key > 5 ? 48 + key : 60 + key };
+    }
+  }
 }
 
 function degreeToSemis(scale, deg) {
@@ -443,7 +708,10 @@ export class AudioEngine {
     this.slowFilter = c.createBiquadFilter();
     this.slowFilter.type = 'lowpass';
     this.slowFilter.frequency.value = 20000;
-    this.music.connect(this.musicFilter).connect(this.slowFilter).connect(this.musicFade).connect(this.master);
+    // per-section loudness (a sequenced song's quiet verse, its build's
+    // crescendo, its drop); 1 for every other song
+    this.sectionGain = c.createGain();
+    this.music.connect(this.sectionGain).connect(this.musicFilter).connect(this.slowFilter).connect(this.musicFade).connect(this.master);
 
     // echo + small room for the lead and sfx
     this.delay = c.createDelay(1);
@@ -472,17 +740,25 @@ export class AudioEngine {
 
     // one gain per music layer, faded smoothly with intensity
     this.layers = {};
-    for (const name of ['bass', 'arp', 'drums', 'lead', 'stabs', 'counter', 'sparkle']) {
+    for (const name of ['bass', 'arp', 'drums', 'lead', 'stabs', 'counter', 'sparkle', 'pad']) {
       const g = c.createGain();
       g.gain.value = 0;
       g.connect(this.music);
       this.layers[name] = { gain: g, level: 0, target: 0 };
+    }
+    // sidechain pump: songs with `pump` play their pad and arp through these,
+    // which dip on every kick and swell back
+    this.pumps = {};
+    for (const name of ['pad', 'arp']) {
+      this.pumps[name] = c.createGain();
+      this.pumps[name].connect(this.layers[name].gain);
     }
     this.layers.lead.gain.connect(this.delay);
     // the lead's reverb send skips the music bus, so it carries its own copy
     // of the music volume (otherwise music at 0 still leaks through the room)
     this.musicSend = c.createGain();
     this.layers.lead.gain.connect(this.musicSend).connect(this.reverb);
+    this.layers.pad.gain.connect(this.musicSend);
     this.layers.counter.gain.connect(this.delay);
     this.sfxSend = c.createGain();
     this.sfxSend.gain.value = 0.35;
@@ -873,7 +1149,8 @@ export class AudioEngine {
     this.musicOn = true;
     this.zone = this.state.zone;
     this.pickSong();
-    this.section = 'A';
+    this.section = this.song.seq ? this.song.seq[0] : 'A'; // a sequenced song starts on its first section
+    this.seqIdx = 0;
     this.bar = 0;
     this.step = 0;
     this.tempo = menu ? 112 : this.song.tempo;
@@ -884,13 +1161,46 @@ export class AudioEngine {
     this.timer = setInterval(() => this.schedule(), 25);
   }
 
-  // Each map has two songs; one is picked at random whenever its music
-  // starts (a new zone, a new run). forceTrack (0 or 1) pins one, for testing.
+  // Each map has two or more songs; one is picked at random whenever its music
+  // starts (a new zone, a new run), unless the player chose one for that map
+  // with nextSong(). forceTrack (0, 1, ...) pins one everywhere, for testing.
   pickSong() {
-    const pair = TRACKS[this.zone];
-    const i = this.forceTrack ?? (Math.random() < 0.5 ? 0 : 1);
-    this.song = pair[i] || pair[0];
+    const songs = TRACKS[this.zone];
+    this.chosen = this.chosen || {};
+    const i = this.forceTrack ?? this.chosen[this.zone] ?? Math.floor(Math.random() * songs.length);
+    this.song = songs[i] || songs[0];
     if (this.onTrack) this.onTrack(this.song, this.zone);
+  }
+
+  // Skip to the map's next song, right away, from its first bar. The choice
+  // sticks for that map for the rest of the visit. Returns the new song, or
+  // null when there's nothing to cycle (no music yet, or the bonus level's).
+  nextSong() {
+    if (!this.ctx || !this.musicOn || this.custom || !this.song) return null;
+    if (this.pendingZone !== null) {
+      // mid zone change: land the new zone now, then step from its song
+      this.zone = this.pendingZone;
+      this.pendingZone = null;
+    }
+    const songs = TRACKS[this.zone];
+    this.chosen = this.chosen || {};
+    // (if the zone just landed, step on from the song it was about to play)
+    let cur = songs.indexOf(this.song);
+    if (cur < 0) cur = this.chosen[this.zone] ?? -1;
+    const i = (cur + 1) % songs.length;
+    this.chosen[this.zone] = i;
+    this.forceTrack = undefined;
+    this.pickSong();
+    this.section = this.song.seq ? this.song.seq[0] : 'A'; // a sequenced song starts on its first section
+    this.seqIdx = 0;
+    this.bar = 0;
+    this.step = 0;
+    this.fill = false;
+    this.restartAtBar = false;
+    this.crash = !this.state.menu;
+    this.tempo = this.state.menu ? 112 : this.song.tempo + Math.max(0, Math.min(4, this.state.level - SONG_STARTS[this.zone])) * 1.5;
+    this.nextTime = Math.max(this.nextTime, this.ctx.currentTime + 0.05);
+    return this.song;
   }
 
   // Fade out instead of cutting (death, back to silence).
@@ -948,6 +1258,12 @@ export class AudioEngine {
     }
   }
 
+  // The style in play: a sequenced song's sections each carry their own
+  // (tempo, lead, pad, drums...); other songs have one for the whole song.
+  style() {
+    return this.song[this.section].style || this.song;
+  }
+
   tier() {
     if (this.state.menu) return 0;
     const i = this.state.intensity;
@@ -958,22 +1274,27 @@ export class AudioEngine {
     const s = this.state;
     const i = s.intensity;
     const menu = s.menu;
+    const st = this.song ? this.style() : {};
     const t = {
       bass: menu ? 0.55 : 1,
       arp: menu ? 0.75 : 0.55 + i * 0.45,
       drums: menu ? 0 : 1,
       lead: menu ? 0.5 : 1, // a soft melody on the title screen so each map's song is recognisable
-      stabs: !menu && i >= 0.35 ? 1 : 0,
+      stabs: !menu && (i >= 0.35 || st.drop) ? 1 : 0,
       counter: !menu && i >= 0.62 ? 1 : 0,
       sparkle: !menu && s.rush ? 1 : 0,
+      pad: st.pad ? (menu ? 0.7 : 1) : 0,
     };
+    // a section can drop layers out (a breakdown, a sparse intro)
+    for (const k of st.mute || []) t[k] = 0;
     const now = this.ctx.currentTime;
     for (const [k, v] of Object.entries(t)) {
       const L = this.layers[k];
       if (L.target !== v) {
         L.target = v;
         L.gain.gain.cancelScheduledValues(now);
-        L.gain.gain.setTargetAtTime(v, now, k === 'sparkle' ? 0.25 : 1.4);
+        // (a pad leaving for a drop gets out of the way fast)
+        L.gain.gain.setTargetAtTime(v, now, k === 'sparkle' ? 0.25 : k === 'pad' && v === 0 ? 0.15 : 1.4);
       }
       L.level = L.gain.gain.value;
     }
@@ -1003,7 +1324,7 @@ export class AudioEngine {
     if (this.step < 16) return;
     this.step = 0;
     this.bar++;
-    const song = this.song;
+    const song = this.style();
     const target = this.state.menu ? 112 : song.tempo + Math.min(4, this.state.level - SONG_STARTS[this.zone]) * 1.5;
     this.tempo += (target - this.tempo) * 0.35;
     if (this.fill) {
@@ -1012,7 +1333,8 @@ export class AudioEngine {
         this.zone = this.pendingZone;
         this.pendingZone = null;
         this.pickSong();
-        this.section = 'A';
+        this.section = this.song.seq ? this.song.seq[0] : 'A'; // a sequenced song starts on its first section
+        this.seqIdx = 0;
         this.bar = 0;
         this.crash = true;
         return;
@@ -1021,13 +1343,32 @@ export class AudioEngine {
     if (this.restartAtBar) {
       this.restartAtBar = false;
       this.pickSong();
-      this.section = 'A';
+      this.section = this.song.seq ? this.song.seq[0] : 'A'; // a sequenced song starts on its first section
+      this.seqIdx = 0;
       this.bar = 0;
       this.crash = !this.state.menu;
       return;
     }
     if (this.pendingZone !== null) {
       this.fill = true; // one bar of fill, then the new zone lands
+      return;
+    }
+    const sec = this.song[this.section];
+    const seq = this.song.seq;
+    if (seq) {
+      // a sequenced song plays its sections in order, round and round; a
+      // build (riser) section brings its own roll, the rest end on a fill
+      if (this.bar >= sec.bars) {
+        this.bar = 0;
+        const nextIdx = (this.seqIdx ?? 0) + 1;
+        // at the end it goes round again (from loopTo, if the song skips its intro)
+        this.seqIdx = nextIdx < seq.length ? nextIdx : this.song.loopTo ?? 0;
+        this.section = seq[this.seqIdx];
+        this.crash = !this.state.menu;
+        this.boom = !this.state.menu && !!sec.riser;
+      } else if (this.bar === sec.bars - 1 && !this.state.menu && !sec.riser && sec.fill !== false) {
+        this.fill = true;
+      }
       return;
     }
     if (this.bar >= 8) {
@@ -1042,21 +1383,27 @@ export class AudioEngine {
   }
 
   playStep(t) {
-    const song = this.song;
-    const sec = song[this.section];
+    const sec = this.song[this.section];
+    const song = sec.style || this.song;
     const s = this.step;
-    const barIdx = Math.min(7, this.bar);
-    const [cRoot, cQual] = sec.chords[barIdx % 4];
+    const bars = sec.bars || 8;
+    const barIdx = Math.min(bars - 1, this.bar);
+    // a build section: everything but the lead drops out for its last beat,
+    // a breath of silence before the drop
+    const pos = barIdx * 16 + s;
+    const hush = sec.riser && pos >= bars * 16 - 4;
+    const [cRoot, cQual] = sec.chords[barIdx % sec.chords.length];
     const chord = QUALITY[cQual];
     const key = song.key;
     const spb = 60 / this.tempo / 4;
-    const tier = this.tier();
+    let tier = this.tier();
+    if (tier && song.minTier) tier = Math.max(tier, song.minTier);
     const L = this.layers;
     // swing: the off 16ths come a little late
     if (song.swing && s % 2) t += song.swing * spb;
 
     // bass: triangle with a thin pulse on top for presence
-    if (this.active('bass')) {
+    if (this.active('bass') && !hush) {
       const bass = song.bass || BASS;
       const pat = (tier === 0 ? bass.menu : bass[tier]).split(' ');
       const tok = pat[s];
@@ -1071,39 +1418,101 @@ export class AudioEngine {
       }
     }
 
-    // drums
-    if (this.active('drums') && tier > 0) {
+    // the build: a noise riser swelling up, the whole mix dipping under a
+    // low-pass and opening back up, a snare roll that keeps doubling
+    if (pos === 0) {
+      // each section sets the level; a build swells from it to levelTo
+      const sg = this.sectionGain.gain;
+      const lv = song.level ?? 1;
+      sg.cancelScheduledValues(t);
+      if (sec.riser && song.levelTo) {
+        sg.setValueAtTime(lv, t);
+        sg.linearRampToValueAtTime(song.levelTo, t + (bars * 16 - 4) * spb);
+      } else sg.setTargetAtTime(lv, t, 0.03);
+    }
+    if (sec.riser && pos === 0 && !this.state.menu) {
+      const len = (bars * 16 - 4) * spb;
+      this.riser(t, len, L.drums.gain);
+      if (!this.state.paused) {
+        const fq = this.musicFilter.frequency;
+        fq.cancelScheduledValues(t);
+        fq.setValueAtTime(18000, t);
+        fq.exponentialRampToValueAtTime(2600, t + 8 * spb);
+        fq.exponentialRampToValueAtTime(18000, t + len);
+      }
+    }
+    if (sec.riser && this.active('drums') && tier > 0) {
+      if (this.crash && s === 0) this.crash = false;
+      if (!hush) {
+        if (s % 4 === 0) this.kick(t, L.drums.gain);
+        const every = [4, 2, 2, 1][Math.min(3, Math.floor((barIdx / bars) * 4))];
+        if (s % every === 0) this.snare(t, L.drums.gain, 0.05 + 0.12 * (pos / (bars * 16)));
+        if (tier >= 2 && s % 4 === 2) this.hat(t, L.drums.gain, 0.06);
+      }
+    } else if (this.active('drums') && tier > 0) {
       const d = this.fill ? FILL : (song.drums || DRUMS)[tier];
       if (this.crash && s === 0) {
         this.noiseHit({ t, dur: 1.1, gain: 0.13, freq: 5000, type: 'highpass', dest: L.drums.gain });
         this.crash = false;
       }
-      if (d.k[s] === 'x') this.kick(t, L.drums.gain);
+      if (this.boom && s === 0) {
+        // the drop lands: a sub boom under the crash
+        this.voice(70, { t, dur: 1.2, gain: 0.45, wave: 'sine', slide: 0.45, dest: L.drums.gain, release: 0.6 });
+        this.noiseHit({ t, dur: 1.6, gain: 0.1, freq: 3000, type: 'highpass', dest: L.drums.gain });
+        this.boom = false;
+      }
+      if (d.k[s] === 'x') {
+        this.kick(t, L.drums.gain);
+        if (song.pump) {
+          for (const p of Object.values(this.pumps)) {
+            p.gain.setValueAtTime(0.3, t);
+            p.gain.setTargetAtTime(1, t + 0.02, spb * 0.9);
+          }
+        }
+      }
       if (d.s[s] === 'x') this.snare(t, L.drums.gain, this.fill ? 0.06 + (s / 16) * 0.12 : 0.16);
+      else if (!this.fill && d.g && d.g[s] === 'x') this.snare(t, L.drums.gain, 0.04); // ghost notes
       if (d.h[s] === 'x') this.hat(t, L.drums.gain, s % 4 === 2 ? 0.07 : 0.045, tier === 3 && s % 8 === 6);
       if (d.t && d.t[s] === 'x') this.voice(midi(45 + (s % 4 === 3 ? -5 : 0)), { t, dur: 0.14, gain: 0.2, wave: 'triangle', slide: 0.5, dest: L.drums.gain });
       if (this.fill && s >= 8 && s % 2 === 0) this.voice(midi(50 - (s - 8)), { t, dur: 0.12, gain: 0.22, wave: 'triangle', slide: 0.5, dest: L.drums.gain });
-    } else if (this.crash && s === 0) this.crash = false;
+    } else if (s === 0) this.crash = this.boom = false;
+
+    // pad: the bar's chord held under everything, two slightly detuned voices
+    // per note with a slow swell, washed in the room
+    if (song.pad && s === 0 && this.active('pad') && !(sec.riser && barIdx === bars - 1)) {
+      let base = 48 + ((key + cRoot) % 12);
+      if (base < 52) base += 12;
+      const dur = spb * 18; // overlaps into the next bar so chords blend
+      for (const n of chord.slice(0, 4)) {
+        const f = midi(base + n);
+        for (const [det, wave, gain] of [[1.004, 'triangle', 0.024], [1 / 1.004, 0.5, 0.006]]) {
+          this.voice(f * det, { t, dur, gain, wave, dest: song.pump ? this.pumps.pad : L.pad.gain, attack: spb * 3, release: spb * 6, pan: det > 1 ? -0.3 : 0.3 });
+        }
+      }
+    }
 
     // arpeggio
     const arp = song.arp;
-    if (this.active('arp') && !arp) {
+    const arpDest = song.pump ? this.pumps.arp : L.arp.gain;
+    if (hush) {
+      // (silence before the drop)
+    } else if (this.active('arp') && !arp) {
       const order = [0, 1, 2, 3, 2, 1, 0, 1];
       const idx = order[s % 8] % chord.length;
       const oct = s % 8 === 3 && chord.length === 3 ? 12 : 0;
       const n = 72 + ((key + cRoot) % 12) + chord[idx] + oct;
-      this.voice(midi(n), { t, dur: spb * 0.8, gain: tier === 0 ? 0.05 : 0.04, wave: 0.125, dest: L.arp.gain, release: 0.05 });
+      this.voice(midi(n), { t, dur: spb * 0.8, gain: tier === 0 ? 0.05 : 0.04, wave: 0.125, dest: arpDest, release: 0.05 });
     } else if (this.active('arp') && s % arp.every === 0) {
       const k = (s / arp.every) % arp.order.length;
       const idx = arp.order[k] % chord.length;
       // (the top of the pattern jumps an octave when the chord has no 4th note)
       const oct = arp.oct && arp.order[k] >= chord.length ? arp.oct : 0;
       const n = 72 + ((key + cRoot) % 12) + chord[idx] + oct;
-      this.voice(midi(n), { t, dur: spb * arp.every * arp.len, gain: tier === 0 ? 0.05 : 0.04, wave: 0.125, dest: L.arp.gain, release: Math.min(0.2, spb * arp.every * arp.len * 0.4) });
+      this.voice(midi(n), { t, dur: spb * arp.every * arp.len, gain: tier === 0 ? 0.05 : 0.04, wave: 0.125, dest: arpDest, release: Math.min(0.2, spb * arp.every * arp.len * 0.4) });
     }
 
     // offbeat chord stabs
-    if (this.active('stabs') && (song.stabs ? song.stabs[s] === 'x' : s % 4 === 2)) {
+    if (this.active('stabs') && !hush && (song.stabs ? song.stabs[s] === 'x' : s % 4 === 2)) {
       for (let k = 0; k < 3; k++) {
         const n = 60 + ((key + cRoot) % 12) + chord[k];
         this.voice(midi(n), { t, dur: spb * 0.9, gain: 0.03, wave: 0.5, dest: L.stabs.gain, release: 0.04 });
@@ -1119,7 +1528,7 @@ export class AudioEngine {
       if (this.active('lead')) {
         this.voice(midi(root + semis), { t, dur, gain: 0.085, wave: song.lead, dest: L.lead.gain, release: Math.min(0.08, dur * 0.3), vibrato: note.len >= 3 ? 0.008 : 0 });
         // the chorus soars: the lead doubled an octave up (down if that's shrill)
-        if (song.double && this.section === 'B' && tier >= 1) {
+        if (song.double && (sec.chorus ?? this.section === 'B') && tier >= 1) {
           const up = root + semis + 12 <= 88 ? 12 : -12;
           this.voice(midi(root + semis + up), { t, dur, gain: 0.04, wave: 0.125, dest: L.lead.gain, release: Math.min(0.08, dur * 0.3) });
         }
@@ -1132,11 +1541,39 @@ export class AudioEngine {
       }
     }
 
+    // the band's answer: a second line of licks replying in the lead's gaps
+    const ans = sec.answerNotes && sec.answerNotes[barIdx * 16 + s];
+    if (ans && this.active('lead')) {
+      const dur = spb * ans.len * 0.7;
+      this.voice(midi(song.root + degreeToSemis(song.scale, ans.deg)), { t, dur, gain: 0.05, wave: 0.125, dest: L.lead.gain, release: Math.min(0.06, dur * 0.3), pan: 0.35 });
+    }
+
     // rush sparkle: fast high arpeggio
-    if (this.active('sparkle')) {
+    if (this.active('sparkle') && !hush) {
       const n = 84 + ((key + cRoot) % 12) + chord[s % chord.length] + (s % 2 ? 12 : 0);
       this.voice(midi(n), { t, dur: spb * 0.5, gain: 0.03, wave: 0.125, dest: L.sparkle.gain, release: 0.03 });
     }
+  }
+
+  // A build-up riser: looped noise through a band-pass that sweeps up while
+  // it swells, cut dead at the end for the drop.
+  riser(t, dur, dest) {
+    const c = this.ctx;
+    const src = c.createBufferSource();
+    src.buffer = this.noise;
+    src.loop = true;
+    const f = c.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 1.6;
+    f.frequency.setValueAtTime(250, t);
+    f.frequency.exponentialRampToValueAtTime(7000, t + dur);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.16, t + dur);
+    g.gain.setValueAtTime(0, t + dur);
+    src.connect(f).connect(g).connect(dest);
+    src.start(t);
+    src.stop(t + dur + 0.02);
   }
 
   kick(t, dest) {
