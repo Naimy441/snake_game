@@ -7,7 +7,7 @@ const PAD_VS = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectio
 const PAD_FS = `uniform sampler2D uTex; uniform float uTime; uniform vec3 uA; uniform vec3 uB; uniform float uOn;
 varying vec2 vUv;
 void main(){
-  float m = texture2D(uTex, vec2(vUv.x, vUv.y * 1.5 - uTime * 1.6)).r;
+  float m = texture2D(uTex, vec2(vUv.x, vUv.y * 1.5 - uTime * 0.35)).r;
   vec2 c = abs(vUv - 0.5);
   float frame = smoothstep(0.43, 0.47, max(c.x, c.y)) * smoothstep(0.5, 0.48, max(c.x, c.y));
   vec3 col = mix(uA, uB, vUv.y) * m * 2.4 + uB * frame * 2.0;
@@ -68,7 +68,7 @@ export class BoardObjects {
       );
       plate.position.y = 0.03;
       plate.receiveShadow = true;
-      const u = { uTex: { value: chevronTex }, uTime: { value: 0 }, uA: { value: new THREE.Color('#ff3a1f') }, uB: { value: new THREE.Color('#ffd23f') }, uOn: { value: 1 } };
+      const u = { uTex: { value: chevronTex }, uTime: { value: 0 }, uA: { value: new THREE.Color('#2a5cff') }, uB: { value: new THREE.Color('#a8f4ff') }, uOn: { value: 1 } };
       const arrows = new THREE.Mesh(
         new THREE.PlaneGeometry(0.8, 0.8),
         new THREE.ShaderMaterial({ uniforms: u, vertexShader: PAD_VS, fragmentShader: PAD_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })
@@ -77,7 +77,7 @@ export class BoardObjects {
       arrows.position.y = 0.07;
       const glow = new THREE.Mesh(
         new THREE.PlaneGeometry(1.8, 1.8),
-        new THREE.MeshBasicMaterial({ map: glowTex, color: new THREE.Color('#ffb020'), transparent: true, opacity: 0.6, depthWrite: false, blending: THREE.AdditiveBlending, fog: false })
+        new THREE.MeshBasicMaterial({ map: glowTex, color: new THREE.Color('#5fc8ff'), transparent: true, opacity: 0.6, depthWrite: false, blending: THREE.AdditiveBlending, fog: false })
       );
       glow.rotation.x = -Math.PI / 2;
       glow.position.y = 0.025;
@@ -85,9 +85,9 @@ export class BoardObjects {
       spin.add(arrows);
       const ground = new THREE.Group();
       ground.add(plate, glow, spin);
-      // sky version: a spinning gold gyroscope of two hoops around a core
+      // sky version: a slowly turning ice-blue gyroscope of two hoops around a core
       const air = new THREE.Group();
-      const hoopMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffb020').multiplyScalar(2.2), fog: false });
+      const hoopMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#7fd8ff').multiplyScalar(2.2), fog: false });
       const hoopGeo = new THREE.TorusGeometry(0.42, 0.04, 8, 40);
       const h1 = new THREE.Mesh(hoopGeo, hoopMat);
       const h2 = new THREE.Mesh(hoopGeo, hoopMat);
@@ -96,9 +96,9 @@ export class BoardObjects {
       gyro.add(h1, h2);
       const core = new THREE.Mesh(
         new THREE.OctahedronGeometry(0.13, 0),
-        new THREE.MeshStandardMaterial({ color: '#ffd23f', emissive: '#ff8a1a', emissiveIntensity: 1.6, roughness: 0.2, metalness: 0.4 })
+        new THREE.MeshStandardMaterial({ color: '#c8f4ff', emissive: '#3aa8ff', emissiveIntensity: 1.6, roughness: 0.2, metalness: 0.4 })
       );
-      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: '#ffb020', transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending }));
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: '#5fc8ff', transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending }));
       halo.scale.setScalar(1.7);
       air.add(gyro, core, halo);
       air.position.y = 0.3;
@@ -162,15 +162,18 @@ export class BoardObjects {
     this.warns.instanceMatrix.needsUpdate = true;
     this.warnMat.opacity = 0.65 + 0.35 * Math.sin(time * 14);
 
-    // pads: arrows always point along the snake's heading
-    const ids = new Set(game.pads.map((p) => p.id));
+    // slow-mo tiles: the chevrons point back at the snake (brakes), drifting
+    // slowly. In the Galactic Core the apple that brings the calm sits on one.
+    const f = game.food;
+    const list = f && f.ramp ? [...game.pads, { x: f.x, z: f.z, y: 0, id: `ramp${f.id}` }] : game.pads;
+    const ids = new Set(list.map((p) => p.id));
     for (const g of this.pads) {
       if (g.userData.id !== null && !ids.has(g.userData.id)) {
         g.visible = false;
         g.userData.id = null;
       }
     }
-    for (const p of game.pads) {
+    for (const p of list) {
       const g = this.pads.find((x) => x.userData.id === p.id) || this.pads.find((x) => x.userData.id === null);
       if (!g) continue;
       const u = g.userData;
@@ -185,9 +188,9 @@ export class BoardObjects {
       u.ground.visible = !sky;
       u.air.visible = !!sky;
       if (sky) {
-        u.gyro.rotation.x = time * 1.7;
-        u.gyro.rotation.y = time * 1.1;
-        u.core.rotation.y = time * 3;
+        u.gyro.rotation.x = time * 0.5;
+        u.gyro.rotation.y = time * 0.3;
+        u.core.rotation.y = time * 0.8;
       }
       u.appear = Math.min(1, u.appear + dt * 3);
       g.scale.setScalar(Math.max(0.001, 1 - Math.pow(1 - u.appear, 3)));
@@ -195,7 +198,7 @@ export class BoardObjects {
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
       u.yaw += d * Math.min(1, dt * 10);
-      u.spin.rotation.y = u.yaw + Math.PI;
+      u.spin.rotation.y = u.yaw + Math.PI; // turned round: pointing back at the snake
       u.u.uTime.value = time;
     }
   }

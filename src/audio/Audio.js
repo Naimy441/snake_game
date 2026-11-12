@@ -1289,9 +1289,9 @@ export class AudioEngine {
     this.noiseHit({ dur: 0.25, gain: 0.08, freq: 900, sweep: 0.5 });
   }
 
+  // a slow-mo tile: the same soft bwoom, with a bell
   boost() {
-    this.noiseHit({ dur: 0.4, gain: 0.22, freq: 500, sweep: 7, q: 1.4 });
-    this.voice(220, { wave: 0.25, dur: 0.28, gain: 0.08, slide: 3 });
+    this.voice(150, { wave: 'sine', dur: 0.45, gain: 0.14, slide: 0.45, attack: 0.02, release: 0.3 });
     this.voice(midi(84), { wave: 0.5, at: 0.05, dur: 0.12, gain: 0.07 });
   }
 
@@ -1299,9 +1299,18 @@ export class AudioEngine {
     this.voice(midi(96), { wave: 0.125, dur: 0.025, gain: 0.025 });
   }
 
+  // Slow-mo kicks in: a soft, deep "bwoom" under a pair of gentle chimes, like
+  // the world taking a breath.
   rushStart() {
-    this.noiseHit({ dur: 0.45, gain: 0.2, freq: 400, sweep: 8, q: 1.2 });
-    this.voice(180, { wave: 'sawtooth', dur: 0.35, gain: 0.05, slide: 3 });
+    this.voice(150, { wave: 'sine', dur: 0.45, gain: 0.16, slide: 0.45, attack: 0.02, release: 0.3 });
+    this.voice(midi(81), { wave: 'triangle', at: 0.02, dur: 0.5, gain: 0.035, attack: 0.01, release: 0.45 });
+    this.voice(midi(76), { wave: 'triangle', at: 0.09, dur: 0.6, gain: 0.03, attack: 0.01, release: 0.55 });
+    this.noiseHit({ dur: 0.35, gain: 0.025, freq: 900, sweep: 0.5, q: 0.7, type: 'lowpass' });
+  }
+
+  // ...and lets go: a quick, light lift back up to speed.
+  rushEnd() {
+    this.voice(90, { wave: 'sine', dur: 0.16, gain: 0.07, slide: 1.8, attack: 0.01, release: 0.1 });
   }
 
   levelUp() {

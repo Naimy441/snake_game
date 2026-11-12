@@ -12,7 +12,7 @@
 
 import {
   DIRS, NEIGHBOURS, NEIGHBOURS_3D, SKY_LIFT, SKY_CENTER, FOOD_TYPES, COMBO_WINDOW_MS, MAX_COMBO, appleGrowth, zoneForLevel, RUSH_DRAIN_PER_SEC, CHAIN_LINK_POINTS, CHAIN_LINK_RUSH,
-  CHAIN_BONUS_PER_LINK, LEVEL_AT, LEVEL_SPEEDS, MIN_INTERVAL, MIN_FAST_INTERVAL, MAX_LEVEL,
+  CHAIN_BONUS_PER_LINK, LEVEL_AT, APPLE_BITES, LEVEL_SPEEDS, MIN_INTERVAL, MIN_FAST_INTERVAL, MAX_LEVEL,
 } from './SnakeGame.js';
 
 const Y = (c) => c.y || 0;
@@ -36,6 +36,7 @@ export class GhostBot {
       this.flying = g.flying;
       this.removedTail = g.removedTail ? { ...g.removedTail } : null;
       this.apples = g.foodEaten;
+      this.bites = g.bites || 0;
       this.score = g.score;
     } else {
       const c = Math.floor(s / 2);
@@ -47,6 +48,7 @@ export class GhostBot {
       this.flying = false;
       this.removedTail = { x: c, z: startZ + 4, y: 0 };
       this.apples = 0;
+      this.bites = 0;
       this.score = 0;
       this.route = null;
     }
@@ -423,14 +425,18 @@ export class GhostBot {
       return { respawned: true };
     }
     const ev = {};
-    const mult = this.rushing ? 2 : 1;
+    const mult = 1; // slow-mo buys time, not points
     if (g.food && at(g.food, nx, nz, ny) && this.ateFood !== g.food.id) {
       this.ateFood = g.food.id;
       this.pendingGrowth += appleGrowth(zoneForLevel(this.level)); // the map it was eaten on
-      this.apples++;
+      const k = APPLE_BITES[zoneForLevel(this.level)] || 1;
+      if (++this.bites >= k) {
+        this.bites = 0;
+        this.apples++;
+      }
       this.registerEat();
       this.score += FOOD_TYPES.orb.points * this.combo * mult;
-      this.rush = Math.min(100, this.rush + FOOD_TYPES.orb.rush);
+      this.rush = Math.min(100, this.rush + FOOD_TYPES.orb.rush / k);
       ev.ate = 'apple';
     }
     if (g.bonus && at(g.bonus, nx, nz, ny) && this.atePrism !== g.bonus.id) {

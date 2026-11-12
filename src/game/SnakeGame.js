@@ -12,17 +12,21 @@ export const DIRS = {
   dive: { x: 0, z: 0, y: -1 },
 };
 
+// rush: how much of the slow-mo meter it refills (out of 100). Slow-mo gives
+// real reaction time, so the meter fills slower than it used to.
 export const FOOD_TYPES = {
-  orb: { points: 10, grow: 1, rush: 25 },
-  prism: { points: 50, grow: 2, rush: 100 },
-  prey: { points: 100, grow: 2, rush: 50 },
+  orb: { points: 10, grow: 1, rush: 15 },
+  prism: { points: 50, grow: 2, rush: 60 },
+  // the golden mouse is worth the chase: big points, a full meter, and it
+  // only grows the snake by one
+  prey: { points: 250, grow: 1, rush: 100 },
 };
 
 export const COMBO_WINDOW_MS = 5000;
 // No cap: every quick follow-up eat raises the multiplier by one.
 export const MAX_COMBO = Infinity;
 export const PRISM_LIFETIME_MS = 9000;
-export const RUSH_DRAIN_PER_SEC = 32;
+export const RUSH_DRAIN_PER_SEC = 30; // slow-mo meter, per real second
 // Levels 0..13 are reached by eating apples; the Galactic Core is level 14,
 // the last one, won by filling the board as it collapses (see SPACE_START).
 export const MAX_LEVEL = 14;
@@ -39,7 +43,7 @@ export const LEVEL_COSTS = [3, 3, 3, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 6];
 export const LEVEL_SPEEDS = [175, 163, 152, 142, 133, 124, 115, 106, 98, 90, 83, 77, 122, 106, 150];
 // Total apples eaten at which each level starts.
 export const LEVEL_AT = LEVEL_COSTS.reduce((acc, c) => (acc.push(acc[acc.length - 1] + c), acc), [0]);
-export const MIN_FAST_INTERVAL = 48; // ~21 cells/s with Rush or Boost
+export const MIN_FAST_INTERVAL = 48; // game-time floor while slow-mo runs
 
 // The world changes zone every few speed levels.
 export const ZONE_STARTS = [0, 3, 6, 9, 12, 14];
@@ -49,13 +53,14 @@ export const ZONE_NAMES = ['Emerald Coast', 'Golden Canyon', 'Neon Night', 'Cybe
 // drops out over a black hole, onto a CORE_SIZE x CORE_SIZE board of light
 // floating above it. The black hole eats the board: every apple dooms
 // COLLAPSE_PER_APPLE more cells, which glow for DOOM_MS and then fall in
-// (only once the snake is off them). They go in a spiral from the outer edge
-// inwards, so the board shrinks around the snake. Dead-end nubs (cells with
-// one neighbour left, which could only ever be filled last) go first, for
-// free. The collapse never splits the board, never takes the cells right in
-// front of the head, and never cuts the head off from its own tail (so there
-// is always a way to stay alive). The run is won when every cell left is
-// snake: 100%.
+// (only once the snake is off them). It eats whole edge rows and columns,
+// one at a time, starting with the edge furthest from the head, so the board
+// is always a rectangle (give or take the row going now) with at least one
+// side an even number of cells long: a board like that can always be filled
+// completely by a loop. Nothing falls in the middle, nothing falls right in
+// front of the head, and the collapse never cuts the head off from its own
+// tail (so there is always a way to stay alive). The run is won when every
+// cell left is snake: 100%.
 export const SPACE_ZONE = 5;
 export const SPACE_START = 14;
 export const CORE_SIZE = 12;
@@ -69,10 +74,9 @@ export const CORE_FAST = 132; // ms per move once the board is nearly full (~7.6
 export const CORE_CALM_LEN = 35;
 export const CORE_CALM = 180; // ms per move (~5.5 moves/s)
 export const CORE_CALM_MOVES = 10;
-const MAX_FREE_EATS = 4; // dead-end nubs taken per apple, on top
 // What the bot's planning copies can share with the game (never changed in
 // the Galactic Core, or not wanted in a copy).
-const SIM_SHARED = new Set(['spiral', 'sizes', 'undo', 'corePlanned', 'stallWay', 'appleAfter', 'obstacles', 'pads', 'padRespawns', 'stats', 'simPlan']);
+const SIM_SHARED = new Set(['sizes', 'undo', 'corePlanned', 'stallWay', 'appleAfter', 'obstacles', 'pads', 'padRespawns', 'stats', 'simPlan']);
 const scratch = {}; // reused buffers for roomScore
 // The same apple (planning copies have their own copy of it)?
 const sameFood = (a, b) => a === b || (!!a && !!b && a.id === b.id && a.x === b.x && a.z === b.z);
@@ -92,10 +96,13 @@ export const SKY_PAD = 2;
 export const BOARD_SIZES = [15, 17, 19];
 
 // The bonus level (unlocked by growing to BONUS_UNLOCK_LENGTH in the Galactic
-// Core): classic Snake on a 17 x 17 board. No power-ups, no mice, no speed
-// ramp; every golden apple grows the snake by one, and Rush still works.
-export const BONUS_SIZE = 17;
-export const BONUS_INTERVAL = 128; // ms per move (~7.8 moves/s), the whole level
+// Core): classic Snake on a 10 x 9 board (10 across, 9 deep). No power-ups,
+// no mice, no speed ramp; every golden apple grows the snake by one, and
+// slow-mo still works.
+export const BONUS_W = 10;
+export const BONUS_H = 9;
+export const BONUS_SIZE = BONUS_W;
+export const BONUS_INTERVAL = 135; // ms per move (~7.4 moves/s), the whole level
 export const BONUS_PARTY_AT = 10; // apples until the lights come on
 export const BONUS_UNLOCK_LENGTH = 30;
 // The epilogue's meteor storm, on Emerald Coast's own 15 x 15 board, with
@@ -129,14 +136,16 @@ export const CHAIN_LINK_RUSH = 15;
 export const CHAIN_BONUS_PER_LINK = 100;
 
 // Fleeing prey.
-export const PREY_LIFETIME_MS = 14000;
+export const PREY_LIFETIME_MS = 18000;
+export const PREY_FLEE_RADIUS = 5; // it only bolts once the head is this close
 export const PREY_FIRST_DELAY_MS = 16000;
 
-// Boost pads: free burst of speed and double points.
+// Slow-mo tiles: a free burst of slow motion (no meter used) with double
+// points. They don't refill the meter and come back slowly, so they can't be
+// chained into endless slow-mo.
 export const BOOST_TICKS = 14;
 export const PAD_POINTS = 25;
-export const PAD_RUSH = 15;
-export const PAD_RESPAWN_MS = 5000;
+export const PAD_RESPAWN_MS = 12000;
 
 // Obstacles rise at these speed levels (level index -> how many). The
 // board is kept clear: no level raises pillars any more (the machinery stays
@@ -156,30 +165,19 @@ export const NEIGHBOURS_3D = [...NEIGHBOURS, DIRS.rise, DIRS.dive];
 export const cellKey = (x, z, y = 0) => (x * 64 + z) * 16 + y;
 
 // Apples grow the snake more on each map: 1 cell on the first, 2 on the
-// second, then 3 from the third map on.
-export const MAX_APPLE_GROWTH = 3;
+// second. From Neon Night on (the sky too) three apples are out at once and
+// each grows the snake by one: three of them make up one apple of level
+// progress (see APPLE_BITES), so the maps are as long as ever and the snake
+// as long, but it never waits on a single far-off apple.
+const APPLE_GROWTH = [1, 2, 1, 1, 1, 1];
+export const MAX_APPLE_GROWTH = 2;
 export function appleGrowth(zone) {
-  return Math.min(MAX_APPLE_GROWTH, zone + 1);
+  return APPLE_GROWTH[Math.max(0, Math.min(APPLE_GROWTH.length - 1, zone))];
 }
-
-// The order the Galactic Core's board falls in: the outer edge first, going
-// round clockwise (seen from above) from the top-left corner, then the next
-// ring in, and so on.
-function spiralOrder(S) {
-  const order = new Int32Array(S * S);
-  let k = 0;
-  for (let L = 0; L < S / 2; L++) {
-    const a = L;
-    const b = S - 1 - L;
-    const path = [];
-    for (let x = a; x <= b; x++) path.push([x, a]);
-    for (let z = a + 1; z <= b; z++) path.push([b, z]);
-    for (let x = b - 1; x >= a; x--) path.push([x, b]);
-    for (let z = b - 1; z > a; z--) path.push([a, z]);
-    for (const [x, z] of path) order[x * S + z] = k++;
-  }
-  return order;
-}
+// Extra apples on the board at once (on top of the main one), per map.
+const EXTRA_APPLES = [0, 0, 2, 2, 2, 0];
+// How many apples eaten make one apple of level progress, per map.
+export const APPLE_BITES = [1, 1, 3, 3, 3, 1];
 
 export function zoneForLevel(level) {
   let z = 0;
@@ -235,6 +233,7 @@ export class SnakeGame {
     this.pendingGrowth = 0;
     this.score = 0;
     this.foodEaten = 0;
+    this.bites = 0; // apples eaten towards the next apple of progress (see APPLE_BITES)
     this.combo = 1;
     this.maxCombo = 1;
     this.lastEatTime = -1e9;
@@ -261,12 +260,46 @@ export class SnakeGame {
     this.pads = []; // { x, z, id }
     this.padRespawns = []; // times at which a used pad comes back
     this.stats = { chains: 0, prey: 0, pads: 0 };
+    this.extras = []; // more apples on the board at once (see EXTRA_APPLES)
+    this.rows = 0; // board depth when it isn't square (the bonus level); 0: same as size
+    this.prevDir = { ...DIRS.up };
+    this.rect = null; // Galactic Core: the rectangle the board is shrinking to
+    this.stripCells = []; // Galactic Core: the edge row / column falling now
     this.food = null;
     this.food = this.spawn('orb');
   }
 
   get head() {
     return this.cells[0];
+  }
+
+  // Cells from front to back (z). Every board is square except the bonus level's.
+  get depth() {
+    return this.rows || this.size;
+  }
+
+  // Is slow motion on (held, or from a slow-mo tile)?
+  get slowmo() {
+    return this.rushing || this.boostTicks > 0;
+  }
+
+  extrasTarget() {
+    if (this.space || this.bonusLevel || this.meteorLevel) return 0;
+    return EXTRA_APPLES[this.zone] || 0;
+  }
+
+  // Top up the extra apples to this map's count. Returns the new ones.
+  fillExtras() {
+    const out = [];
+    const want = this.extrasTarget();
+    if (this.extras.length > want) this.extras.length = want;
+    while (this.extras.length < want) {
+      const f = this.spawn('orb');
+      if (!f) break;
+      this.extras.push(f);
+      out.push({ ...f });
+    }
+    return out;
   }
 
   boardSizeFor(zone) {
@@ -290,6 +323,7 @@ export class SnakeGame {
     const shift = this.shiftGrid(pad);
     shift(this.food);
     shift(this.bonus);
+    this.extras.forEach((c) => shift(c));
     if (this.chain) this.chain.links.forEach((c) => shift(c));
     if (this.prey) {
       shift(this.prey);
@@ -328,13 +362,15 @@ export class SnakeGame {
     }
     const l = this.level;
     if (l >= SPACE_START) return { into: 1, need: 1, max: true };
-    return { into: this.foodEaten - LEVEL_AT[l], need: LEVEL_COSTS[l], max: false };
+    // in apples actually eaten (three to a step from Neon Night on)
+    const k = APPLE_BITES[this.zone] || 1;
+    return { into: (this.foodEaten - LEVEL_AT[l]) * k + this.bites, need: LEVEL_COSTS[l] * k, max: false };
   }
 
   // Cells on the board (in the Galactic Core: the ones not fallen yet).
   get capacity() {
     if (this.space) return this.landCount();
-    return this.size * this.size * this.height;
+    return this.size * this.depth * this.height;
   }
 
   landCount() {
@@ -393,19 +429,22 @@ export class SnakeGame {
     return Math.max(MIN_INTERVAL, LEVEL_SPEEDS[this.level]);
   }
 
-  currentInterval(rushing = this.rushing) {
-    let f = 1;
-    if (rushing) f = 0.6;
-    if (this.boostTicks > 0) f = rushing ? 0.5 : 0.55;
+  // Slow-mo is bullet time: the moves come quicker in game time, and the
+  // presentation slows the whole world down by more than that (see main.js),
+  // so in real time the snake moves a little slower and everything else
+  // (the mouse, timers, particles, music) a lot slower.
+  currentInterval(slow = this.slowmo) {
+    const f = slow ? 0.6 : 1;
     return Math.max(MIN_FAST_INTERVAL, this.baseInterval() * f);
   }
 
   // Speed as a 0..1 value for presentation effects.
-  intensity() {
-    if (this.meteorLevel) return Math.min(1, 0.45 + (this.meteorsEaten / METEOR_TOTAL) * 0.3 + (this.rushing ? 0.35 : 0));
-    if (this.bonusLevel) return Math.min(1, 0.35 + (this.rushing ? 0.45 : 0));
+  // How intense the picture is (speed lines, blur, camera). slow: count slow-mo.
+  intensity(slow = this.slowmo) {
+    if (this.meteorLevel) return Math.min(1, 0.45 + (this.meteorsEaten / METEOR_TOTAL) * 0.3 + (slow ? 0.35 : 0));
+    if (this.bonusLevel) return Math.min(1, 0.35 + (slow ? 0.45 : 0));
     const lvl = this.level / MAX_LEVEL;
-    return Math.min(1, lvl * 0.7 + (this.rushing || this.boostTicks > 0 ? 0.45 : 0));
+    return Math.min(1, lvl * 0.7 + (slow ? 0.45 : 0));
   }
 
   lastQueuedDir() {
@@ -456,7 +495,7 @@ export class SnakeGame {
 
   inBounds(x, z, y = 0) {
     if (this.space) return y === 0 && this.isLand(x, z);
-    return x >= 0 && z >= 0 && x < this.size && z < this.size && y >= 0 && y < this.height;
+    return x >= 0 && z >= 0 && x < this.size && z < this.depth && y >= 0 && y < this.height;
   }
 
   occupied(x, z, ignoreTail = false, y = 0) {
@@ -496,6 +535,7 @@ export class SnakeGame {
     this.cells.forEach(add);
     if (this.food) add(this.food);
     if (this.bonus) add(this.bonus);
+    for (const e of this.extras) add(e);
     if (this.prey) add(this.prey);
     if (this.chain) for (let i = this.chain.next; i < this.chain.links.length; i++) add(this.chain.links[i]);
     for (const o of this.obstacles) for (let y = 0; y < (flat ? 1 : this.height); y++) taken.add(cellKey(o.x, o.z, y));
@@ -509,7 +549,7 @@ export class SnakeGame {
     const H = flat ? 1 : this.height;
     const out = [];
     for (let x = 0; x < this.size; x++) {
-      for (let z = 0; z < this.size; z++) {
+      for (let z = 0; z < this.depth; z++) {
         if (this.space && (!this.isLand(x, z) || this.doomAt(x, z))) continue;
         for (let y = 0; y < H; y++) if (!taken.has(cellKey(x, z, y))) out.push({ x, z, y });
       }
@@ -546,10 +586,15 @@ export class SnakeGame {
     }
     // Prefer cells that are not right in front of the head so food never
     // appears where the player can't react to it.
-    // Galactic Core: never on a dead end (the black hole is about to eat those)
+    // Galactic Core: never on a dead end (the black hole is about to eat those),
+    // and not on the row falling now or the outer edge if it can help it
     if (this.space) {
       const open = free.filter((c) => !this.leavesDeadEnd(c, []));
       if (open.length) free = open;
+      const strip = new Set(this.stripCells.map((c) => c.x * this.size + c.z));
+      const r = this.rect;
+      const inner = free.filter((c) => !strip.has(c.x * this.size + c.z) && (!r || (c.x > r.x0 && c.x < r.x1 && c.z > r.z0 && c.z < r.z1)));
+      if (inner.length) free = inner;
     }
     const h = this.head;
     const fair = free.filter((c) => this.dist(c, h) > 2);
@@ -629,7 +674,7 @@ export class SnakeGame {
     const taken = this.takenSet();
     const nb = this.neighbours;
     const yOk = (y) => (this.flying ? y >= 1 && y < this.height - 1 : y === 0);
-    const ok = (c) => c.x >= 1 && c.z >= 1 && c.x < this.size - 1 && c.z < this.size - 1 && yOk(c.y) && !taken.has(cellKey(c.x, c.z, c.y));
+    const ok = (c) => c.x >= 1 && c.z >= 1 && c.x < this.size - 1 && c.z < this.depth - 1 && yOk(c.y) && !taken.has(cellKey(c.x, c.z, c.y));
     for (let attempt = 0; attempt < 60; attempt++) {
       const start = this.pick(this.freeCells());
       if (!start || manhattan(start, this.head) < 6 || !ok(start)) continue;
@@ -668,8 +713,10 @@ export class SnakeGame {
     return this.prey;
   }
 
+  // The mouse is slower than the snake at every level (it used to outrun it
+  // late on), so cornering it is a fair chase.
   preyMoveMs() {
-    return Math.max(150, 290 - this.level * 9);
+    return Math.max(210, 340 - this.level * 8);
   }
 
   preyCanEnter(x, z, ahead) {
@@ -677,6 +724,7 @@ export class SnakeGame {
     if (ahead && ahead.x === x && ahead.z === z) return false;
     if (this.food && this.food.x === x && this.food.z === z) return false;
     if (this.bonus && this.bonus.x === x && this.bonus.z === z) return false;
+    if (this.extras.some((e) => e.x === x && e.z === z)) return false;
     if (this.chainIndexAt(x, z) >= 0) return false;
     return true;
   }
@@ -693,7 +741,7 @@ export class SnakeGame {
     p.px = p.x;
     p.pz = p.z;
     const dist = manhattan(p, h);
-    p.fleeing = dist <= 7;
+    p.fleeing = dist <= PREY_FLEE_RADIUS;
     if (!options.length) return;
     let choice = null;
     if (p.fleeing) {
@@ -709,7 +757,8 @@ export class SnakeGame {
           choice = o;
         }
       }
-      if (manhattan(choice, h) <= dist && this.rng() < 0.3) choice = null; // hesitates
+      if (manhattan(choice, h) <= dist && this.rng() < 0.45) choice = null; // hesitates
+      else if (this.rng() < 0.2) choice = null; // and now and then freezes in fright
     } else if (this.rng() < 0.6) {
       const straight = options.find((o) => sameDir(o.d, p.dir));
       choice = straight && this.rng() < 0.6 ? straight : this.pick(options);
@@ -786,7 +835,7 @@ export class SnakeGame {
 
   spawnPad() {
     const yOk = (y) => !this.flying || (y >= 1 && y < this.height - 1);
-    const pool = this.freeCells().filter((c) => manhattan(c, this.head) >= 4 && !this.inFrontOfHead(c, 3) && c.x > 0 && c.z > 0 && c.x < this.size - 1 && c.z < this.size - 1 && yOk(c.y));
+    const pool = this.freeCells().filter((c) => manhattan(c, this.head) >= 4 && !this.inFrontOfHead(c, 3) && c.x > 0 && c.z > 0 && c.x < this.size - 1 && c.z < this.depth - 1 && yOk(c.y));
     if (!pool.length) return null;
     const c = this.pick(pool);
     const p = { x: c.x, z: c.z, y: c.y, id: this.uid++ };
@@ -830,6 +879,8 @@ export class SnakeGame {
       pads.push({ ...p });
     }
     if (pads.length) ev.padsSpawned = pads;
+    const extras = this.fillExtras();
+    if (extras.length) ev.extrasSpawned = extras;
   }
 
   // Begin a fresh run at a later level (level select): that level's speed,
@@ -847,11 +898,13 @@ export class SnakeGame {
     this.growBoard(this.boardSizeFor(Math.min(this.zone, SKY_ZONE - 1)));
     if (this.zone >= SKY_ZONE) {
       this.enterSky();
-      return void this.fillPads();
+      this.fillPads();
+      return void this.fillExtras();
     }
     for (let l = 1; l <= L; l++) if (OBSTACLE_PLAN[l]) this.addObstacles(OBSTACLE_PLAN[l]);
     for (const o of this.obstacles) o.solid = true;
     this.fillPads();
+    this.fillExtras();
   }
 
   // Playtesting: lengthen the snake to n cells at once (a run starts with it
@@ -875,7 +928,7 @@ export class SnakeGame {
     let go = true;
     for (let x = t.x; x >= 0 && go; x--) go = add(x, z);
     let dir = 1;
-    for (z += bz; go && z >= 0 && z < this.size; z += bz, dir = -dir) {
+    for (z += bz; go && z >= 0 && z < this.depth; z += bz, dir = -dir) {
       for (let i = 0; i < this.size && go; i++) go = add(dir > 0 ? i : this.size - 1 - i, z);
     }
     this.pendingGrowth += Math.max(0, n - this.cells.length);
@@ -905,6 +958,7 @@ export class SnakeGame {
     this.yMid = SKY_LIFT;
     lift(this.food);
     lift(this.bonus);
+    this.extras.forEach(lift);
     if (this.chain) this.chain.links.forEach(lift);
     this.obstacles = [];
     this.pads = [];
@@ -922,17 +976,18 @@ export class SnakeGame {
   // up, the first golden apple straight ahead, and nothing else at all.
   enterBonusLevel() {
     this.reset();
-    const S = BONUS_SIZE;
     this.bonusLevel = true;
-    this.size = S;
-    const c = Math.floor(S / 2);
-    const z0 = S - 5;
+    this.size = BONUS_W;
+    this.rows = BONUS_H;
+    this.extras = [];
+    const c = Math.floor(BONUS_W / 2);
+    const z0 = BONUS_H - 5;
     this.cells = [];
     for (let i = 0; i < 4; i++) this.cells.push({ x: c, z: z0 + i, y: 0 });
     this.removedTail = { x: c, z: z0 + 4, y: 0 };
     this.preyTimer = Infinity;
     this.rush = 50;
-    this.food = { x: c, z: z0 - 6, y: 0, type: 'orb', id: this.uid++, spawnedAt: 0 };
+    this.food = { x: c, z: 0, y: 0, type: 'orb', id: this.uid++, spawnedAt: 0 };
   }
 
   // ---------------------------------------------------------------- meteor storm
@@ -1035,7 +1090,9 @@ export class SnakeGame {
     this.yMid = 0;
     this.size = S;
     this.land = new Uint8Array(S * S).fill(1);
-    this.spiral = spiralOrder(S);
+    this.rect = { x0: 0, x1: S - 1, z0: 0, z1: S - 1 };
+    this.stripCells = [];
+    this.extras = [];
     this.doomed = [];
     this.fallen = 0;
     this.fillTop = 0;
@@ -1205,41 +1262,89 @@ export class SnakeGame {
     return n;
   }
 
-  // An apple was eaten: doom the next n cells of the spiral, plus (for free)
-  // any dead-end nubs.
+  // Pick the next edge row or column to fall. The board stays a rectangle
+  // with at least one even side (so a loop can always fill it), and of the
+  // edges allowed, the one furthest from the head (and with the least of the
+  // snake on it) goes. Returns false when the board can't shrink any more.
+  nextStrip() {
+    const r = this.rect;
+    if (!r) return false;
+    const W = r.x1 - r.x0 + 1;
+    const H = r.z1 - r.z0 + 1;
+    const h = this.head;
+    const body = this.bodyMask();
+    const S = this.size;
+    const opts = [];
+    // rows (z0 / z1) shrink H; columns (x0 / x1) shrink W
+    const rowsOk = H > 2 && (W % 2 === 0 || (H - 1) % 2 === 0);
+    const colsOk = W > 2 && (H % 2 === 0 || (W - 1) % 2 === 0);
+    const line = (axis, v) => {
+      const out = [];
+      if (axis === 'z') for (let x = r.x0; x <= r.x1; x++) out.push({ x, z: v });
+      else for (let z = r.z0; z <= r.z1; z++) out.push({ x: v, z });
+      return out;
+    };
+    const add = (axis, v, side) => {
+      const cells = line(axis, v).filter((c) => this.land[c.x * S + c.z]);
+      let onBody = 0;
+      for (const c of cells) onBody += body[c.x * S + c.z];
+      const far = axis === 'z' ? Math.abs(h.z - v) : Math.abs(h.x - v);
+      // keep it squarish: prefer cutting the longer side
+      const long = (axis === 'z' ? H >= W : W >= H) ? 1.5 : 0;
+      opts.push({ axis, v, side, cells, score: far + long - onBody * 2 });
+    };
+    if (rowsOk) {
+      add('z', r.z0, 'z0');
+      add('z', r.z1, 'z1');
+    }
+    if (colsOk) {
+      add('x', r.x0, 'x0');
+      add('x', r.x1, 'x1');
+    }
+    if (!opts.length) return false;
+    opts.sort((a, b) => b.score - a.score);
+    const o = opts[0];
+    if (o.side === 'z0') r.z0++;
+    else if (o.side === 'z1') r.z1--;
+    else if (o.side === 'x0') r.x0++;
+    else r.x1--;
+    // along the strip, from the end furthest from the head
+    const along = (c) => (o.axis === 'z' ? Math.abs(c.x - h.x) : Math.abs(c.z - h.z));
+    this.stripCells = o.cells.sort((a, b) => along(b) - along(a));
+    return true;
+  }
+
+  // An apple was eaten: doom the next n cells of the edge strip falling now
+  // (starting the next strip when it runs out). A cell is skipped for now
+  // (it goes with a later apple) if the snake or the apple is on it, if it's
+  // right in front of the head, or if losing it would cut the head off from
+  // its tail.
   collapse(ev, n = COLLAPSE_PER_APPLE) {
     const S = this.size;
     const body = this.bodyMask();
     const { dist } = this.reachInfo();
     const h = this.head;
-    // never take the cells right in front of the head, or cut it off from
-    // its tail (if it can still reach it now)
-    const near = Math.min(5, 2 + Math.floor(this.coreFree() / 12));
+    const near = Math.min(4, 2 + Math.floor(this.coreFree() / 16));
     const guardTail = this.tailInReach();
-    const cand = [];
-    for (let x = 0; x < S; x++) {
-      for (let z = 0; z < S; z++) {
-        const k = x * S + z;
-        if (!this.land[k] || body[k] || this.doomAt(x, z)) continue;
-        if (this.food && this.food.x === x && this.food.z === z) continue;
-        if (Math.abs(x - h.x) + Math.abs(z - h.z) <= 1 || (dist[k] >= 0 && dist[k] < near)) continue;
-        const cls = this.landDegree(x, z) <= 1 ? 0 : 2;
-        cand.push({ x, z, cls, ord: this.spiral[k] });
-      }
-    }
-    cand.sort((a, b) => a.cls - b.cls || a.ord - b.ord);
     const picked = [];
-    let extra = 0;
-    let spiral = 0;
-    for (const c of cand) {
-      if (c.cls < 2 ? extra >= MAX_FREE_EATS : spiral >= n) continue;
-      if (!this.landConnected([...picked, c])) continue;
-      if (this.food && this.leavesDeadEnd(this.food, [...picked, c])) continue;
-      if (guardTail && !this.tailInReach([...this.doomed, ...picked, c])) continue;
-      picked.push(c);
-      if (c.cls < 2) extra++;
-      else spiral++;
-      if (spiral >= n && (extra >= MAX_FREE_EATS || c.cls === 2)) break;
+    const key = (c) => c.x * S + c.z;
+    for (let round = 0; round < 3 && picked.length < n; round++) {
+      if (!this.stripCells.length && !this.nextStrip()) break;
+      for (const c of this.stripCells) {
+        if (picked.length >= n) break;
+        const k = key(c);
+        if (!this.land[k] || body[k] || this.doomAt(c.x, c.z)) continue;
+        if (this.food && this.food.x === c.x && this.food.z === c.z) continue;
+        if (Math.abs(c.x - h.x) + Math.abs(c.z - h.z) <= 1 || (dist[k] >= 0 && dist[k] < near)) continue;
+        if (!this.landConnected([...picked, c])) continue;
+        if (this.food && this.leavesDeadEnd(this.food, [...picked, c])) continue;
+        if (guardTail && !this.tailInReach([...this.doomed, ...picked, c])) continue;
+        picked.push(c);
+      }
+      const took = new Set(picked.map(key));
+      this.stripCells = this.stripCells.filter((c) => this.land[key(c)] && !this.doomAt(c.x, c.z) && !took.has(key(c)));
+      // what's left of this strip waits for a later apple
+      if (this.stripCells.length) break;
     }
     const out = picked.map((c, i) => {
       const d = { x: c.x, z: c.z, doomAt: this.time, fallAt: this.time + DOOM_MS + i * DOOM_STAGGER_MS, id: this.uid++ };
@@ -1248,6 +1353,32 @@ export class SnakeGame {
     });
     if (out.length) ev.doomed = out;
     return out;
+  }
+
+  // Endgame, with an apple nobody can eat safely: doom one free cell (not
+  // the apple's, not the snake's) if, without it, the apple can be eaten
+  // safely after all.
+  trimEndgame(ev, food) {
+    const S = this.size;
+    const body = this.bodyMask();
+    for (let x = 0; x < S; x++) {
+      for (let z = 0; z < S; z++) {
+        const k = x * S + z;
+        if (!this.land[k] || body[k] || this.doomAt(x, z) || (food.x === x && food.z === z)) continue;
+        if (!this.landConnected([{ x, z }])) continue;
+        const d = { x, z, doomAt: this.time, fallAt: this.time + DOOM_MS, id: this.uid++ };
+        this.doomed.push(d);
+        const g = this.simCopy();
+        g.food = { ...food };
+        if (g.planApple({ n: 3000 })) {
+          this.stripCells = this.stripCells.filter((c) => c.x !== x || c.z !== z);
+          ev.doomed = (ev.doomed || []).concat({ ...d });
+          return true;
+        }
+        this.doomed.pop();
+      }
+    }
+    return false;
   }
 
   // Doomed cells fall once their time is up and the snake is off them. If
@@ -1705,8 +1836,9 @@ export class SnakeGame {
     this.lastEatTime = this.clock;
   }
 
+  // Slow-mo tiles pay double; slow-mo you hold doesn't (it already buys you time).
   get scoreMult() {
-    return this.rushing || this.boostTicks > 0 ? 2 : 1;
+    return this.boostTicks > 0 ? 2 : 1;
   }
 
   // Advance one grid move. Returns an event object describing what happened.
@@ -1717,7 +1849,7 @@ export class SnakeGame {
     // Snapshot for the late-turn grace window (see regrace).
     this.undo = {
       cells: this.cells.slice(), removedTail: this.removedTail, pendingGrowth: this.pendingGrowth,
-      dir: this.dir, facing: this.facing, queue: this.queue.slice(), time: this.time, clock: this.clock, ticks: this.ticks,
+      dir: this.dir, prevDir: this.prevDir, facing: this.facing, queue: this.queue.slice(), time: this.time, clock: this.clock, ticks: this.ticks,
       rush: this.rush, rushing: this.rushing, boostTicks: this.boostTicks,
       prey: this.prey ? { ...this.prey } : null, preyTimer: this.preyTimer,
     };
@@ -1744,6 +1876,7 @@ export class SnakeGame {
     this.removedTail = u.removedTail;
     this.pendingGrowth = u.pendingGrowth;
     this.dir = u.dir;
+    this.prevDir = u.prevDir;
     this.facing = u.facing;
     this.time = u.time;
     this.clock = u.clock;
@@ -1760,6 +1893,38 @@ export class SnakeGame {
     return ev;
   }
 
+  // After the lift-off climb: which way to level out. Free cells straight
+  // ahead (from the cell the climb ends in) in each direction; the way it
+  // was facing wins if it has room, else the roomiest, nearest the middle.
+  levelOutDir() {
+    const h = this.head;
+    const y = Y(h) + 1; // the climb has one more step to go when this is asked
+    const run = (d) => {
+      let n = 0;
+      for (let i = 1; i <= 8; i++) {
+        const x = h.x + d.x * i;
+        const z = h.z + d.z * i;
+        if (!this.inBounds(x, z, y) || this.occupied(x, z, false, y)) break;
+        n++;
+      }
+      return n;
+    };
+    const f = this.facing;
+    if (run(f) >= 6) return { ...f };
+    const mid = (this.size - 1) / 2;
+    let best = f;
+    let top = -Infinity;
+    for (const d of NEIGHBOURS) {
+      const toMid = (mid - h.x) * d.x + (mid - h.z) * d.z; // > 0: heads towards the middle
+      const s = run(d) * 10 + toMid;
+      if (s > top) {
+        top = s;
+        best = d;
+      }
+    }
+    return { ...best };
+  }
+
   // Relative turn resolved against the heading (the facing while climbing or diving).
   turnDir(side) {
     const l = this.lastFacing();
@@ -1774,20 +1939,24 @@ export class SnakeGame {
     const real = interval / this.clockScale;
     this.clock += real;
     this.ticks++;
-    if (this.rushing) this.rush = Math.max(0, this.rush - (RUSH_DRAIN_PER_SEC * real) / 1000);
+    // a slow-mo tile's slow-mo is free: holding Space on one doesn't stack, so it costs nothing
+    if (this.rushing && this.boostTicks <= 0) this.rush = Math.max(0, this.rush - (RUSH_DRAIN_PER_SEC * real) / 1000);
     if (this.boostTicks > 0) this.boostTicks--;
 
     if (this.queue.length) {
+      this.prevDir = this.dir;
       this.dir = this.queue.shift();
       if (!Y(this.dir)) this.facing = this.dir;
       ev.turned = true;
     }
-    // lift-off: climb straight up, then level out the way we were going.
+    // lift-off: climb straight up, then level out into open air: the way it
+    // was going if there's room, else the way with the most room (so lifting
+    // off beside the laser fence never flies it straight into it).
     // (It climbs whatever the queue says, so nothing that clears the queue,
     // like an autoplay, can leave it stuck mid-lift-off with steering locked.)
     if (this.launch > 0) {
       this.dir = { ...DIRS.rise };
-      if (--this.launch === 0) this.queue = [{ ...this.facing }];
+      if (--this.launch === 0) this.queue = [this.levelOutDir()];
     }
 
     // timed things
@@ -1877,6 +2046,7 @@ export class SnakeGame {
     let eaten = null;
     if (this.food && at(this.food, nx, nz, ny)) eaten = this.food;
     else if (this.bonus && at(this.bonus, nx, nz, ny)) eaten = this.bonus;
+    else eaten = this.extras.find((e) => at(e, nx, nz, ny)) || null;
     const caught = this.prey && at(this.prey, nx, nz, ny) ? this.prey : null;
     const meteor = this.meteorLevel ? this.meteors.find((m) => m.landed && m.x === nx && m.z === nz) || null : null;
 
@@ -1896,10 +2066,18 @@ export class SnakeGame {
       this.score += points;
       // an apple grows by the map it was eaten on (before any level-up it brings)
       this.pendingGrowth += this.space || this.bonusLevel ? 1 : eaten.type === 'orb' ? appleGrowth(this.zone) : def.grow;
-      this.rush = Math.min(100, this.rush + def.rush);
+      // where it takes a few small apples to make one, each refills its share
+      const k = eaten.type === 'orb' && !this.space && !this.bonusLevel ? APPLE_BITES[this.zone] || 1 : 1;
+      this.rush = Math.min(100, this.rush + def.rush / k);
       const prevLevel = this.level;
-      if (eaten.type === 'orb') this.foodEaten++;
+      if (eaten.type === 'orb') {
+        if (++this.bites >= k) {
+          this.bites = 0;
+          this.foodEaten++;
+        }
+      }
       ev.ate = { ...eaten, points, combo: this.combo, rushing: this.scoreMult > 1, levelUp: this.level > prevLevel };
+      if (eaten.ramp) ev.ate.ramp = true;
       if (this.level > prevLevel) {
         this.onLevelUp(ev, prevLevel);
         if (ev.levelUp.warp) {
@@ -1975,7 +2153,6 @@ export class SnakeGame {
       this.padRespawns.push(this.time + PAD_RESPAWN_MS);
       this.boostTicks = BOOST_TICKS;
       this.score += PAD_POINTS * (this.rushing ? 2 : 1);
-      this.rush = Math.min(100, this.rush + PAD_RUSH);
       this.stats.pads++;
       ev.boost = { ...pad };
     }
@@ -2002,6 +2179,7 @@ export class SnakeGame {
         this.collapse(ev);
         this.fillTop = Math.max(this.fillTop, this.fill); // (the speed the next apple is judged at)
       }
+      const hadFood = !!this.food;
       // A new one only goes somewhere fair (see fairCoreCell). If there's no
       // such place yet it waits, and looks again a few times a second. (The
       // bot's planning copies don't get one, as they can't know where it'll
@@ -2012,6 +2190,8 @@ export class SnakeGame {
         this.food = this.spawn('orb', null, true);
         if (!this.food) this.spawnTryAt = this.time + 400;
       }
+      // the apple that brings the calm sits on a slow-down ramp
+      if (this.food && !hadFood && this.calm < 0 && this.cells.length + this.pendingGrowth === CORE_CALM_LEN - 1) this.food.ramp = true;
       // an apple that has sat a while and still can't be eaten without
       // getting trapped is swallowed by the black hole, and a fair one
       // appears (or, if there's nowhere fair yet, one will soon)
@@ -2024,12 +2204,20 @@ export class SnakeGame {
           this.food = null;
           const n0 = this.doomed.length;
           const told = ev.doomed;
+          const strip0 = this.stripCells.slice();
+          const rect0 = this.rect && { ...this.rect };
           this.collapse(ev);
           if (this.doomed.length > n0 && !this.survive(this.simCopy(), undefined, { n: 2000 })) {
             this.doomed.length = n0;
             ev.doomed = told;
+            this.stripCells = strip0;
+            this.rect = rect0;
           }
+          // the last few cells: if one of them is what makes it unwinnable,
+          // let it go too
+          if (this.doomed.length === n0 && this.coreFree() <= 6) this.trimEndgame(ev, old);
           this.food = this.spawn('orb', old, true);
+          if (this.food && old.ramp) this.food.ramp = true;
           ev.appleMoved = { from: { ...old }, to: this.food ? { ...this.food } : null };
         }
       }
@@ -2075,9 +2263,15 @@ export class SnakeGame {
       }
     } else if (eaten && eaten === this.bonus) {
       this.bonus = null;
+    } else if (eaten && this.extras.includes(eaten)) {
+      this.extras.splice(this.extras.indexOf(eaten), 1);
+    }
+    if (!this.space && !this.meteorLevel && !this.bonusLevel && this.extras.length < this.extrasTarget()) {
+      const more = this.fillExtras();
+      if (more.length) ev.extrasSpawned = (ev.extrasSpawned || []).concat(more);
     }
 
-    if (!this.space && !this.meteorLevel && !this.food && !this.bonus && this.freeCells().length === 0) {
+    if (!this.space && !this.meteorLevel && !this.food && !this.bonus && !this.extras.length && this.freeCells().length === 0) {
       this.won = true;
       this.die('win');
       ev.won = true;

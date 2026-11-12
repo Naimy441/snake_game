@@ -2,6 +2,24 @@ import * as THREE from 'three';
 import { SnakePath, CORNER } from './SnakePath.js';
 import { skinById } from '../skins.js';
 import { buildAccessory, disposeAccessory, poseAccessory } from './accessories.js';
+import { modelFor } from './skinModels.js';
+
+// Body radius at distance d from the head (cells): a slim neck, the full
+// body, then a long taper to the tail tip.
+function bodyRadius(d, total, tailTaper) {
+  let r = 0.34;
+  if (d < 0.5) r = 0.27 + 0.07 * (d / 0.5);
+  const u = (total - d) / tailTaper;
+  if (u < 1) r *= 0.1 + 0.9 * Math.sqrt(Math.max(0, u));
+  return r;
+}
+
+const disposeTree = (o) => o.traverse((m) => {
+  if (m.isMesh) {
+    m.geometry.dispose();
+    m.material.dispose();
+  }
+});
 
 const STEP = 0.2; // ring spacing along the body, in cells
 const BLOCK_R = 0.5; // half width of a block skin's body: a block fills its whole cell
@@ -181,6 +199,11 @@ export class SnakeView {
     this.tmpM = new THREE.Matrix4();
     this.travel = 0;
     this.wiggle = 1;
+    this.maxCells = maxCells;
+    this.model = null; // a modelled skin (see skinModels.js)
+    this.secRing = null; // its body cross-section: [x, y, nx, ny] per vertex round a ring
+    this.modelHead = null;
+    this.partsMesh = null;
 
     const R = radial;
     this.blockRing = squareRing(R);
@@ -344,7 +367,9 @@ export class SnakeView {
     const block = skin.shape === 'block';
     this.block = block;
     this.blockH = block ? skin.blockH || 1 : 1;
-    this.skull.visible = !block;
+    this.applyModel(block ? null : modelFor(skin.id));
+    const model = this.model;
+    this.skull.visible = !block && (!model || !model.head || !!model.keepSkull);
     this.blockHead.visible = block;
     const bc = this.blockHeadGeo.attributes.color;
     col.set(h.top);
@@ -376,11 +401,14 @@ export class SnakeView {
     const host = block ? this.face : this.head;
     for (const o of [...this.eyes, this.tongue, this.accHolder]) host.add(o);
     this.eyes.forEach((e, i) => (block ? e.position.set((i ? 1 : -1) * 0.25, faceH * 0.2, 0.5) : e.position.set((i ? 1 : -1) * 0.22, 0.11, 0.12)));
-    this.eyes.forEach((e) => e.scale.setScalar(h.eyeScale || 1));
-    this.eyeBase = h.eyeScale || 1;
+    if (model && model.eyes) this.eyes.forEach((e, i) => e.position.set(...model.eyes[i]));
+    const eyeScale = (model && model.eyeScale) || h.eyeScale || 1;
+    this.eyes.forEach((e) => e.scale.setScalar(eyeScale));
+    this.eyeBase = eyeScale;
     if (this.blockMouth) this.blockMouth.position.set(0, -faceH * 0.18, 0.52);
-    this.nostrils.forEach((n) => (n.visible = !block));
+    this.nostrils.forEach((n) => (n.visible = this.skull.visible));
     if (block) this.tongue.position.set(0, -faceH * 0.25, 0.5);
+    else if (model && model.tongue) this.tongue.position.set(...model.tongue);
     else this.tongue.position.set(0, -0.02, 0.38);
     this.poseAccessory();
     // where the dizzy stars circle (head-local y above the top)
@@ -388,6 +416,89 @@ export class SnakeView {
     this.eyeMat.color.set(h.eye);
     this.eyeMat.emissive.set(h.eye);
     this.eyeMat.emissiveIntensity = h.eyeGlow ?? 0.9;
+  }
+
+  // Swap in a modelled skin's body section, head and body parts (or none).
+  applyModel(model) {
+    if (this.isGhost) model = null;
+    this.model = model;
+    if (this.modelHead) {
+      this.head.remove(this.modelHead);
+      disposeTree(this.modelHead);
+      this.modelHead = null;
+    }
+    if (this.partsMesh) {
+      this.group.remove(this.partsMesh);
+      this.partsMesh.geometry.dispose();
+      this.partsMesh.material.dispose();
+      this.partsMesh = null;
+    }
+    this.secRing = null;
+    if (!model) return;
+    if (model.section) {
+      // the outline at each vertex round the ring, and its outward normal
+      // (from the neighbouring points: the outline runs anticlockwise)
+      const R = this.radial;
+      const pts = [];
+      for (let j = 0; j <= R; j++) pts.push(model.section((j / R) * Math.PI * 2));
+      const ring = new Float32Array((R + 1) * 4);
+      for (let j = 0; j <= R; j++) {
+        const a = pts[j === 0 ? R - 1 : j - 1];
+        const b = pts[j === R ? 1 : j + 1];
+        const tx = b[0] - a[0];
+        const ty = b[1] - a[1];
+        const l = Math.hypot(tx, ty) || 1;
+        ring.set([pts[j][0], pts[j][1], ty / l, -tx / l], j * 4);
+      }
+      this.secRing = ring;
+    }
+    if (model.head) {
+      this.modelHead = model.head();
+      this.head.add(this.modelHead);
+    }
+    if (model.parts) {
+      const { geo, mat } = model.parts.build();
+      const n = Math.ceil(this.maxCells / model.parts.every) + 2;
+      const pm = new THREE.InstancedMesh(geo, mat, n);
+      pm.castShadow = true;
+      pm.receiveShadow = true;
+      pm.frustumCulled = false;
+      pm.count = 0;
+      this.partsMesh = pm;
+      this.group.add(pm);
+    }
+  }
+
+  // Lay the model's parts along the body (see skinModels.js).
+  updateParts(game, sHead, total, tailTaper) {
+    const pm = this.partsMesh;
+    const pp = this.model.parts;
+    const s = this.sample;
+    const tan = this.tmpTan;
+    const up = this.tmpUp;
+    const side = this.tmpSide;
+    const m = this.tmpM;
+    const max = pm.instanceMatrix.count;
+    let k = 0;
+    for (let d = pp.offset; d < total - 0.45 && k < max; d += pp.every) {
+      this.path.sample(sHead + d, s);
+      tan.set(s[3], s[4], s[5]);
+      this.headUpTarget(tan, game.facing, game.flying, up);
+      side.crossVectors(tan, up).normalize();
+      up.crossVectors(side, tan).normalize();
+      const r = bodyRadius(d, total, tailTaper);
+      const sc = r / 0.34;
+      const rh = r * 0.82;
+      const lift = rh * (this.model.lift ?? 0.92) + (pp.up || 0) * rh;
+      const px = s[0] + up.x * lift;
+      const py = s[1] + up.y * lift;
+      const pz = s[2] + up.z * lift;
+      m.makeBasis(side.multiplyScalar(sc), up.multiplyScalar(sc), tan.multiplyScalar(sc));
+      m.setPosition(px, py, pz);
+      pm.setMatrixAt(k++, m);
+    }
+    pm.count = k;
+    pm.instanceMatrix.needsUpdate = true;
   }
 
   // Turn this view into the ghost bot: a translucent, glowing fresnel shell
@@ -550,6 +661,7 @@ export class SnakeView {
     if (!this.accessory || !this.skin) return;
     const face = this.block ? { h: this.faceH, eyeY: this.faceH * 0.2, eyeFront: 0.5 + 0.085 * (this.skin.head.eyeScale || 1) } : null;
     poseAccessory(this.accessory, this.accHolder, face);
+    if (!this.block && this.model && this.model.acc) this.accHolder.position.set(...this.model.acc);
   }
 
   cellWorld(c, toWorld, out) {
@@ -881,6 +993,11 @@ export class SnakeView {
     const side = this.tmpSide;
     const tan = this.tmpTan;
     const up = this.tmpUp;
+    const model = this.model;
+    const sec = this.secRing;
+    const bump = model && model.bump;
+    const wave = model && model.wave;
+    const liftK = model && model.lift != null ? model.lift : 0.92;
 
     // head frame
     path.sample(sHead, s);
@@ -927,7 +1044,9 @@ export class SnakeView {
           r *= 1 + bulgeAmt * Math.exp(-q * q);
         }
         rh = r * 0.82;
-        lift = rh * 0.92;
+        lift = rh * liftK;
+        // a rippling body (bacon) rides up and down along its length
+        if (wave) lift += wave(d) * rh * Math.min(1, d / 0.8) * Math.min(1, (total - d) / 0.8);
       }
       const cx = s[0] + side.x * off + up.x * lift;
       const cy = s[1] + side.y * off + up.y * lift;
@@ -942,6 +1061,22 @@ export class SnakeView {
           const b = B[j * 4 + 1];
           const nx = B[j * 4 + 2];
           const ny = B[j * 4 + 3];
+          P[k] = cx + side.x * a * r + up.x * b * rh;
+          P[k + 1] = cy + side.y * a * r + up.y * b * rh;
+          P[k + 2] = cz + side.z * a * r + up.z * b * rh;
+          N[k] = side.x * nx + up.x * ny;
+          N[k + 1] = side.y * nx + up.y * ny;
+          N[k + 2] = side.z * nx + up.z * ny;
+        }
+      } else if (sec) {
+        // a modelled skin's own cross-section
+        for (let j = 0; j <= R; j++) {
+          const k = (i * (R + 1) + j) * 3;
+          const f = bump ? bump(d, (j / R) * Math.PI * 2) : 1;
+          const a = sec[j * 4] * f;
+          const b = sec[j * 4 + 1] * f;
+          const nx = sec[j * 4 + 2];
+          const ny = sec[j * 4 + 3];
           P[k] = cx + side.x * a * r + up.x * b * rh;
           P[k + 1] = cy + side.y * a * r + up.y * b * rh;
           P[k + 2] = cz + side.z * a * r + up.z * b * rh;
@@ -982,6 +1117,7 @@ export class SnakeView {
     this.normAttr.clearUpdateRanges();
     this.normAttr.addUpdateRange(0, (rings + 1) * (R + 1) * 3);
     this.geo.setDrawRange(0, rings * R * 6);
+    if (this.partsMesh) this.updateParts(game, sHead, total, tailTaper);
 
     // head sits slightly ahead of the first ring
     const hd = this.headDir;
@@ -1014,6 +1150,7 @@ export class SnakeView {
     this.head.scale.set(1 + squash * 0.22, 1 - squash * 0.12, 1 - squash * 0.32);
     this.updateDizzy(dizzy);
     if (this.jetpack) this.updateJetpack(game, time, dt, rushGlow);
+    if (this.modelHead && this.model.update) this.model.update(this.modelHead, time);
 
     // tongue flicks every couple of seconds
     const ph = (time % 2.3) / 0.32;
@@ -1050,6 +1187,7 @@ export class SnakeView {
 
   dispose() {
     if (this.accessory) disposeAccessory(this.accessory);
+    this.applyModel(null);
     if (this.ghostMat) this.ghostMat.dispose();
     this.geo.dispose();
     this.bodyMat.dispose();

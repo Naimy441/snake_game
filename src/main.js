@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 
 import { GhostBot } from './game/GhostBot.js';
-import { SnakeGame, BOARD_SIZES, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, LEVEL_AT, SKY_H, SPACE_ZONE, BONUS_PARTY_AT, BONUS_UNLOCK_LENGTH, zoneForLevel } from './game/SnakeGame.js';
+import { SnakeGame, BOARD_SIZES, DIRS, COMBO_WINDOW_MS, ZONE_NAMES, ZONE_STARTS, MAX_LEVEL, LEVEL_SPEEDS, LEVEL_AT, SKY_H, SPACE_ZONE, SPACE_START, BONUS_PARTY_AT, BONUS_UNLOCK_LENGTH, zoneForLevel } from './game/SnakeGame.js';
+import { Tutorial } from './Tutorial.js';
 import { GalaxyDirector } from './GalaxyDirector.js';
 import { fallPath, CORE_Y, HORIZON_R } from './render/Space.js';
 import { SKINS, ACCESSORIES, skinById, accessoryById, isUnlocked, unlockProgress } from './skins.js';
@@ -12,6 +13,8 @@ import { BoardObjects } from './render/BoardObjects.js';
 import { Effects } from './render/Effects.js';
 import { CameraRig } from './render/CameraRig.js';
 import { PostFX } from './render/Post.js';
+import { CameraDebug } from './render/CameraDebug.js';
+import { CameraTuner } from './CameraTuner.js';
 import { CORNER } from './render/SnakePath.js';
 import { HEAD_LEAD } from './render/SnakeView.js';
 import { makeGlowTexture, makeScaleNormalMap, makeRingTexture, makeChevronTexture } from './render/textures.js';
@@ -53,8 +56,9 @@ const smooth01 = (v) => {
 // Together with the drawn head's lead this ends just past the turning cell's
 // centre, so a redo never visibly snaps the head by more than ~1/4 cell.
 const GRACE = 0.25;
-// Real-time pace while rushing, relative to not rushing (see frame()).
-const RUSH_FEEL = 0.95;
+// Real-time pace of the snake in slow-mo, relative to normal (see frame()):
+// the snake is 10% slower, and the rest of the world slows a lot more.
+const RUSH_FEEL = 0.9;
 
 class App {
   constructor() {
@@ -94,15 +98,18 @@ class App {
     if (this.isTouch) document.body.classList.add('touch-device');
 
     this.post = new PostFX(r);
+    this.camDebug = new CameraDebug(r);
     this.game = new SnakeGame({ sizes: BOARD_SIZES, best: loadBest() });
     this.world = new World({ size: BOARD_SIZES[0], renderer: r });
     this.scene = this.world.scene;
     // y: the cell's altitude layer in the sky (undefined on the ground); in
     // the Galactic Core the grid is bent into a ring around the black hole
-    this.toWorld = (x, z, y) => this.world.toWorld(x, z, y, this.game.yMid, this.game.size);
+    this.toWorld = (x, z, y) => this.world.toWorld(x, z, y, this.game.yMid, this.game.size, this.game.depth);
 
     this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 1500);
     this.rig = new CameraRig(this.camera, BOARD_SIZES[0]);
+    this.debugStopped = false; // the camera debug view can hold the snake still (F, or Stop in its panel)
+    this.camTuner = new CameraTuner(this);
 
     this.glowTex = makeGlowTexture();
     this.scaleMap = makeScaleNormalMap();
@@ -128,7 +135,9 @@ class App {
     this.deathFlash = 0;
     this.crash = null;
     this.speedFx = 0;
+    this.camFx = 0; // speedFx without slow-mo: the camera has its own slow-mo spring
     this.rushGlow = 0;
+    this.slowFx = 0; // 0..1, eased: how far into slow-mo the picture is
     this.flashAmt = 0;
     this.flashColor = new THREE.Color('#ffffff');
     this.cameraMode = this.camOverride || (CAMERA_ORDER.includes(this.settings.camera) ? this.settings.camera : 'tp');
@@ -150,13 +159,24 @@ class App {
       camera: () => this.cycleCamera(),
       ghost: () => this.toggleGhost(),
       timer: () => this.toggleTimer(),
+      debugStop: () => {
+        if (this.camDebug.on) this.camTuner.toggleStop();
+      },
+      camDebug: () => {
+        const on = this.camDebug.toggle(this.scene);
+        this.camTuner.show(on);
+        if (!on) this.debugStopped = false;
+        this.toast({ kicker: 'Debug', title: on ? 'Camera view on' : 'Camera view off', sub: on ? 'Where the camera sits, and what it sees' : '', tone: 'sky', ms: 1600 });
+      },
       pause: (k) => this.onPause(k),
       restart: () => this.onRestart(),
       mute: () => this.toggleMute(),
       song: () => this.cycleSong(),
+      tutorial: () => this.tutorial.toggle(),
     });
     this.input.bindTouchButtons($('t-left'), $('t-right'), $('t-rush'), $('t-up'), $('t-down'));
 
+    this.tutorial = new Tutorial(this);
     this.bindUI();
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -472,7 +492,7 @@ class App {
     if (ev.ate) {
       const w = at(ev.ate);
       const prism = ev.ate.type === 'prism';
-      this.food.markEaten(ev.ate.type, new THREE.Vector3(w.x, w.y, w.z), delay);
+      this.food.markEaten(ev.ate.type, new THREE.Vector3(w.x, w.y, w.z), delay, ev.ate.id);
       this.later(delay, () => {
         this.effects.emit(w.x, w.y + 0.45, w.z, { count: prism ? 60 : 28, color: prism ? '#e0aaff' : '#ff4d6d', speed: prism ? 4 : 3, up: 2.4, size: prism ? 0.3 : 0.22 });
         this.effects.shockwave(w.x, w.z, prism ? '#c77dff' : '#ff5a7a', { y: w.y, max: prism ? 4 : 2.4 });
@@ -805,7 +825,6 @@ class App {
     } else if (this.relativeSteer) {
       // In chase / first person, left/right steer relative to the snake.
       if (dir === 'left' || dir === 'right') this.steer(this.game.turnDir(dir === 'left' ? -1 : 1));
-      else if (src !== 'swipe') this.flashHint();
     } else {
       this.steer(DIRS[dir]);
     }
@@ -935,20 +954,12 @@ class App {
     }
     this.settings.camera = mode;
     saveSettings(this.settings);
+    this.tutorial.on('camera');
     if (['playing', 'paused', 'countdown'].includes(this.state)) {
       this.rig.setMode(mode, { reduceMotion: this.settings.reduceMotion });
-      if (this.relativeSteer) this.flashHint();
     }
     this.updateCameraUI();
     this.audio.ui();
-  }
-
-  flashHint() {
-    const el = $('fp-hint');
-    el.textContent = this.game.flying ? '↑ climb  ·  ↓ dive  ·  ← → turn' : '← → turn';
-    el.classList.add('hidden');
-    void el.offsetWidth;
-    if (this.state === 'playing' || this.state === 'countdown') el.classList.remove('hidden');
   }
 
   // ---------------------------------------------------------------- flow
@@ -1018,9 +1029,9 @@ class App {
     this.showCountdown('READY');
     this.audio.countdown(false);
     this.saidGo = false;
-    if (this.relativeSteer) this.flashHint();
     if (this.game.flying) this.toast(FLY_TOAST);
     if (this.game.space) this.toast(CORE_TOAST);
+    this.tutorial.onRunStart(startLevel);
   }
 
   pause() {
@@ -1072,7 +1083,8 @@ class App {
     // the play aids live outside #hud and updateHud doesn't run on the title
     // screen, so leaving from the pause menu would strand them on it
     this.setClass($('app'), 'view-aids', false);
-    for (const id of ['compass', 'minimap', 'alt', 'touch', 'fp-hint']) this.setClass($(id), 'hidden', true);
+    for (const id of ['compass', 'alt', 'touch']) this.setClass($(id), 'hidden', true);
+    this.tutorial.hide();
     this.rig.setMode('tour', { reduceMotion: this.settings.reduceMotion });
     this.showScreen('screen-start');
     this.updateCameraUI();
@@ -1224,7 +1236,6 @@ class App {
     this.showCountdown('READY');
     this.audio.countdown(false);
     this.saidGo = false;
-    if (this.relativeSteer) this.flashHint();
     this.toast(BONUS_TOAST);
   }
 
@@ -1312,9 +1323,9 @@ class App {
         g.wantRush = !!plan.rush;
       }
     }
-    this.handleStep(g.step(), wasRushing);
+    const ev = g.step();
+    this.handleStep(ev, wasRushing);
   }
-
 
   handleStep(ev, wasRushing) {
     const g = this.game;
@@ -1393,7 +1404,7 @@ class App {
         this.effects.emit(w.x, w.y + 0.6, w.z, { count: 80, color: '#7ff8ff', speed: 5, up: 3, size: 0.3 });
         this.effects.shockwave(w.x, w.z, '#38f6ff', { y: w.y, max: 6, dur: 0.7 });
         this.audio.chainComplete();
-        this.banner('Chain complete', 'Rush full');
+        this.banner('Chain complete', 'Slow-mo full');
         if (!rm) {
           this.flash(0.22, '#9ff8ff');
           this.rig.kick += 6;
@@ -1406,7 +1417,7 @@ class App {
     }
     if (ev.chainExpired) this.toast({ title: 'Chain faded', tone: 'chain' });
     if (ev.preySpawned) {
-      this.toast({ kicker: 'Corner it · +100', title: 'Golden mouse!', tone: 'gold' });
+      this.toast({ kicker: 'Corner it · +250 · full slow-mo', title: 'Golden mouse!', tone: 'gold' });
       this.audio.preySpotted();
       const w = at(ev.preySpawned);
       this.effects.emit(w.x, w.y + 0.2, w.z, { count: 24, color: '#d8c49a', speed: 1.6, up: 1.5, size: 0.2, life: 0.7 });
@@ -1435,9 +1446,9 @@ class App {
       this.later(delay * 0.8, () => {
         const w = at(ev.boost);
         this.audio.boost();
-        this.popup(new THREE.Vector3(w.x, w.y, w.z), 'Boost!', 'boost');
-        this.effects.emit(w.x, w.y + 0.2, w.z, { count: 40, color: '#ffb020', speed: 3.5, up: 1.2, size: 0.24, life: 0.5 });
-        if (!rm) this.rig.kick += 8;
+        this.popup(new THREE.Vector3(w.x, w.y, w.z), 'Slow-mo!', 'boost');
+        this.effects.emit(w.x, w.y + 0.2, w.z, { count: 40, color: '#8fe0ff', speed: 2.2, up: 1.2, size: 0.24, life: 0.9 });
+        this.tutorial.on('slowmo');
       });
     }
     if (ev.obstaclesWarned) {
@@ -1457,16 +1468,12 @@ class App {
     if (ev.padsSpawned) {
       for (const p of ev.padsSpawned) {
         const w = at(p);
-        this.effects.emit(w.x, w.y + 0.1, w.z, { count: 14, color: '#ffd23f', speed: 1.2, up: 1.4, size: 0.18, life: 0.5 });
+        this.effects.emit(w.x, w.y + 0.1, w.z, { count: 14, color: '#8fe0ff', speed: 1.2, up: 1.4, size: 0.18, life: 0.5 });
       }
     }
     if (ev.died) {
       this.onDeath(ev);
       return;
-    }
-    if (g.rushing && !wasRushing) {
-      this.audio.rushStart();
-      this.rig.kick += 6;
     }
     this.syncFood();
   }
@@ -1494,7 +1501,8 @@ class App {
     const w = this.toWorld(ate.x, ate.z, ate.y);
     const pos = new THREE.Vector3(w.x, w.y, w.z);
     const delay = this.visualDelay();
-    this.food.markEaten(ate.type, pos, delay);
+    this.food.markEaten(ate.type, pos, delay, ate.id);
+    this.tutorial.on('ate');
     const prism = ate.type === 'prism';
     this.later(delay, () => {
       const rm = this.settings.reduceMotion;
@@ -1535,6 +1543,7 @@ class App {
       saveStats(this.stats);
     }
     if (lu.warp) return; // the hyperspeed cinematic takes it from here
+    this.tutorial.on('level');
     const lv = $('hud-lvl');
     lv.classList.remove('bump');
     void lv.offsetWidth;
@@ -1555,7 +1564,6 @@ class App {
       if (!this.settings.reduceMotion) this.rig.startCinematic(3.8);
       this.later(1.6, () => {
         this.toast(FLY_TOAST);
-        this.flashHint();
       });
       const s = this.snake;
       for (const p of s.nozzleWorld) this.effects.emit(p.x, p.y, p.z, { count: 40, color: '#ffb347', speed: 3, up: 1, size: 0.26, life: 0.7, gravity: 1 });
@@ -1608,6 +1616,7 @@ class App {
       this.epilogue.onDeath();
     }
     this.state = 'dying';
+    this.tutorial.hide();
     this.stopTimer(false);
     this.t = 1; // the failed move never happened: hold the last pose
     this.dyingTime = 0;
@@ -1632,6 +1641,17 @@ class App {
     // (off the edge of the Galactic Core there's nothing to bump into: it falls)
     this.crash = ev.hit && !won && ev.cause !== 'void' ? { hit: ev.hit, cause: ev.cause } : null;
     if (this.crash) {
+      // Draw the crash as the failed move itself: the head turns into the
+      // cell it hit (so a crash right after a turn shows the turn), and the
+      // chase / first-person camera turns with it to look at what was hit.
+      const cg = Object.create(g);
+      cg.cells = [{ ...ev.hit }, ...g.cells.slice(0, -1)];
+      cg.removedTail = g.cells[g.cells.length - 1];
+      this.crash.game = cg;
+      this.crash.dir = { x: g.dir.x, z: g.dir.z, y: g.dir.y || 0 };
+      // (prevDir is only updated on a turn: the fatal move turned if it is the
+      // newest direction and the step before went the old way)
+      this.crash.turned = !!ev.turned;
       const w = this.toWorld(ev.hit.x, ev.hit.z, ev.hit.y);
       const hy = (w.y || 0) + 0.3;
       this.later(CRASH_HIT, () => {
@@ -1676,8 +1696,8 @@ class App {
     // watching the snake go in.
     // Off the edge, it first rides the snake down until the head goes in.
     if (ev.cause === 'void') this.later(0.1, () => this.startDeathFollow());
-    else if (g.space) this.later(0.55, () => this.startDeathOrbit());
-    else this.later(0.55, () => this.startDeathCircle());
+    else if (g.space) this.later(this.crash ? 0.85 : 0.55, () => this.startDeathOrbit());
+    else this.later(this.crash ? 0.85 : 0.55, () => this.startDeathCircle());
     // the card (and Play again) comes up straight away; the camera carries
     // on behind it
     this.later(0.45, () => this.showGameOver(ev.cause));
@@ -1687,7 +1707,8 @@ class App {
   // the obstacle, then a bounce back that settles a little short of it.
   crashLunge(t) {
     // block skins already fill their cell, so they only nudge in before bouncing
-    const into = this.snake.block ? 0.12 : this.crash.cause === 'wall' || this.crash.cause === 'laser' ? 0.16 : 0.32;
+    // a crash on a turn shoves further in, so the head is seen to turn
+    const into = this.snake.block ? 0.12 : (this.crash.cause === 'wall' || this.crash.cause === 'laser' ? 0.16 : 0.32) + (this.crash.turned ? 0.22 : 0);
     if (t < CRASH_HIT) return into * Math.pow(t / CRASH_HIT, 2);
     const k = t - CRASH_HIT;
     return 0.04 + (into - 0.04) * Math.exp(-k * 9) * Math.cos(k * 14);
@@ -1748,6 +1769,25 @@ class App {
     $('over-combo').textContent = `x${g.maxCombo}`;
     $('over-time').textContent = this.formatTime(g.time);
     $('over-zone').textContent = g.meteorLevel ? 'Ending' : g.bonusLevel ? 'Bonus' : g.space ? `${g.zone + 1} · ${Math.floor(g.fill * 100)}%` : String(g.zone + 1);
+    // (the HUD's "apples to go" is hidden behind this card, so say it here)
+    const prog = g.levelProgress();
+    const toGo = prog.need - prog.into;
+    $('over-next').textContent = g.meteorLevel || g.bonusLevel ? '–' : prog.core ? `${Math.max(0, g.coreFree())} cells` : prog.max ? 'Top' : `${toGo} apple${toGo === 1 ? '' : 's'}`;
+    $('over-next-l').textContent = prog.core ? 'Left to fill' : 'To next level';
+    // how much of the whole game this run got through
+    const pct = this.gamePercent(g);
+    $('over-pct').classList.toggle('hidden', pct == null);
+    if (pct != null) {
+      const before = this.stats.bestPct || 0;
+      if (pct > before) {
+        this.stats.bestPct = pct;
+        saveStats(this.stats);
+      }
+      $('over-pct-n').textContent = `${pct}%`;
+      $('over-pct-fill').style.transform = `scaleX(${(pct / 100).toFixed(3)})`;
+      $('over-pct-best').textContent = pct > before && before > 0 ? 'New best!' : `Best ${Math.max(pct, before)}%`;
+      this.updateWinBadge();
+    }
     const special = g.bonusLevel || g.meteorLevel;
     $('over-chains').textContent = special ? '–' : String(g.stats.chains);
     $('over-prey').textContent = special ? '–' : String(g.stats.prey);
@@ -1760,6 +1800,14 @@ class App {
     this.renderBonusButton();
     this.showScreen('screen-over');
     $('btn-again').focus({ preventScroll: true });
+  }
+
+  // How far into the whole game a run got, 0..100: the apples to the
+  // Galactic Core are the first 90%, filling its board the last 10%.
+  gamePercent(g) {
+    if (g.bonusLevel || g.meteorLevel) return null;
+    if (g.space) return g.won ? 100 : Math.min(99, 90 + Math.floor(g.fill * 10));
+    return Math.min(89, Math.floor((g.foodEaten / LEVEL_AT[SPACE_START]) * 90));
   }
 
   formatTime(ms) {
@@ -1821,6 +1869,19 @@ class App {
     bindCheck('set-motion', 'reduceMotion', () => this.applyMotion());
     bindCheck('set-guide', 'guide');
     bindCheck('set-minimap', 'minimap');
+    // first-person field of view
+    const fov = $('set-fov');
+    const fovVal = $('set-fov-val');
+    fov.value = s.fpFov;
+    fovVal.textContent = `${s.fpFov}°`;
+    this.rig.fpFov = s.fpFov;
+    fov.addEventListener('input', () => {
+      s.fpFov = Number(fov.value);
+      fovVal.textContent = `${s.fpFov}°`;
+      this.rig.fpFov = s.fpFov;
+      saveSettings(s);
+    });
+    $('btn-tutorial-h').addEventListener('click', () => this.tutorial.replay());
     bindCheck('set-fps', 'showFps', () => $('fps').classList.toggle('hidden', !s.showFps));
     bindCheck('set-timer', 'timer');
     $('set-ghost').checked = !!s.ghost;
@@ -1937,12 +1998,17 @@ class App {
     }, 360);
   }
 
+  // A gold "100%" next to Best once the galaxy has been finished; before
+  // that, how much of the game the best run got through.
   updateWinBadge() {
     const el = $('win-badge');
     if (!el) return;
     const n = this.stats.wins || 0;
-    el.classList.toggle('hidden', n < 1);
-    el.title = n > 1 ? `Galaxy finished ${n} times` : 'You finished the galaxy';
+    const pct = this.stats.bestPct || 0;
+    el.classList.toggle('hidden', n < 1 && pct < 1);
+    el.classList.toggle('partial', n < 1);
+    el.textContent = n > 0 ? '★ 100%' : `${pct}% beaten`;
+    el.title = n > 1 ? `Galaxy finished ${n} times` : n === 1 ? 'You finished the galaxy' : `Your best run got ${pct}% of the way through the game`;
   }
 
   // Callouts: a short headline, with an optional kicker above it and a line
@@ -2111,7 +2177,7 @@ class App {
     else this.setText('hud-zone-next', g.space ? `${Math.max(0, g.coreFree())} cells left to fill` : nz < 0 ? 'Final zone' : `Next: ${ZONE_NAMES[nz]} at Lv ${ZONE_STARTS[nz] + 1}`);
     this.setStyle('hud-rush', 'transform', `scaleX(${(g.rush / 100).toFixed(3)})`);
     const rushEl = $('hud-rush-wrap');
-    this.setClass(rushEl, 'active', g.rushing);
+    this.setClass(rushEl, 'active', g.slowmo);
     this.setClass(rushEl, 'full', g.rush >= 99.9);
     this.setClass($('hud-boost'), 'hidden', !g.boosting);
     const comboLeft = 1 - (g.clock - g.lastEatTime) / COMBO_WINDOW_MS;
@@ -2139,11 +2205,7 @@ class App {
     this.setClass($('app'), 'view-aids', view && this.settings.minimap);
     const aids = view && this.settings.minimap;
     this.setClass($('compass'), 'hidden', !aids);
-    this.setClass($('minimap'), 'hidden', !aids);
-    if (aids) {
-      this.updateCompass();
-      this.drawMinimap();
-    }
+    if (aids) this.updateCompass();
     const showTouch = this.isTouch && (this.state === 'playing' || this.state === 'countdown');
     this.setClass($('touch'), 'hidden', !showTouch);
     this.setClass($('touch'), 'overhead', !this.relativeSteer);
@@ -2176,8 +2238,6 @@ class App {
       this.setClass($('alt'), 'near-top', g.head.y >= SKY_H - 2);
       this.setClass($('alt'), 'near-bottom', g.head.y <= 1);
     }
-    if (this.state !== 'playing' && this.state !== 'countdown') this.setClass($('fp-hint'), 'hidden', true);
-    else this.lastHud['fp-hint:hidden'] = undefined;
   }
 
   viewForward() {
@@ -2265,102 +2325,6 @@ class App {
     point(g.meteorLevel ? this.epilogue.nearestMeteor() : g.food, 'orb', true);
     point(g.bonus, 'prism', false);
     point(g.prey, 'prey', false);
-  }
-
-  // Pixel-art map, a few canvas pixels per cell and scaled up crisp by CSS.
-  // It turns in quarter steps so the way the camera faces is up and the
-  // pixels never smear.
-  drawMinimap() {
-    const cv = $('minimap');
-    const g = this.game;
-    const N = g.size;
-    const P = 5; // canvas pixels per cell
-    const B = 2; // border pixels
-    const S = N * P + B * 2;
-    if (cv.width !== S) cv.width = cv.height = S;
-    const c = this.mmCtx || (this.mmCtx = cv.getContext('2d'));
-    c.imageSmoothingEnabled = false;
-    const t = this.simTime;
-    const blink = Math.floor(t * 4) % 2 === 0;
-    const f = this.viewForward();
-    const q = (((Math.round(Math.atan2(f.x, -f.z) / (Math.PI / 2))) % 4) + 4) % 4;
-    const M = N - 1;
-    // grid cell -> map cell, a quarter turn at a time
-    const T = (x, z) => {
-      for (let i = 0; i < q; i++) [x, z] = [z, M - x];
-      return [x, z];
-    };
-    const px = (x, z, color, inset = 0) => {
-      const [u, v] = T(x, z);
-      c.fillStyle = color;
-      c.fillRect(B + u * P + inset, B + v * P + inset, P - inset * 2, P - inset * 2);
-    };
-    // frame and floor
-    c.fillStyle = '#070d26';
-    c.fillRect(0, 0, S, S);
-    c.fillStyle = '#5a78d8';
-    c.fillRect(0, 0, S, B);
-    c.fillRect(0, S - B, S, B);
-    c.fillRect(0, 0, B, S);
-    c.fillRect(S - B, 0, B, S);
-    for (let x = 0; x < N; x++) {
-      for (let z = 0; z < N; z++) {
-        if (g.space && g.land) {
-          if (!g.land[x * N + z]) continue;
-          if (g.doomAt(x, z)) {
-            px(x, z, blink ? '#ff9a3c' : '#7a3a20');
-            continue;
-          }
-        }
-        px(x, z, (x + z) & 1 ? '#172a63' : '#1f3678');
-      }
-    }
-    for (const ob of g.obstacles) {
-      if (ob.solid) px(ob.x, ob.z, '#e8dcc0');
-      else if (blink) px(ob.x, ob.z, '#ff3b5c', 1);
-    }
-    for (const p of g.pads) px(p.x, p.z, '#ff9a3c', 1);
-    if (g.chain) {
-      for (let i = g.chain.next; i < g.chain.links.length; i++) {
-        const l = g.chain.links[i];
-        if (i === g.chain.next) px(l.x, l.z, blink ? '#ffffff' : '#38f6ff');
-        else px(l.x, l.z, '#38f6ff', 1);
-      }
-    }
-    if (this.settings.ghost) for (const gc of this.ghost.cells) px(gc.x, gc.z, 'rgba(168, 240, 255, 0.45)', 1);
-    // snake: body in its colour with a darker belly stripe, white head
-    const body = this.snake.trailColor || '#38f6ff';
-    for (let i = g.cells.length - 1; i >= 1; i--) {
-      px(g.cells[i].x, g.cells[i].z, body);
-      if (i % 2) px(g.cells[i].x, g.cells[i].z, 'rgba(0, 0, 0, 0.22)', 2);
-    }
-    px(g.head.x, g.head.z, '#ffffff');
-    // little pixel sprites, always drawn upright
-    const sprite = (x, z, rows, colors) => {
-      const [u, v] = T(x, z);
-      const o = (rows.length - P) >> 1; // bigger sprites spill over their cell evenly
-      for (let r = 0; r < rows.length; r++) {
-        for (let k = 0; k < rows[r].length; k++) {
-          const ch = rows[r][k];
-          if (ch === '.') continue;
-          c.fillStyle = colors[ch];
-          c.fillRect(B + u * P + k - o, B + v * P + r - o, 1, 1);
-        }
-      }
-    };
-    if (g.prey) sprite(g.prey.x, g.prey.z, ['.y.y.', 'yyyyy', 'ykyky', 'yyyyy', '.yyy.'], { y: '#ffd36a', k: '#3a2400' });
-    if (g.bonus) sprite(g.bonus.x, g.bonus.z, ['..v..', '.vwv.', 'vvvvv', '.vvv.', '..v..'], { v: '#c77dff', w: '#ffffff' });
-    for (const m of g.meteors) {
-      // burning meteors, and blinking rings where the next ones will land
-      if (m.landed) sprite(m.x, m.z, ['.yoy.', 'yoroy', 'orrro', 'yoroy', '.yoy.'], { y: '#ffd23f', o: '#ff7a1a', r: '#ff2a1a' });
-      else if (blink) px(m.x, m.z, '#ff3b1a', 1);
-    }
-    if (g.home) sprite(g.home.x, g.home.z, ['..r..', '.rrr.', 'rrrrr', '.www.', '.wbw.'], { r: '#e8452c', w: '#f6ead0', b: '#7a4424' });
-    if (g.food) {
-      // a pixel apple; it flashes white now and then so it's easy to spot
-      const flash = (t * 1.5) % 1 < 0.12;
-      sprite(g.food.x, g.food.z, ['...gg..', '..g....', '.rr.rr.', 'rwrrrrr', 'rwrrrrr', 'rrrrrrr', '.rrrrr.'], { g: '#5be36a', r: flash ? '#ffffff' : '#ff3355', w: '#ffd0d8' });
-    }
   }
 
   // Galactic Core deaths: the camera lets go of the board, drifts up and
@@ -2719,20 +2683,34 @@ class App {
     const dt = Math.min(0.1, rawDt);
     const slowing = this.state === 'playing' && now / 1000 < (this.slowUntil || 0);
     if (!slowing) this.slowScale = 1;
-    // Rush bullet time: the snake really is faster in game time, but the world
-    // slows so that in real time it moves at RUSH_FEEL of its unrushed pace.
-    const rushScale = this.state === 'playing' && this.game.rushing
-      ? (RUSH_FEEL * this.game.currentInterval()) / this.game.currentInterval(false) : 1;
-    const tsTarget = Math.min(slowing ? this.slowScale : 1, rushScale);
+    this.levelSlow = slowing || (this.levelSlow && this.timeScale < 0.97 && !this.game.slowmo);
+    // Slow-mo (bullet time): the snake moves quicker in game time, and the
+    // world slows by more than that, so in real time the snake moves at
+    // RUSH_FEEL of its usual pace and everything else much slower.
+    const slowOn = this.state === 'playing' && this.game.slowmo;
+    const rushScale = slowOn ? (RUSH_FEEL * this.game.currentInterval()) / this.game.currentInterval(false) : 1;
+    if (slowOn !== !!this.wasSlow) {
+      this.wasSlow = slowOn;
+      if (slowOn) {
+        this.audio.rushStart();
+        if (this.game.rushing) this.tutorial.on('slowmo');
+      } else this.audio.rushEnd();
+    }
+    this.slowFx += ((slowOn ? 1 : 0) - this.slowFx) * Math.min(1, Math.max(0, now - this.last) / 1000 * (slowOn ? 7 : 4));
+    // the camera debug view can stop the snake (F) to look at the camera
+    const debugSlow = this.camDebug.on && this.state === 'playing' && this.debugStopped ? 0 : 1;
+    const tsTarget = Math.min(slowing ? this.slowScale : 1, rushScale, debugSlow);
     // level-up slow motion eases back gently; Rush snaps in and out so the
     // pace you react to barely changes
     if (slowing) this.easeBack = 3;
     else if (rushScale < 1) this.easeBack = 10;
-    const ease = slowing ? 7 : rushScale < 1 ? 10 : this.easeBack || 3;
+    const ease = slowing || debugSlow < 1 ? 7 : rushScale < 1 ? 10 : this.easeBack || 3;
     this.timeScale = (this.timeScale ?? 1) + (tsTarget - (this.timeScale ?? 1)) * Math.min(1, dt * ease);
+    if (tsTarget === 0 && this.timeScale < 0.002) this.timeScale = 0; // stopped: come to a full stop
     // gameplay time: snake, game clock, ghost, pickups and particles
     const gdt = dt * this.timeScale;
-    this.audio.setSlow(slowing && this.timeScale < 0.8); // level-up slow-mo only, not Rush bullet time
+    // the music muffles in slow-mo, like it does under a level-up card
+    this.audio.setSlow((slowing && this.timeScale < 0.8) || slowOn);
     this.last = now;
     this.renderer.info.reset();
     this.input.pollGamepad();
@@ -2766,7 +2744,7 @@ class App {
     }
 
     if (this.state === 'playing') {
-      g.clockScale = this.timeScale;
+      g.clockScale = Math.max(0.01, this.timeScale); // (0 when the debug view stops the snake)
       this.t += (gdt * 1000) / g.currentInterval();
       let guard = 0;
       while (this.t >= 1 && this.state === 'playing' && guard++ < 4) {
@@ -2777,6 +2755,7 @@ class App {
     }
 
     if (this.state === 'menu') this.updateDemo(gdt);
+    this.tutorial.update(dt);
 
     if (this.state === 'dying' || this.state === 'over') {
       this.dyingTime = (this.dyingTime || 0) + dt;
@@ -2784,10 +2763,14 @@ class App {
     }
     this.deathFlash = Math.max(0, this.deathFlash - dt * 1.2);
 
-    const fast = g.rushing || g.boosting;
+    const fast = g.slowmo;
     this.galaxy.update(dt);
     const targetFx = this.speedFxOverride ?? (this.state === 'playing' ? g.intensity() : 0);
     this.speedFx += (targetFx - this.speedFx) * Math.min(1, dt * 3);
+    const camTarget = this.speedFxOverride ?? (this.state === 'playing' ? g.intensity(false) : 0);
+    this.camFx += (camTarget - this.camFx) * Math.min(1, dt * 3);
+    // how long slow-mo has been held (its streak blur fades once it's in)
+    this.slowHeld = fast && this.state === 'playing' ? (this.slowHeld || 0) + dt : 0;
     const glowOn = (fast && this.state === 'playing') || this.galaxy.glow > 0;
     this.rushGlow += ((glowOn ? 1 : 0) - this.rushGlow) * Math.min(1, dt * 8);
 
@@ -2801,12 +2784,13 @@ class App {
     // through hyperspeed the snake is still the one from the sky, full length,
     // jetpack and all; it only becomes the short one on the board at the drop
     const pre = this.galaxy.kind === 'warp' && !this.galaxy.dropped ? this.galaxy.pre : null;
-    const snakeGame = pre || g;
+    const crashPose = !pre && this.crash && this.crash.game && (this.state === 'dying' || this.state === 'over') ? this.crash.game : null;
+    const snakeGame = pre || crashPose || g;
     const snakeWorld = pre ? (x, z, y) => this.world.toWorld(x, z, y, pre.yMid, pre.size) : this.toWorld;
     const fall = this.voidFallPose();
     // (the ending's cutscene steers and draws the snake itself)
     this.epilogue.update(dt, gdt);
-    if (!this.epilogue.drawsSnake) this.snake.update(fall ? fall.game : snakeGame, pre || fall ? 1 : clamp01(this.t), this.simTime, fall ? fall.toWorld : snakeWorld, {
+    if (!this.epilogue.drawsSnake) this.snake.update(fall ? fall.game : snakeGame, pre || fall ? 1 : crashPose ? 0 : clamp01(this.t), this.simTime, fall ? fall.toWorld : snakeWorld, {
       lunge: fall ? 0 : this.lunge,
       // (aura farming in the ending keeps the glow shell lit, in gold)
       rushGlow: this.epilogue.active ? Math.max(this.rushGlow, this.epilogue.auraGlow || 0) : this.rushGlow,
@@ -2827,7 +2811,7 @@ class App {
       const hp = this.snake.headPos;
       const hd = this.snake.headDir;
       this.effects.emit(hp.x - hd.x * 0.5, hp.y - hd.y * 0.5 + 0.3, hp.z - hd.z * 0.5, {
-        count: 2, color: g.boosting ? '#ffb020' : this.snake.trailColor || '#5ff6ff', speed: 0.6, up: 0.6, size: 0.18, life: 0.45, gravity: 0, spread: 0.5,
+        count: 1, color: g.boosting ? '#8fe0ff' : this.snake.trailColor || '#5ff6ff', speed: 0.15, up: 0.25, size: 0.2, life: 1.1, gravity: 0, spread: 0.4,
       });
     }
 
@@ -2870,10 +2854,12 @@ class App {
     // flight: yaw follows the horizontal facing, pitch the next climb or dive
     const next = g.queue[0] || g.dir;
     const aim = g.flying ? (next.y ? g.facing : next) : next;
+    // a crash: look the way the fatal move went
+    const crashAim = this.crash && (this.state === 'dying' || this.state === 'over') && !g.flying ? this.crash.dir : null;
     // tall block skins lift the chase and first-person cameras over the body
     this.rig.bodyLift = this.snake.block ? Math.max(0, this.snake.blockH - 1) : 0;
     this.rig.update(dt, this.snake, {
-      speedFx: this.speedFx, reduceMotion: rm, aim: steering || g.flying ? aim : null,
+      speedFx: this.camFx, slow: this.state === 'playing' && g.slowmo, reduceMotion: rm, aim: crashAim || (steering || g.flying ? aim : null),
       flying: g.flying && this.state !== 'menu', pitch: steering ? next.y || 0 : 0, box: sky, sky: this.world.skyAmount, space: this.world.spaceAmount,
     });
     // The first-person camera sits inside the head; hide it once we're there.
@@ -2889,7 +2875,7 @@ class App {
     // music follows the action; on the title screen it plays the song of the map the tour is showing
     const inGame = this.state === 'playing' || this.state === 'countdown' || this.state === 'paused';
     const intensity = clamp01(0.12 + (g.level / MAX_LEVEL) * 0.6 + ((g.combo - 1) / 7) * 0.2 + (fast ? 0.15 : 0));
-    this.audio.setMusicState({ menu: !inGame && this.state !== 'dying' && this.state !== 'over', intensity, rush: fast && this.state === 'playing', zone: this.state === 'menu' ? this.tourZone() : g.zone, level: g.level });
+    this.audio.setMusicState({ menu: !inGame && this.state !== 'dying' && this.state !== 'over', intensity, rush: false, zone: this.state === 'menu' ? this.tourZone() : g.zone, level: g.level });
 
     this.renderFrame(dt, view, rm);
     if (this.state !== 'menu') this.updateHud();
@@ -2910,15 +2896,21 @@ class App {
       else if (look.blocked && look.free === 1) danger = 0.16;
       else if (look.blocked && look.free === 2 && g.flying) danger = 0.07;
     }
-    const speed = rm ? 0 : Math.max(0, this.speedFx - 0.25) * (view ? 1.3 : 0.45) + this.rushGlow * (view ? 0.5 : 0.15);
+    // slow-mo shows the speed lines and streak blur Rush always had
+    // the streak blur hits going in, then mostly fades: held slow-mo should
+    // look calm, not fast (the speed lines stay)
+    const hold = this.rig.tune.slow.blur;
+    const settle = hold + (1 - hold) * Math.exp(-(this.slowHeld || 0) * 2.5);
+    const speed = rm ? 0 : Math.max(0, this.camFx - 0.25) * (view ? 1.3 : 0.45) + this.rushGlow * settle * (view ? 0.5 : 0.15);
     const trans = this.world.transitioning ? 0.5 : 0;
-    const slow = 1 - (this.timeScale ?? 1);
+    // (slow-mo itself doesn't dim or grade the picture: only level-up slow motion does)
+    const slow = this.levelSlow ? 1 - (this.timeScale ?? 1) : 0;
     P.uBloom.value = pp.bloom + this.rushGlow * 0.18 + this.flashAmt * 0.5;
     P.uSat.value = pp.sat * (1 - slow * 0.3);
     P.uContrast.value = pp.contrast;
     P.uTint.value.copy(pp.tint);
     P.uLift.value.copy(pp.lift);
-    P.uVignette.value = pp.vignette + this.rushGlow * 0.1 + slow * 0.35 + (this.cineVignette || 0);
+    P.uVignette.value = pp.vignette + slow * 0.35 + (this.cineVignette || 0);
     P.uSpeed.value = speed;
     P.uLines.value = rm ? 0 : Math.max(0, this.speedFx - 0.2) * (view ? 1.2 : 0.5) + this.rushGlow * 0.6;
     P.uChroma.value = rm ? 0 : this.rushGlow * 0.7 + trans + slow * 0.6 + (this.cineChroma || 0);
@@ -2931,6 +2923,10 @@ class App {
     this.renderer.toneMappingExposure = pp.exposure;
     if (this.epilogue.active) this.epilogue.applyGrade(P);
     this.post.render(this.scene, this.camera, { threshold: pp.threshold });
+    if (this.camDebug.on) {
+      const hp = this.snake.headPos;
+      this.camDebug.render(this.scene, this.camera, { head: this.snake.head, eye: this.camera.position.y - hp.y, mode: { fp: 'first person', tp: 'chase', overhead: 'overhead' }[this.rig.mode] || this.rig.mode });
+    }
   }
 
   // Where the Galactic Core's black hole is on screen, for the bloom mask:

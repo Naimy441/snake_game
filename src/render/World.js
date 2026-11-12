@@ -69,9 +69,9 @@ export class World {
   // Board cell to world position. y is the cell's layer in the sky (relative
   // to yMid, the layer level with the board); on the ground it's 0.
   // size: the grid's width (the sky box is wider than the board, centred on it).
-  toWorld(x, z, y, yMid = 0, size = this.size) {
-    const o = (size - 1) / 2;
-    return { x: x - o, y: y == null ? 0 : y - yMid, z: z - o };
+  // depth: cells from front to back when the board isn't square
+  toWorld(x, z, y, yMid = 0, size = this.size, depth = size) {
+    return { x: x - (size - 1) / 2, y: y == null ? 0 : y - yMid, z: z - (depth - 1) / 2 };
   }
 
   buildLights() {

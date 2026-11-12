@@ -28,6 +28,7 @@ export const DEFAULTS = {
   ghost: false,
   startLevel: 0,
   chaseDefault: true,
+  fpFov: 90, // first-person field of view, degrees
 };
 
 export function loadSettings() {
@@ -41,6 +42,8 @@ export function loadSettings() {
         saved.camera = 'tp';
         saved.chaseDefault = true;
       }
+      // the view width setting starts at 75 degrees
+      if (typeof saved.fpFov === 'number') saved.fpFov = Math.min(115, Math.max(75, saved.fpFov));
       return { ...DEFAULTS, ...saved };
     }
   } catch {
@@ -74,7 +77,9 @@ export function saveBest(v) {
 }
 
 // Lifetime totals used to unlock skins and accessories.
-export const STAT_DEFAULTS = { games: 0, apples: 0, mice: 0, chains: 0, pads: 0, maxZone: 0, maxLevel: 0, wins: 0, bestWinTime: 0 };
+// bestPct: how far through the game the best run got (0..100);
+// tutorialDone: the first-run tutorial has been finished or skipped.
+export const STAT_DEFAULTS = { games: 0, apples: 0, mice: 0, chains: 0, pads: 0, maxZone: 0, maxLevel: 0, wins: 0, bestWinTime: 0, bestPct: 0, tutorialDone: false };
 
 export function loadStats() {
   try {

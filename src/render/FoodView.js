@@ -465,7 +465,9 @@ export class FoodView {
     this.prism = new Pickup('prism', glowTex);
     this.chain = new ChainView(glowTex);
     this.prey = new PreyView(glowTex);
-    this.group.add(this.orb.group, this.prism.group, this.chain.group, this.prey.group);
+    // the extra apples on the board from Neon Night on
+    this.extras = [new Pickup('orb', glowTex), new Pickup('orb', glowTex)];
+    this.group.add(this.orb.group, this.prism.group, this.chain.group, this.prey.group, ...this.extras.map((p) => p.group));
   }
 
   // Keep meshes in sync with game state. A food that was just eaten keeps its
@@ -473,6 +475,23 @@ export class FoodView {
   sync(game, toWorld) {
     this.syncOne(this.orb, game.food, toWorld);
     this.syncOne(this.prism, game.bonus, toWorld);
+    // extras: keep each view on the same apple while it's there
+    const list = game.extras || [];
+    const used = new Set();
+    for (const v of this.extras) {
+      if (v.eaten) continue;
+      const f = v.cell && list.find((e) => e.id === v.cell.id);
+      if (f) {
+        used.add(f.id);
+        this.syncOne(v, f, toWorld);
+      } else if (v.group.visible) v.hide();
+    }
+    for (const f of list) {
+      if (used.has(f.id)) continue;
+      const v = this.extras.find((x) => !x.group.visible && !x.eaten);
+      if (!v) break;
+      this.syncOne(v, f, toWorld);
+    }
     if (this.prism.group.visible && game.bonus && !this.prism.eaten) {
       const left = Math.max(0, (game.bonus.expires - game.time) / PRISM_LIFETIME_MS);
       this.prism.ring.geometry.setDrawRange(0, Math.max(1, Math.ceil(48 * left)) * 6);
@@ -492,14 +511,16 @@ export class FoodView {
     else if (!p.eaten) p.group.position.y = toWorld(food.x, food.z, food.y).y || 0; // lift-off
   }
 
-  markEaten(kind, towards, duration) {
-    const p = kind === 'orb' ? this.orb : this.prism;
+  markEaten(kind, towards, duration, id = null) {
+    let p = kind === 'orb' ? this.orb : this.prism;
+    if (kind === 'orb' && id != null && (!p.cell || p.cell.id !== id)) p = this.extras.find((x) => x.cell && x.cell.id === id) || p;
     if (!p.group.visible) return;
     p.eaten = { t: 0, towards: towards.clone(), duration };
   }
 
   hideAll() {
     this.orb.hide();
+    for (const v of this.extras) v.hide();
     this.prism.hide();
     for (const l of this.chain.links) l.visible = false;
     this.chain.dots.count = 0;
@@ -511,6 +532,7 @@ export class FoodView {
 
   update(dt, time, opts) {
     this.orb.update(dt, time, opts);
+    for (const v of this.extras) v.update(dt, time, opts);
     this.prism.update(dt, time, opts);
     if (this.prism.blink && this.prism.group.visible && !this.prism.eaten) {
       this.prism.body.visible = Math.floor(time * 10) % 2 === 0;

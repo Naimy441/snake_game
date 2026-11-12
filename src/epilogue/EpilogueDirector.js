@@ -691,7 +691,6 @@ export class Epilogue {
     app.saidGo = false;
     app.showCountdown('READY');
     app.audio.countdown(false);
-    if (app.relativeSteer) app.flashHint();
     app.toast({ kicker: 'Meteor storm', title: 'Save the world', sub: `${METEOR_TOTAL} meteors, 3 lives, 2 minutes. Don't crush your home!`, tone: 'danger', ms: 3800 });
   }
 

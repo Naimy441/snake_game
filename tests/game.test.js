@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SnakeGame, DIRS, BOARD_SIZES, SKY_SIZE as SKY_W } from '../src/game/SnakeGame.js';
+import { SnakeGame, DIRS, BOARD_SIZES, SKY_SIZE as SKY_W, FOOD_TYPES } from '../src/game/SnakeGame.js';
 
 const seq = (vals) => {
   let i = 0;
@@ -49,7 +49,7 @@ test('eating food grows the snake, scores and respawns food', () => {
   assert.equal(g.score, 10);
   assert.equal(g.cells.length, 5);
   assert.ok(g.food && g.food.id !== 1);
-  assert.equal(g.rush, 25);
+  assert.equal(g.rush, FOOD_TYPES.orb.rush);
 });
 
 test('combo multiplies points when eating quickly', () => {
@@ -280,18 +280,20 @@ test('prey appears after a while and flees from the head', () => {
   assert.ok(d1 >= d0, `prey should not approach the head (was ${d0}, now ${d1})`);
 });
 
-test('catching prey scores big and grows the snake', () => {
+test('catching prey scores big, fills slow-mo and grows the snake by one', () => {
   const g = new SnakeGame({ rng: seq([0.5]) });
   const h = g.head;
   // boxed in on three sides by walls of body so it can't flee
   g.prey = { x: h.x, z: h.z - 1, px: h.x, pz: h.z - 1, id: 9, expires: 1e9, acc: -1e9, moves: 0, dir: DIRS.up };
   const ev = g.step();
   assert.ok(ev.caught);
-  assert.equal(g.score, 100);
+  assert.equal(g.score, FOOD_TYPES.prey.points);
+  assert.ok(FOOD_TYPES.prey.points >= 200, 'worth the risk');
+  assert.equal(g.rush, 100);
   assert.equal(g.prey, null);
   g.step();
   g.step();
-  assert.equal(g.cells.length, 6);
+  assert.equal(g.cells.length, 5);
 });
 
 test('prey escapes when its time runs out', () => {
@@ -315,7 +317,7 @@ test('boost pads give a burst of speed and respawn later', () => {
   assert.ok(g.currentInterval() < base);
   assert.equal(g.pads.length, 0);
   assert.equal(g.padRespawns.length, 1);
-  runFor(g, 6000);
+  runFor(g, 13000);
   if (g.alive) assert.equal(g.pads.length, 1);
 });
 
@@ -593,7 +595,7 @@ test('the ghost takes chain orbs in order and grabs prisms before they expire', 
   assert.equal(g.chain.next, 0, 'the real chain is untouched');
 });
 
-test('the ghost uses Rush to reach the next pickup at double points', () => {
+test('the ghost uses slow-mo to reach the next pickup (no extra points)', () => {
   const g = new SnakeGame({ rng: seq([0.5]) });
   const gh = new GhostBot(g);
   gh.rush = 100;
@@ -605,7 +607,7 @@ test('the ghost uses Rush to reach the next pickup at double points', () => {
     rushed = rushed || gh.rushing;
   }
   assert.ok(rushed);
-  assert.equal(gh.score, 20, 'apple scored double during Rush');
+  assert.equal(gh.score, 10, 'slow-mo does not double points');
 });
 
 test('the ghost ignores the golden mouse and steers around pillars', () => {
@@ -657,6 +659,7 @@ function skyGame(rng = seq([0.5])) {
 test('reaching Sunset Heavens lifts the snake off into a box of air', () => {
   const g = new SnakeGame({ rng: seq([0.7]) });
   g.foodEaten = LEVEL_AT[ZONE_STARTS[SKY_ZONE]] - 1;
+  g.bites = 2; // (three small apples to a step from Neon Night on: this is the last)
   g.prey = { x: 1, z: 1, px: 1, pz: 1, id: 9, expires: 1e9, acc: 0, moves: 0, dir: DIRS.up };
   g.addObstacles(4);
   const h0 = { ...g.head };
@@ -786,6 +789,7 @@ test('the sky has no obstacles, even at its level-ups', () => {
   assert.equal(g.obstacles.length, 0);
   assert.deepEqual(g.addObstacles(3), []);
   g.foodEaten = LEVEL_AT[ZONE_STARTS[SKY_ZONE] + 1] - 1;
+  g.bites = 2; // (three small apples to a step from Neon Night on: this is the last)
   g.food = { x: g.head.x, z: g.head.z - 1, y: g.head.y, type: 'orb', id: 5 };
   const ev = g.step();
   assert.ok(ev.levelUp);
@@ -851,11 +855,16 @@ test('the board grows 15 -> 17 -> 19 with the zones and stays 19', () => {
   const g = new SnakeGame({ sizes: BOARD_SIZES, rng: seq([0.5]) });
   assert.equal(g.size, 15);
   const seen = [];
-  for (let i = 0; i < 80 && g.alive && !g.flying; i++) {
+  for (let i = 0; i < 250 && g.alive && !g.flying; i++) {
     const before = g.head;
     g.food = { x: g.head.x + g.dir.x, z: g.head.z + g.dir.z, type: 'orb', id: 6000 + i };
     if (!g.inBounds(g.food.x, g.food.z)) { g.turn(1); g.step(); i--; continue; }
     const size0 = g.size;
+    // (keep the snake short so circling the board never runs into itself)
+    if (g.cells.length > 6) {
+      g.cells.length = 6;
+      g.pendingGrowth = 0;
+    }
     const ev = g.step();
     assert.ok(ev.ate && !ev.died);
     const pad = (g.size - size0) / 2;
@@ -879,7 +888,7 @@ test('the board grows 15 -> 17 -> 19 with the zones and stays 19', () => {
 });
 
 // ---------------------------------------------------------------- growth and combos
-test('apples grow the snake by 1, 2, then 3 from the third map on', () => {
+test('apples grow the snake more on later maps', () => {
   for (let zone = 0; zone < ZONE_STARTS.length; zone++) {
     const g = new SnakeGame({ rng: seq([0.5]) });
     g.startAtLevel(ZONE_STARTS[zone]);
@@ -888,7 +897,7 @@ test('apples grow the snake by 1, 2, then 3 from the third map on', () => {
     g.food = { x: g.head.x + d.x, z: g.head.z + d.z, y: g.head.y || 0, type: 'orb', id: 7000 };
     const len = g.cells.length;
     g.step();
-    assert.equal(g.pendingGrowth + (g.cells.length - len), zone === SPACE_ZONE ? 1 : Math.min(3, zone + 1), `map ${zone + 1}`);
+    assert.equal(g.pendingGrowth + (g.cells.length - len), [1, 2, 1, 1, 1, 1][zone], `map ${zone + 1}`);
   }
   // the apple that opens the next map still grows by the map it was eaten on
   const g = new SnakeGame({ rng: seq([0.5]) });
@@ -969,6 +978,7 @@ test('clearing Sunset Heavens jumps to hyperspeed and onto the Galactic Core boa
   g.startAtLevel(SPACE_START - 1);
   assert.ok(g.flying);
   g.foodEaten = LEVEL_AT[SPACE_START] - 1;
+  g.bites = 2; // (three small apples to a step from Neon Night on: this is the last)
   g.food = { x: g.head.x + g.dir.x, z: g.head.z + g.dir.z, y: g.head.y + (g.dir.y || 0), type: 'orb', id: 99 };
   const ev = g.step();
   assert.equal(ev.levelUp.warp, true);
@@ -1031,17 +1041,44 @@ test('a doomed cell under the snake waits until the snake is off it', () => {
   assert.equal(g.isLand(mid.x, mid.z), false, 'falls once the tail has passed');
 });
 
-test('dead-end nubs are eaten for free, and the head and its tail are spared', () => {
-  const g = coreGame();
-  const S = CORE_SIZE;
-  g.land[1 * S + 0] = 0; // (0, 0) is left with one neighbour
-  const ev = {};
-  g.collapse(ev);
-  assert.ok(ev.doomed.some((d) => d.x === 0 && d.z === 0), 'the nub goes');
-  assert.equal(ev.doomed.length, COLLAPSE_PER_APPLE + 1, 'on top of the usual cells');
-  const h = g.head;
-  for (const d of ev.doomed) assert.ok(Math.abs(d.x - h.x) + Math.abs(d.z - h.z) > 1);
-  assert.ok(g.tailInReach(g.doomed), 'the tail is still in reach');
+test('the board falls an edge row or column at a time, far from the head, and stays an even-sided rectangle', () => {
+  for (let s = 1; s <= 6; s++) {
+    const g = coreGame(mulberry(s));
+    autoplay(g, (g, ev) => {
+      // (the last few cells may go wherever makes the endgame winnable)
+      if (!g.alive || g.coreFree() <= 6) return;
+      const r = g.rect;
+      const W = r.x1 - r.x0 + 1;
+      const H = r.z1 - r.z0 + 1;
+      assert.ok(W % 2 === 0 || H % 2 === 0, `one side even (${W} x ${H})`);
+      const h = g.head;
+      for (const d of ev.doomed || []) {
+        assert.ok(Math.abs(d.x - h.x) + Math.abs(d.z - h.z) > 1, 'never right by the head');
+        // only edge cells: the cell is outside the rectangle the board is shrinking to
+        assert.ok(d.x < r.x0 || d.x > r.x1 || d.z < r.z0 || d.z > r.z1, 'only on the edge');
+      }
+      // nothing inside the rectangle ever falls
+      for (let x = r.x0; x <= r.x1; x++) for (let z = r.z0; z <= r.z1; z++) assert.ok(g.isLand(x, z), 'no holes in the middle');
+    });
+    assert.ok(g.won, `seed ${s}`);
+  }
+});
+
+test('the apple that brings the calm sits on a slow-down ramp', () => {
+  let seen = 0;
+  for (let s = 1; s <= 4; s++) {
+    const g = coreGame(mulberry(s));
+    let ramp = null;
+    autoplay(g, (g, ev) => {
+      if (g.food && g.food.ramp) ramp = g.food.id;
+      if (ev.calm) {
+        assert.ok(ev.ate && ev.ate.ramp, 'eating the ramp apple is what calms it');
+        seen++;
+      }
+    });
+    assert.ok(ramp != null);
+  }
+  assert.ok(seen >= 3);
 });
 
 test('the board never splits in two; it speeds up as it fills, then calms down at length 35', () => {
@@ -1183,6 +1220,7 @@ test('lift-off climbs even if something clears the move queue (autoplay)', () =>
   const g = new SnakeGame({ sizes: BOARD_SIZES, rng: mulberry(7) });
   g.startAtLevel(ZONE_STARTS[SKY_ZONE] - 1);
   g.foodEaten = LEVEL_AT[ZONE_STARTS[SKY_ZONE]] - 1;
+  g.bites = 2; // (three small apples to a step from Neon Night on: this is the last)
   g.food = { x: g.head.x + g.dir.x, z: g.head.z + g.dir.z, y: 0, type: 'orb', id: 77 };
   const ev = g.step();
   assert.ok(ev.levelUp && ev.levelUp.liftoff);
@@ -1269,4 +1307,82 @@ test('Seaglass Original is kept but not played in the game', () => {
     assert.ok(!SEAGLASS_ORIGINAL[k].keys && !SEAGLASS_ORIGINAL[k].bell, `${k}: no keys or bells`);
     assert.ok(SEAGLASS_ORIGINAL[k].notes, `${k}: parsed`);
   }
+});
+
+test('lifting off right beside the laser fence levels out into open air, not into the fence', () => {
+  const g = new SnakeGame({ sizes: BOARD_SIZES, rng: mulberry(9) });
+  g.startAtLevel(ZONE_STARTS[SKY_ZONE] - 1);
+  // head two cells from the top wall, heading straight at it
+  const S = g.size;
+  const x = Math.floor(S / 2);
+  g.cells = [0, 1, 2, 3].map((i) => ({ x, z: 1 + i, y: 0 }));
+  g.dir = { ...DIRS.up };
+  g.facing = { ...DIRS.up };
+  g.queue = [];
+  g.foodEaten = LEVEL_AT[ZONE_STARTS[SKY_ZONE]] - 1;
+  g.bites = 2; // (three small apples to a step from Neon Night on: this is the last)
+  g.food = { x, z: 0, y: 0, type: 'orb', id: 4321 };
+  const ev = g.step();
+  assert.ok(ev.levelUp && ev.levelUp.liftoff);
+  for (let i = 0; i < SKY_CLIMB + 4 && g.alive; i++) {
+    g.queue.length = 0;
+    g.step();
+  }
+  assert.ok(g.alive, `still flying (${g.deathCause})`);
+});
+
+test('from Neon Night on, three apples are out at once and three count as one', () => {
+  for (const [zone, n] of [[0, 1], [1, 1], [2, 3], [3, 3], [4, 3]]) {
+    const g = new SnakeGame({ sizes: BOARD_SIZES, rng: mulberry(4) });
+    g.startAtLevel(ZONE_STARTS[zone]);
+    assert.equal(1 + g.extras.length, n, `map ${zone + 1}`);
+  }
+  // eating an extra apple counts as an apple, and a new one appears
+  const g = new SnakeGame({ sizes: BOARD_SIZES, rng: mulberry(4) });
+  g.startAtLevel(ZONE_STARTS[2]);
+  const h = g.head;
+  g.extras[0] = { ...g.extras[0], x: h.x + g.dir.x, z: h.z + g.dir.z, y: 0 };
+  const before = g.foodEaten;
+  const p0 = g.levelProgress();
+  const ev = g.step();
+  assert.ok(ev.ate);
+  assert.equal(g.foodEaten, before, 'a third of an apple of progress');
+  assert.equal(g.bites, 1);
+  assert.equal(g.levelProgress().into, p0.into + 1);
+  assert.equal(p0.need, 15, 'a level on map 3 is 15 small apples');
+  assert.equal(g.extras.length, 2);
+  // two more make a full apple of progress
+  for (let i = 0; i < 2; i++) {
+    const hh = g.head;
+    g.food = { x: hh.x + g.dir.x, z: hh.z + g.dir.z, y: 0, type: 'orb', id: 8800 + i };
+    g.step();
+  }
+  assert.equal(g.foodEaten, before + 1);
+  assert.equal(g.bites, 0);
+});
+
+test('small apples refill a third of the slow-mo an apple does, so it can\'t be farmed', () => {
+  const g = new SnakeGame({ sizes: BOARD_SIZES, rng: mulberry(4) });
+  g.startAtLevel(ZONE_STARTS[2]);
+  g.rush = 0;
+  const h = g.head;
+  g.food = { x: h.x + g.dir.x, z: h.z + g.dir.z, y: 0, type: 'orb', id: 8900 };
+  g.step();
+  assert.equal(g.rush, FOOD_TYPES.orb.rush / 3);
+});
+
+test('a slow-mo tile does not stack with Space: the meter is not used while it lasts', () => {
+  const g = new SnakeGame({ rng: seq([0.5]) });
+  const h = g.head;
+  g.pads = [{ x: h.x, z: h.z - 1, id: 3 }];
+  g.rush = 50;
+  g.wantRush = true;
+  const ev = g.step(); // (this step, on the way to the tile, still uses the meter)
+  assert.ok(ev.boost);
+  const r = g.rush;
+  assert.ok(r < 50 && r > 45, 'the tile gives no meter');
+  const slow = g.currentInterval();
+  g.step();
+  assert.equal(g.rush, r, 'and holding Space on it costs nothing');
+  assert.equal(g.currentInterval(), slow, 'and is no slower');
 });

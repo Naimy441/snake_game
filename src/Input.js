@@ -93,6 +93,9 @@ export class Input {
       case 'KeyE':
         if (!e.repeat) this.h.turn(1);
         break;
+      case 'KeyH':
+        if (!e.repeat && this.h.tutorial) this.h.tutorial();
+        break;
       case 'Space':
       case 'ShiftLeft':
       case 'ShiftRight':
@@ -128,6 +131,12 @@ export class Input {
         break;
       case 'KeyT':
         if (!e.repeat && this.h.timer) this.h.timer();
+        break;
+      case 'KeyF':
+        if (!e.repeat && this.h.debugStop) this.h.debugStop();
+        break;
+      case 'Backquote':
+        if (!e.repeat && this.h.camDebug) this.h.camDebug();
         break;
       default:
     }

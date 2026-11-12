@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PixelParticles, RAINBOW, GOLD } from './PixelParticles.js';
+import { BONUS_W, BONUS_H } from '../game/SnakeGame.js';
 
 // The bonus level's set: its own scene, swapped in for the World while the
 // bonus level runs (the game's snake, apple, effects and cameras move in).
@@ -15,8 +16,12 @@ import { PixelParticles, RAINBOW, GOLD } from './PixelParticles.js';
 // dance floor and floats up off the water, mirrored in it, with fireworks
 // over the castle, all in time with the music.
 
-const S = 17;
-const H = S / 2;
+// the board: SX cells across (x), SZ deep (z)
+const SX = BONUS_W;
+const SZ = BONUS_H;
+const HX = SX / 2;
+const HZ = SZ / 2;
+const H = Math.max(HX, HZ);
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const smooth = (v) => {
   const t = clamp01(v);
@@ -679,9 +684,10 @@ export class BonusStage {
       const edge = rand() < 0.6;
       const t = rand() * 2 - 1;
       const side = Math.floor(rand() * 4);
-      const e = H + 0.6;
-      const x = edge ? (side < 2 ? t * e : (side === 2 ? 1 : -1) * e) : (rand() - 0.5) * S;
-      const z = edge ? (side < 2 ? (side === 0 ? 1 : -1) * e : t * e) : (rand() - 0.5) * S;
+      const ex = HX + 0.6;
+      const ez = HZ + 0.6;
+      const x = edge ? (side < 2 ? t * ex : (side === 2 ? 1 : -1) * ex) : (rand() - 0.5) * SX;
+      const z = edge ? (side < 2 ? (side === 0 ? 1 : -1) * ez : t * ez) : (rand() - 0.5) * SZ;
       pos.set([x, 0, z], i * 3);
       c.set(i % 2 ? '#ffd27a' : '#e8c8ff').multiplyScalar(2);
       col.set([c.r, c.g, c.b], i * 3);
@@ -690,7 +696,7 @@ export class BonusStage {
   }
 
   buildBoard() {
-    const n = S * S;
+    const n = SX * SZ;
     const geo = new THREE.BoxGeometry(0.96, TILE_H, 0.96);
     this.tileGlow = new Float32Array(n * 3);
     geo.setAttribute('aGlow', new THREE.InstancedBufferAttribute(this.tileGlow, 3).setUsage(THREE.DynamicDrawUsage));
@@ -699,10 +705,10 @@ export class BonusStage {
     this.tiles = new THREE.InstancedMesh(geo, this.tileMat, n);
     this.tiles.receiveShadow = true;
     const c = new THREE.Color();
-    for (let x = 0; x < S; x++) {
-      for (let z = 0; z < S; z++) {
-        const i = x * S + z;
-        this.dummy.position.set(x - (S - 1) / 2, -TILE_H / 2, z - (S - 1) / 2);
+    for (let x = 0; x < SX; x++) {
+      for (let z = 0; z < SZ; z++) {
+        const i = x * SZ + z;
+        this.dummy.position.set(x - (SX - 1) / 2, -TILE_H / 2, z - (SZ - 1) / 2);
         this.dummy.rotation.set(0, 0, 0);
         this.dummy.scale.setScalar(1);
         this.dummy.updateMatrix();
@@ -714,13 +720,13 @@ export class BonusStage {
     this.ripples = [];
 
     // the stone slab, with a gold band round it
-    const slab = new THREE.Mesh(new THREE.BoxGeometry(S + 1.6, -SLAB_BOTTOM - 0.28, S + 1.6), new THREE.MeshStandardMaterial({ color: '#1d1838', roughness: 0.5, metalness: 0.3 }));
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(SX + 1.6, -SLAB_BOTTOM - 0.28, SZ + 1.6), new THREE.MeshStandardMaterial({ color: '#1d1838', roughness: 0.5, metalness: 0.3 }));
     slab.position.y = (SLAB_BOTTOM - 0.28) / 2;
     slab.receiveShadow = true;
     slab.castShadow = true;
     this.scene.add(slab);
     this.bandMat = new THREE.MeshStandardMaterial({ color: '#c9973a', roughness: 0.3, metalness: 1, emissive: '#ffb347', emissiveIntensity: 0 });
-    const band = new THREE.Mesh(new THREE.BoxGeometry(S + 1.66, 0.14, S + 1.66), this.bandMat);
+    const band = new THREE.Mesh(new THREE.BoxGeometry(SX + 1.66, 0.14, SZ + 1.66), this.bandMat);
     band.position.y = -0.62;
     this.scene.add(band);
     // the glow under it once it floats
@@ -735,11 +741,11 @@ export class BonusStage {
 
   // The rim: a stone curb with a glowing tube on top, all the way round.
   buildRim() {
-    const R = H + 0.55;
-    const len = S + 1.1;
+    const RX = HX + 0.55;
+    const RZ = HZ + 0.55;
     const tubes = [];
     const curbs = [];
-    for (const [x, z, rot] of [[0, -R, 0], [0, R, 0], [-R, 0, Math.PI / 2], [R, 0, Math.PI / 2]]) {
+    for (const [x, z, rot, len] of [[0, -RZ, 0, SX + 1.1], [0, RZ, 0, SX + 1.1], [-RX, 0, Math.PI / 2, SZ + 1.1], [RX, 0, Math.PI / 2, SZ + 1.1]]) {
       tubes.push(new THREE.CapsuleGeometry(0.13, len, 6, 14).rotateZ(Math.PI / 2).rotateY(rot).translate(x, 0.2, z));
       curbs.push(new THREE.BoxGeometry(len + 0.5, 0.36, 0.5).rotateY(rot).translate(x, -0.06, z));
     }
@@ -907,7 +913,7 @@ export class BonusStage {
     for (let k = 0; k < 3; k++) {
       this.later(0.15 + k * 0.22, () => {
         for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-          this.pixels.burst(new THREE.Vector3(sx * (H + 0.5), 0.5, sz * (H + 0.5)), { count: 36, colors: RAINBOW, speed: 1.5, up: 2.2, gravity: 0.6, life: 1.8 });
+          this.pixels.burst(new THREE.Vector3(sx * (HX + 0.5), 0.5, sz * (HZ + 0.5)), { count: 36, colors: RAINBOW, speed: 1.5, up: 2.2, gravity: 0.6, life: 1.8 });
         }
       });
     }
@@ -1055,18 +1061,18 @@ export class BonusStage {
     const col = this.tmpC2;
     for (const r of this.ripples) r.t += dt;
     this.ripples = this.ripples.filter((r) => r.t < r.life);
-    const under = this.underSnake || (this.underSnake = new Uint8Array(S * S));
+    const under = this.underSnake || (this.underSnake = new Uint8Array(SX * SZ));
     under.fill(0);
-    if (cells) for (const cl of cells) if (cl.x >= 0 && cl.z >= 0 && cl.x < S && cl.z < S) under[cl.x * S + cl.z] = 1;
+    if (cells) for (const cl of cells) if (cl.x >= 0 && cl.z >= 0 && cl.x < SX && cl.z < SZ) under[cl.x * SZ + cl.z] = 1;
     const mode = Math.floor(b / 8) % 4;
     const headX = head ? head.x : 0;
     const headZ = head ? head.z : 0;
     const fb = Math.floor(b);
-    for (let x = 0; x < S; x++) {
-      for (let z = 0; z < S; z++) {
-        const i = x * S + z;
-        const wx = x - (S - 1) / 2;
-        const wz = z - (S - 1) / 2;
+    for (let x = 0; x < SX; x++) {
+      for (let z = 0; z < SZ; z++) {
+        const i = x * SZ + z;
+        const wx = x - (SX - 1) / 2;
+        const wz = z - (SZ - 1) / 2;
         let r = 0;
         let g = 0;
         let bl = 0;

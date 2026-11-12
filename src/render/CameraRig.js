@@ -65,9 +65,37 @@ function wrapAngle(a) {
 // Computes the active pose every frame (orbit for menus, classic overhead,
 // third-person chase and first-person) and blends from a snapshot of the
 // previous view to it, so switching is seamless mid-game.
+// The numbers that place the playing cameras, live-tunable from the camera
+// debug panel (the ` key). first person: eye height over the path, how far
+// ahead of the head's middle the eye sits, how far ahead it looks and how far
+// down (1: at the path there, 0: level), how stiffly it follows turns, and how
+// much it leans into them. Chase: distance back, height, the point ahead it
+// looks at, its view width, how stiffly it follows. Slow-mo: its field of view
+// spring: the kick going in, the held offset, the kick coming out, the damping
+// (1: no overshoot), and how much of the streak blur stays while it's held.
+export const CAMERA_TUNE = {
+  fp: { eye: 0.96, ahead: -0.05, look: 13.5, drop: 1, follow: 30, lean: 0 },
+  tp: { dist: 4.3, height: 2.9, ahead: 3.3, fov: 60, follow: 15 },
+  slow: { punch: 140, hold: -1.5, breath: -40, damping: 0.75, blur: 0.3 },
+};
+export const cloneTune = (t = CAMERA_TUNE) => JSON.parse(JSON.stringify(t));
+const SLOW_K = 110; // slow-mo spring stiffness
+// how much of the slow-mo spring each camera gets
+const SLOW_FOV_K = { fp: 1, tp: 0.8, overhead: 0.25 };
+
 export class CameraRig {
   constructor(camera, size) {
     this.bodyLift = 0; // how much taller than normal the snake is (tall block skins)
+    this.fpFov = 90; // first-person field of view (a setting)
+    this.tune = cloneTune();
+    // Slow-mo's field of view: a springy offset (degrees). Going in punches it
+    // wide, then it settles a little narrower than normal while slow-mo lasts
+    // (a longer lens: things seem to pass slower); coming out it draws a short
+    // breath in and springs back.
+    this.slowOn = false;
+    this.slowFov = 0;
+    this.slowFovVel = 0;
+    this.slowAmt = 0; // 0..1, eased: how far into slow-mo
     this.camera = camera;
     this.size = size;
     this.mode = 'orbit';
@@ -330,11 +358,12 @@ export class CameraRig {
       this.tpYaw = targetYaw;
       this.tpYawVel = 0;
     }
-    [this.tpYaw, this.tpYawVel] = this.followYaw(targetYaw, this.tpYaw, this.tpYawVel, high ? 9 : 15, dt);
+    const T = this.tune.tp;
+    [this.tpYaw, this.tpYawVel] = this.followYaw(targetYaw, this.tpYaw, this.tpYawVel, high ? 9 : T.follow, dt);
     const fwd = this.tmpV.set(Math.sin(this.tpYaw), 0, Math.cos(this.tpYaw));
     this.tpPull += ((reduceMotion ? 0 : speedFx) - this.tpPull) * Math.min(1, dt * 2);
-    const dist = high ? 8.4 + this.tpPull * 1.2 : 4.3 + this.tpPull * 1.1;
-    const height = high ? 6.2 + this.tpPull * 0.5 : 2.9 + this.tpPull * 0.4;
+    const dist = high ? 8.4 + this.tpPull * 1.2 : T.dist + this.tpPull * 1.1;
+    const height = high ? 6.2 + this.tpPull * 0.5 : T.height + this.tpPull * 0.4;
     const hp = snake.headPos;
     // climbing: drop below and look up the climb; diving: rise and look down it
     const p = this.pitch * (high ? 0.5 : 0.75);
@@ -356,11 +385,11 @@ export class CameraRig {
     this.tpRoll += (rollTarget - this.tpRoll) * Math.min(1, dt * 6);
     this.tmpObj.position.copy(out.pos);
     this.tmpObj.up.set(0, 1, 0);
-    const ahead = (high ? 3 : 3.3) * (1 - ap);
+    const ahead = (high ? 3 : T.ahead) * (1 - ap);
     this.tmpObj.lookAt(hp.x + fwd.x * ahead, hp.y + p * 4.5, hp.z + fwd.z * ahead);
     this.tmpObj.rotateZ(this.tpRoll);
     out.quat.copy(this.tmpObj.quaternion);
-    out.fov = (high ? 56 : 60) + (reduceMotion ? 0 : speedFx * (high ? 6 : 12));
+    out.fov = (high ? 56 : T.fov) + (reduceMotion ? 0 : speedFx * (high ? 6 : 12));
   }
 
   computeFP(dt, snake, speedFx, reduceMotion, out) {
@@ -368,7 +397,9 @@ export class CameraRig {
     if (this.fpYaw === null) this.fpYaw = targetYaw;
     // Critically damped yaw: turns feel quick but never snap 90 degrees in a frame.
     // Substepped so it stays stable even when a frame takes a long time.
-    const k = 26;
+    // in slow-mo the view swings round a little more lazily, so turns float
+    const T = this.tune.fp;
+    const k = T.follow * (1 - 0.27 * this.slowAmt);
     const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
     const h = dt / steps;
     for (let i = 0; i < steps; i++) {
@@ -378,7 +409,8 @@ export class CameraRig {
       this.fpYaw = wrapAngle(this.fpYaw + this.fpYawVel * h);
     }
     const fwd = this.tmpV.set(Math.sin(this.fpYaw), 0, Math.cos(this.fpYaw));
-    const rollTarget = reduceMotion ? 0 : THREE.MathUtils.clamp(-this.fpYawVel * 0.025, -0.09, 0.09);
+    const maxRoll = 3.6 * T.lean; // (0.09 rad at the old 0.025)
+    const rollTarget = reduceMotion ? 0 : THREE.MathUtils.clamp(-this.fpYawVel * T.lean, -maxRoll, maxRoll);
     this.fpRoll += (rollTarget - this.fpRoll) * Math.min(1, dt * 8);
 
     const hp = snake.headPos;
@@ -386,20 +418,38 @@ export class CameraRig {
     const p = this.pitch * 0.8;
     const ap = Math.abs(p);
     // eyes on top of a tall snake (bodyLift) peer down at the board at an angle
-    const eye = 0.66 + this.bodyLift;
-    out.pos.set(hp.x + fwd.x * 0.3 * (1 - ap), hp.y + eye + p * 0.3, hp.z + fwd.z * 0.3 * (1 - ap));
+    const eye = T.eye + this.bodyLift;
+    out.pos.set(hp.x + fwd.x * T.ahead * (1 - ap), hp.y + eye + p * 0.3, hp.z + fwd.z * T.ahead * (1 - ap));
     this.tmpObj.position.copy(out.pos);
     this.tmpObj.up.set(0, 1, 0);
-    this.tmpObj.lookAt(out.pos.x + fwd.x * 8 * (1 - ap), out.pos.y - eye * (1 - ap) + p * 8, out.pos.z + fwd.z * 8 * (1 - ap));
+    const L = T.look;
+    this.tmpObj.lookAt(out.pos.x + fwd.x * L * (1 - ap), out.pos.y - eye * T.drop * (1 - ap) + p * L, out.pos.z + fwd.z * L * (1 - ap));
     this.tmpObj.rotateZ(this.fpRoll);
     out.quat.copy(this.tmpObj.quaternion);
-    out.fov = 74 + (reduceMotion ? 0 : speedFx * 10);
+    out.fov = this.fpFov + (reduceMotion ? 0 : speedFx * 10);
+  }
+
+  updateSlow(dt, slow) {
+    const T = this.tune.slow;
+    if (slow !== this.slowOn) {
+      this.slowOn = slow;
+      this.slowFovVel += slow ? T.punch : T.breath;
+    }
+    const D = 2 * T.damping * Math.sqrt(SLOW_K);
+    this.slowAmt += ((slow ? 1 : 0) - this.slowAmt) * Math.min(1, dt * (slow ? 6 : 4));
+    const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
+    const h = Math.min(dt, 0.1) / steps;
+    for (let i = 0; i < steps; i++) {
+      this.slowFovVel += (SLOW_K * ((slow ? T.hold : 0) - this.slowFov) - D * this.slowFovVel) * h;
+      this.slowFov += this.slowFovVel * h;
+    }
   }
 
   // aim: horizontal heading to face; pitch: +1 climbing, -1 diving, 0 level.
   // box: { floorY, ceilY } of the sky's flight box (chase cameras stay inside it)
-  update(dt, snake, { speedFx = 0, reduceMotion = false, aim = null, flying = false, pitch = 0, box = null, sky = 0, space = 0 } = {}) {
+  update(dt, snake, { speedFx = 0, slow = false, reduceMotion = false, aim = null, flying = false, pitch = 0, box = null, sky = 0, space = 0 } = {}) {
     this.easeBoardSize(dt);
+    this.updateSlow(dt, slow);
     this.aim = aim;
     this.box = box;
     if (flying !== this.flying) {
@@ -443,6 +493,7 @@ export class CameraRig {
 
     this.kick *= Math.exp(-dt * 6);
     cam.fov = this.from.fov + (target.fov - this.from.fov) * b + (reduceMotion ? 0 : this.kick);
+    if (!reduceMotion) cam.fov += this.slowFov * (SLOW_FOV_K[this.mode] ?? (this.highChase ? 0.6 : 0.25));
     if (this.cine) this.applyCinematic(dt, snake);
 
     // Small, quickly damped shake (never in first person).

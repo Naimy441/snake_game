@@ -3,6 +3,8 @@
 // (PI/2 = spine, -PI/2 = belly). glow(d, theta) makes parts emissive (in their
 // own colour). Some skins unlock through play; see `unlock`.
 
+import { hotdogPart } from './skinShapes.js';
+
 const TAU = Math.PI * 2;
 const fract = (x) => x - Math.floor(x);
 const hash = (a, b) => fract(Math.sin(a * 127.1 + b * 311.7) * 43758.5453);
@@ -294,9 +296,9 @@ export const SKINS = [
     swatch: 'linear-gradient(180deg, #e8a85a 0 22%, #b0402a 22% 44%, #ffd21a 44% 54%, #b0402a 54% 76%, #e8a85a 76%)',
     color(d, t, c) {
       const up = Math.sin(t);
-      if (up < 0.3) {
-        // the bun: soft crumb at the lip, toasted crust below
-        if (up > 0.18) return c.set('#fbe0a6');
+      if (hotdogPart(t) === 'bun') {
+        // the bun: soft crumb on the inside of the split, toasted crust outside
+        if (up > 0.3) return c.set('#fbe0a6');
         c.set('#ee9a3c');
         mix(c, '#b8742e', Math.min(1, -up * 0.9));
         return c.multiplyScalar(0.94 + hash(Math.floor(d * 6), Math.floor(t * 6)) * 0.08);
@@ -308,7 +310,7 @@ export const SKINS = [
       if (up > 0.5 && Math.abs(Math.cos(t) - zigzag(d, 1.1, 0.45)) < 0.13) c.set('#ffd21a');
       return c;
     },
-    mat: { roughness: 0.32, metalness: 0.02, normal: 0.35 },
+    mat: { roughness: 0.55, metalness: 0, normal: 0 },
     head: { top: '#a8382a', side: '#c04a2e', belly: '#e8a85a', accent: '#ffd21a', eye: '#ffffff', eyeGlow: 0.4 },
     aura: '#ffb020', trail: '#ffd21a',
   },
@@ -340,7 +342,7 @@ export const SKINS = [
       if (fract(d * 4) < 0.24 && w < (fract(d * 2) < 0.12 ? 0.75 : 0.4)) return c.set('#141414');
       return c.set('#ffd21a');
     },
-    mat: { roughness: 0.3, metalness: 0.15, normal: 0.1 },
+    mat: { roughness: 0.3, metalness: 0.15, normal: 0 },
     head: { top: '#b8bec8', side: '#d8dde6', belly: '#8a909a', accent: '#141414', eye: '#141414', eyeGlow: 0 },
     aura: '#ffe640', trail: '#ffd21a',
   },
@@ -368,64 +370,67 @@ export const SKINS = [
       if (bump > 0.6 && bu * bu + bv * bv < 0.06) c.set('#b8d860');
       return c;
     },
-    mat: { roughness: 0.4, metalness: 0, normal: 1.4 },
+    mat: { roughness: 0.4, metalness: 0, normal: 0 },
     head: { top: '#3a6014', side: '#5a8a22', belly: '#8aaa3a', accent: '#b8d860', eye: '#ffffff', eyeGlow: 0.4 },
     aura: '#b8ff6a', trail: '#d8ff9a',
-  },
-  {
-    id: 'watermelon', name: 'Watermelon', desc: 'Striped rind on top, juicy and seedy underneath.',
-    swatch: 'linear-gradient(180deg, #1e6a1e 0 20%, #6ac040 20% 30%, #1e6a1e 30% 45%, #eaffd0 45% 52%, #ff4a6a 52%)',
-    unlock: { stat: 'apples', value: 30, label: 'Eat 30 apples in total' },
-    color(d, t, c) {
-      const up = Math.sin(t);
-      if (up < -0.45) {
-        c.set('#ff4a6a');
-        const su = fract(d * 2.2) - 0.5;
-        const sv = fract(t * 3) - 0.5;
-        if (hash(Math.floor(d * 2.2), Math.floor(t * 3)) > 0.45 && su * su * 3 + sv * sv < 0.04) c.set('#1a0c0c');
-        return c;
-      }
-      if (up < -0.3) return c.set('#eaffd0');
-      // dark rind with wavy light stripes running along the body
-      return c.set(Math.sin(Math.cos(t) * 9 + Math.sin(d * 2.4) * 0.9) > 0.35 ? '#6ac040' : '#1e6a1e');
-    },
-    mat: { roughness: 0.3, metalness: 0, normal: 0.3 },
-    head: { top: '#1e6a1e', side: '#3a8a2a', belly: '#ff4a6a', accent: '#6ac040', eye: '#1a0c0c', eyeGlow: 0 },
-    aura: '#ff6a8a', trail: '#ff9aaa',
   },
   {
     id: 'bacon', name: 'Crispy Bacon', desc: 'Sizzling streaks of meat and fat.',
     swatch: 'linear-gradient(170deg, #b8302a 0 22%, #f8d0b0 22% 34%, #d8483a 34% 58%, #f8d0b0 58% 68%, #8a2018 68%)',
     unlock: { stat: 'mice', value: 1, label: 'Catch a golden mouse' },
     color(d, t, c) {
-      const f = fract((t / TAU) * 4 + Math.sin(d * 2.1) * 0.07 + Math.sin(d * 0.7 + t) * 0.04);
+      // streaks of fat and meat running along the rasher, across its width
+      const f = fract(Math.cos(t) * 1.9 + Math.sin(d * 2.1) * 0.08 + Math.sin(d * 0.7) * 0.05 + 0.1);
       if (f < 0.3) c.set('#f8d0b0');
       else c.set('#c8382a');
       mix(c, '#6a1a10', Math.max(0, hash(Math.floor(d * 5), Math.floor(t * 4)) - 0.7) * 2); // crispy bits
       return c;
     },
-    mat: { roughness: 0.45, metalness: 0.05, normal: 0.6 },
+    mat: { roughness: 0.45, metalness: 0.05, normal: 0 },
     head: { top: '#a8281e', side: '#c8382a', belly: '#f8d0b0', accent: '#f8d0b0', eye: '#ffe640', eyeGlow: 0.6 },
     aura: '#ff7a3a', trail: '#ffb080',
   },
   {
-    id: 'disco', name: 'Disco Ball', desc: 'A thousand tiny mirrors. Saturday night on the island.',
-    swatch: 'repeating-linear-gradient(0deg, #1a1a22 0 1px, transparent 1px 7px), repeating-linear-gradient(90deg, #1a1a22 0 1px, transparent 1px 7px), linear-gradient(135deg, #ffffff, #9aa6b8 40%, #ff9af2 60%, #ffffff)',
-    unlock: { stat: 'games', value: 5, label: 'Play 5 runs' },
+    id: 'maid', name: 'Maid', desc: 'A black dress, a frilly white apron, lace ruffles and a headdress.',
+    swatch: 'linear-gradient(180deg, #16161e 0 38%, #ffffff 38% 46%, #16161e 46% 60%, #f6f6fa 60% 100%)',
     color(d, t, c) {
-      const u = d * 3;
-      const v = (t / TAU) * 10;
-      if (Math.abs(fract(u) - 0.5) > 0.4 || Math.abs(fract(v) - 0.5) > 0.4) return c.set('#20202a');
-      const h = hash(Math.floor(u), Math.floor(v));
-      c.set('#d8dee8').multiplyScalar(0.55 + h * 0.5);
-      if (h > 0.9) c.set(['#ff5af2', '#5ae8ff', '#ffe65a'][Math.floor(h * 100) % 3]);
-      return c;
+      const up = Math.sin(t);
+      const ring = fract(d * 0.42);
+      // lace cuffs every couple of cells: white, with a scalloped edge
+      if (ring < 0.09) {
+        const lace = Math.abs(Math.sin(t * 9)) > 0.25 || ring > 0.025;
+        return c.set(lace ? '#ffffff' : '#c8c8d6');
+      }
+      // the apron: crisp white underneath, frilled where it meets the dress
+      if (up < -0.2) {
+        if (up > -0.36) return c.set(fract(d * 7) < 0.5 ? '#ffffff' : '#e2e2ec');
+        return c.set('#f6f6fa').multiplyScalar(0.96 + hash(Math.floor(d * 5), 1) * 0.04);
+      }
+      // the dress: soft black with a faint satin sheen down the sides
+      c.set('#16161e');
+      return mix(c, '#2c2c3c', lateral(t) * 0.35);
     },
-    glow: (d, t) => (hash(Math.floor(d * 3), Math.floor((t / TAU) * 10)) > 0.9 ? 1.6 : 0),
-    anim: 'pulse',
-    mat: { roughness: 0.12, metalness: 0.9, env: 2, normal: 0.05 },
-    head: { top: '#d8dee8', side: '#eef2f8', belly: '#b8c0cc', accent: '#ff5af2', eye: '#5ae8ff', eyeGlow: 2.5 },
-    aura: '#ff9af2', trail: '#5ae8ff',
+    mat: { roughness: 0.42, metalness: 0.05, normal: 0 },
+    head: { top: '#16161e', side: '#202030', belly: '#ffffff', accent: '#16161e', eye: '#ffffff', eyeGlow: 0.5 },
+    aura: '#ffb8de', trail: '#ffffff',
+  },
+  {
+    id: 'benny', name: 'BennyBennion1', desc: 'A tribute skin for BennyBennion1: electric blue, a lime lightning streak down the back and a white stripe every few cells. Built for speed (and slow-mo).',
+    swatch: 'linear-gradient(135deg, #0b2a8a, #1f6bff 45%, #b6ff3a 50%, #1f6bff 55%, #0b2a8a)',
+    color(d, t, c) {
+      if (belly(t)) return c.set('#e8f0ff');
+      // a white stripe round the body every few cells
+      if (fract(d * 0.34) < 0.06) return c.set('#ffffff');
+      // the lightning streak along the spine
+      if (dorsal(t) > 0.4 && Math.abs(Math.cos(t) - zigzag(d, 0.9, 0.5)) < 0.12) return c.set('#b6ff3a');
+      c.set('#1f6bff');
+      return mix(c, '#0b2a8a', Math.max(0, dorsal(t)) * 0.6);
+    },
+    glow: (d, t) => (dorsal(t) > 0.4 && Math.abs(Math.cos(t) - zigzag(d, 0.9, 0.5)) < 0.12 ? 1.5 : 0),
+    anim: 'flow',
+    mat: { roughness: 0.25, metalness: 0.25 },
+    head: { top: '#0b2a8a', side: '#1f6bff', belly: '#e8f0ff', accent: '#b6ff3a', eye: '#ffffff', eyeGlow: 1.2 },
+    aura: '#5fa0ff', trail: '#b6ff3a',
   },
 ];
 

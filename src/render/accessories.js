@@ -14,14 +14,78 @@ function mesh(geo, mat, { x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, s = null 
   return m;
 }
 
+// A point on the round head's skull (the same shape SnakeView builds):
+// phi round from straight ahead (+ to the snake's right), theta up from the
+// middle, pushed out along the surface by off.
+function skullPoint(phi, theta, off = 0) {
+  const shape = (ph, th) => {
+    let x = 0.5 * Math.cos(th) * Math.sin(ph) * 0.8;
+    let y = 0.5 * Math.sin(th) * 0.55;
+    let z = 0.5 * Math.cos(th) * Math.cos(ph) * 0.95;
+    if (z > 0) {
+      const f = 1 - 0.38 * Math.pow(z / 0.475, 1.6);
+      x *= f;
+      y *= 0.75 + 0.25 * f;
+    }
+    if (y < 0) y *= 0.62;
+    return new THREE.Vector3(x, y, z);
+  };
+  const p = shape(phi, theta);
+  if (!off) return p;
+  // outward normal from neighbouring points
+  const e = 0.01;
+  const a = shape(phi + e, theta).sub(shape(phi - e, theta));
+  const b = shape(phi, theta + e).sub(shape(phi, theta - e));
+  const n = new THREE.Vector3().crossVectors(a, b).normalize();
+  if (n.dot(p) < 0) n.negate();
+  return p.addScaledVector(n, off);
+}
+
 const BUILDERS = {
+  // Pixel shades: one flat, glossy black plate, stepped like 8-bit art, with
+  // a few white pixels glinting on each lens. They sit level across the
+  // front of the head, over both eyes, leaning back with the brow.
   shades() {
     const g = new THREE.Group();
-    const lens = std('#0a0c14', { roughness: 0.05, metalness: 1, envMapIntensity: 2 });
-    const frame = std('#141418', { roughness: 0.3 });
-    for (const sx of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(0.16, 0.085, 0.025), lens, { x: sx * 0.105, y: 0.2, z: 0.2, rx: -0.55 }));
-    g.add(mesh(new THREE.BoxGeometry(0.42, 0.02, 0.03), frame, { y: 0.235, z: 0.185, rx: -0.55 }));
-    for (const sx of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(0.02, 0.02, 0.22), frame, { x: sx * 0.205, y: 0.21, z: 0.08 }));
+    const black = std('#08080a', { roughness: 0.18, metalness: 0.35, envMapIntensity: 1.6 });
+    const shine = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffffff').multiplyScalar(1.3) });
+    const px = 0.033; // one pixel
+    const depth = 0.03;
+    // # black, o a white glint (on the black)
+    const ROWS = [
+      '######################',
+      '#o#o######..#o#o######',
+      ' ##o#o####..##o#o#### ',
+      '  ##o#o###..###o#o##  ',
+      '   ######....######   ',
+    ];
+    const W = ROWS[0].length;
+    const plate = new THREE.Group();
+    ROWS.forEach((row, r) => {
+      const y = ((ROWS.length - 1) / 2 - r) * px;
+      // black runs, one box each
+      for (let c = 0; c < W; ) {
+        if (row[c] === ' ' || row[c] === '.') { c++; continue; }
+        let e = c;
+        while (e < W && row[e] !== ' ' && row[e] !== '.') e++;
+        const w = (e - c) * px;
+        plate.add(mesh(new THREE.BoxGeometry(w, px, depth), black, { x: (c + (e - c) / 2 - W / 2) * px, y }));
+        c = e;
+      }
+      for (let c = 0; c < W; c++) {
+        if (row[c] !== 'o') continue;
+        plate.add(mesh(new THREE.PlaneGeometry(px * 0.82, px * 0.82), shine, { x: (c + 0.5 - W / 2) * px, y, z: depth / 2 + 0.002 }));
+      }
+    });
+    // short arms back to the sides of the head
+    for (const sx of [-1, 1]) {
+      plate.add(mesh(new THREE.BoxGeometry(0.018, 0.022, 0.26), black, { x: sx * (W / 2 - 0.3) * px, y: 2 * px, z: -0.13 }));
+    }
+    plate.traverse((o) => (o.castShadow = false));
+    g.add(plate);
+    g.userData.plate = plate;
+    g.position.set(0, 0.17, 0.3);
+    g.rotation.x = -0.5;
     return g;
   },
   tophat() {
@@ -64,8 +128,9 @@ const BUILDERS = {
     const pink = std('#ff5aa8', { roughness: 0.35 });
     for (const sx of [-1, 1]) g.add(mesh(cone(0.07, 0.13, 12), pink, { x: sx * 0.07, rz: sx * Math.PI / 2, s: [1, 1, 0.45] }));
     g.add(mesh(new THREE.SphereGeometry(0.035, 12, 8), pink));
-    g.position.set(0.17, 0.3, -0.06);
-    g.rotation.set(0, 0.4, 0.5);
+    // sitting on the head like the flower (mirrored), resting on the skull
+    g.position.copy(skullPoint(0.75, 0.95, 0.025));
+    g.rotation.set(0.15, 0.3, -0.6);
     return g;
   },
   flower() {
@@ -80,16 +145,47 @@ const BUILDERS = {
     g.rotation.set(0.2, 0, 0.55);
     return g;
   },
+  // A gold band whose top edge rises into five flat points (one sheet,
+  // both sides drawn), with a ball on each point and rubies round the band.
   crown() {
     const g = new THREE.Group();
-    const gold = std('#ffcc40', { roughness: 0.18, metalness: 1, envMapIntensity: 1.8 });
-    g.add(mesh(new THREE.CylinderGeometry(0.13, 0.14, 0.08, 20, 1, true), gold, { y: 0.3 }));
-    for (let i = 0; i < 5; i++) {
-      const a = (i / 5) * Math.PI * 2;
-      g.add(mesh(cone(0.032, 0.09, 8), gold, { x: Math.cos(a) * 0.13, y: 0.38, z: Math.sin(a) * 0.13 }));
-      g.add(mesh(new THREE.SphereGeometry(0.018, 8, 6), std('#ff2040', { emissive: '#a00018', emissiveIntensity: 0.8, roughness: 0.05 }), { x: Math.cos(a + 0.63) * 0.14, y: 0.3, z: Math.sin(a + 0.63) * 0.14 }));
+    const gold = std('#ffcc40', { roughness: 0.25, metalness: 0.85, envMapIntensity: 1.6, side: THREE.DoubleSide });
+    const ruby = std('#ff2040', { emissive: '#a00018', emissiveIntensity: 0.8, roughness: 0.05 });
+    const R = 0.14;
+    const N = 100;
+    const pos = [];
+    const idx = [];
+    const tip = (a) => {
+      const u = ((a / (Math.PI * 2)) * 5) % 1; // 0..1 across one point
+      return 1 - Math.abs(u - 0.5) * 2; // a triangle wave: 1 at each tip
+    };
+    for (let i = 0; i <= N; i++) {
+      const a = (i / N) * Math.PI * 2;
+      const h = 0.06 + 0.1 * tip(a);
+      const c = Math.cos(a);
+      const sn = Math.sin(a);
+      pos.push(c * R, 0, sn * R, c * R * 1.06, h, sn * R * 1.06);
     }
-    g.position.z = -0.03;
+    for (let i = 0; i < N; i++) {
+      const a = i * 2;
+      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const band = mesh(geo, gold, { y: 0.285 });
+    g.add(band);
+    g.add(mesh(new THREE.TorusGeometry(R, 0.013, 8, 40), gold, { y: 0.29, rx: Math.PI / 2 }));
+    g.add(mesh(new THREE.CircleGeometry(R * 0.98, 32), std('#8a1020', { roughness: 0.8, side: THREE.DoubleSide }), { y: 0.3, rx: -Math.PI / 2 }));
+    for (let i = 0; i < 5; i++) {
+      const a = ((i + 0.5) / 5) * Math.PI * 2;
+      g.add(mesh(new THREE.SphereGeometry(0.017, 10, 8), gold, { x: Math.cos(a) * R * 1.06, y: 0.285 + 0.17, z: Math.sin(a) * R * 1.06 }));
+      const b = (i / 5) * Math.PI * 2;
+      g.add(mesh(new THREE.SphereGeometry(0.019, 8, 6), ruby, { x: Math.cos(b) * R * 1.03, y: 0.32, z: Math.sin(b) * R * 1.03 }));
+    }
+    g.position.set(0, 0, -0.06);
+    g.rotation.x = -0.1;
     return g;
   },
   halo() {
@@ -142,16 +238,12 @@ export function poseAccessory(g, holder, face) {
   }
   const top = (face.h + 0.02) / 2; // the cube's top, from its centre
   if (g.userData.id === 'shades') {
-    // across the front of the cube, just clear of the eyes, lenses upright:
-    // turn the group so the lenses stand up, keeping their centre in place
-    const S = 2.1;
-    const a = 0.55;
+    // upright across the front of the cube, just clear of the eyes
+    const S = 1.4;
     holder.scale.setScalar(S);
-    holder.position.set(0, face.eyeY - 0.2 * S, face.eyeFront + 0.03 - 0.2 * S);
-    g.rotation.set(a, 0, 0);
-    const y = 0.2 * Math.cos(a) - 0.2 * Math.sin(a);
-    const z = 0.2 * Math.sin(a) + 0.2 * Math.cos(a);
-    g.position.set(0, 0.2 - y, 0.2 - z);
+    holder.position.set(0, face.eyeY, face.eyeFront + 0.03);
+    g.position.set(0, 0, 0);
+    g.rotation.set(0, 0, 0);
     return;
   }
   const S = BLOCK_SCALE;

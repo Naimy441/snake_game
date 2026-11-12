@@ -50,56 +50,62 @@ your own body. The board is always clear: there are no obstacles on it.
 | --- | --- | --- |
 | Steer | Arrow keys / WASD move in that screen direction | Left/Right or A/D turn left/right |
 | Steer (any view) | Q / E turn left / right relative to the snake | same |
-| Rush (hold) | Space or Shift | same |
+| Slow-mo (hold) | Space or Shift | same |
 | Cycle camera | C (overhead → chase → first-person) | C |
 | Pause / resume | P or Esc | same |
 | Restart | R | same |
 | Next song (on this map) | M | same |
 | Mute | N | same |
 | Speedrun timer on / off | T | same |
+| Tutorial on / off | H | same |
 | Ghost guide on / off | G | same |
 | Climb / dive (Sunset Heavens) | ↑ / ↓ (the other key levels out) | same |
 | Pick the starting level (menu) | Left / Right | |
 
 **Touch:** swipe to steer in the overhead view; in the chase and first-person
 views, tap or swipe left/right (or use the on-screen turn buttons). Hold the
-RUSH button to boost.
+SLOW button for slow-mo.
 
-**Gamepad:** D-pad or left stick steers, A (or triggers) rushes, Y cycles the
+**Gamepad:** D-pad or left stick steers, A (or triggers) slows time, Y cycles the
 camera, Start pauses, bumpers turn left/right.
 
 ### Pickups and hazards
 
-- **Crystal apple:** 10 points, adds 25% Rush, and grows the snake by 1
-  cell on Emerald Coast, 2 in Golden Canyon, then 3 from Neon Night on.
-- **Prism:** appears now and then, worth 50 points, grows by 2 and fills Rush.
-  It disappears after 9 seconds (it blinks near the end).
+- **Crystal apple:** 10 points and refills some slow-mo. Grows the snake by 1
+  on Emerald Coast and 2 in Golden Canyon. From Neon Night on there are three
+  apples on the board at once, each growing the snake by 1; three of them make
+  one apple of level progress (and refill as much slow-mo as one apple), so
+  the maps are as long as before.
+- **Prism:** appears now and then, worth 50 points, grows by 2 and refills a
+  lot of slow-mo. It disappears after 9 seconds (it blinks near the end).
 - **Orb chain:** 3 to 5 numbered orbs. Eat them in order for rising points,
-  a big completion bonus and a full Rush meter. Eating one out of order breaks
-  the chain, and chains fade if you take too long. Chain orbs don't make you
-  longer.
-- **Golden mouse:** shows up every so often and runs away from you, hopping
-  cell to cell. Corner it for 100 points (times your combo); it escapes after
-  14 seconds.
-- **Boost pad:** from zone 2 on. Driving over one gives a free burst of speed
-  and double points, then it reappears somewhere else.
-- **A growing board:** the first map is played on a 17 x 17 board. At
-  Golden Canyon it widens to 19 x 19 and at Neon Night to 21 x 21, where it
-  stays. It grows by a ring of cells on every side as the zone wave rolls
-  out: the walls slide outward, the camera eases back to fit, and nothing
-  on the board moves.
+  a big completion bonus and a full slow-mo meter. Eating one out of order
+  breaks the chain. Chain orbs don't make you longer.
+- **Golden mouse:** shows up every so often and runs away from you, but it's
+  slower than the snake. Corner it for 250 points (times your combo) and a
+  full slow-mo meter; it only grows you by 1, and escapes after 18 seconds.
+- **Slow-mo tile:** from zone 2 on. Driving over one gives a short burst of
+  free slow motion and double points (holding Space on top doesn't stack or
+  use the meter). It doesn't refill the meter, and comes back somewhere else
+  after a while.
+- **A growing board:** the first map is played on a 15 x 15 board; it grows
+  a ring of cells on every side at Golden Canyon and again at Neon Night.
 
-### Scoring, levels and zones
+### Slow-mo, scoring and levels
 
+- **Slow-mo:** hold Space to slow time: the snake moves 10% slower and the
+  world (the mouse, timers, music) much slower, so you get more time to
+  react. It drains the meter; apples, chains and the mouse refill it.
 - **Combo:** eat again within 5 seconds to raise the multiplier by one. There
-  is no cap: keep eating quickly and it keeps climbing.
-- **Rush:** hold Space to move 1.7x faster and score double while the meter lasts.
-- **Speed levels:** eating apples raises your speed level. The difficulty
-  eases in: Emerald Coast levels take 3 apples each, start slow (about 6
-  moves a second), so 9 apples reach Golden Canyon. Later
-  levels take 4, then 5 apples and keep speeding up to the top speed. The HUD
-  shows how many apples are left until the next level and which level brings
-  the next zone.
+  is no cap.
+- **Speed levels:** eating apples raises your speed level: 3 apples a level on
+  Emerald Coast, 4 in Golden Canyon, 5 after that (each of those counting
+  three small apples from Neon Night on). The HUD
+  (and the game-over card) shows how many apples are left to the next level.
+- **Game beaten:** the game-over card shows how far through the whole game the
+  run got, and the title screen shows your best.
+- **Tutorial:** the first run from map 1 teaches steering, levels, the camera,
+  and slow-mo. H turns it on or off; How to play replays it.
 - **Zones:** every 3 speed levels (2 in Sunset Heavens) the world transforms. A glowing wave sweeps
   out from the arena, the old scenery shrinks away, new scenery grows in, and
   the sky, light, water, board and music all change: Emerald Coast, Golden
@@ -187,14 +193,17 @@ continues in the finale.
   light, while the length counter runs down.
 - **The collapsing board:** you land on a 12 x 12 board of glowing glass
   tiles floating high above the black hole, and the black hole is eating it.
-  Every apple grows you by one and dooms three more cells, spiralling in
-  from the outer edge, clockwise. Doomed tiles shiver, crack with light and
+  Every apple grows you by one and dooms three more cells along one edge
+  row or column (the edge furthest from your head), so the board always
+  shrinks as a rectangle with at least one even side: one a loop can always
+  fill. Nothing falls in the middle. Doomed tiles shiver, crack with light and
   sag for 1.3 seconds, then break off and fall in: they stretch into needles
   of light and pour down round the edge of the board into the accretion
   disk as threads of light, and the core flares each time something reaches
   the horizon (it burns brighter the more it has eaten). The edge of the
-  board is the void: slide off it and you fall in. Every camera works here;
-  the minimap shows what's left of the board.
+  board is the void: slide off it and you fall in. Every camera works here.
+  At length 35 the apple sits on a slow-mo ramp: eat it and the black hole
+  calms down for the last stretch.
 - **Fill what's left:** the board shrinks to meet you, so you never have to
   fill all 144 cells: the run is won when every cell still standing is
   snake, usually around 40. The HUD counts the empty cells left.
@@ -246,7 +255,7 @@ Grow to **length 30** in the Galactic Core and a secret unlocks: the **Bonus
 level** button on the title screen (beating the game unlocks it too). It plays
 in the same game, with the same HUD, cameras, Rush, pause and results screens.
 
-- **The rules:** classic Snake on a 17 x 17 board. No power-ups, no golden
+- **The rules:** classic Snake on a 10 x 9 board. No power-ups, no golden
   mouse, no boost pads and no speed-ups (about 7.8 moves a second the whole
   way). Every **golden apple** grows the snake by one. Rush still works: hold
   it to go faster and score double while the meter lasts. The bonus level keeps
@@ -307,7 +316,7 @@ meter carries it all the way to the next pickup, so it scores double. Once
 it has collected everything on the board it waits in place until you eat
 the apple, so it is never more than one apple ahead. It is a ghost: it never
 takes your pickups or blocks you, and keeps its own length, Rush meter and
-score (shown under yours in the HUD and as faint dots on the minimap).
+score (shown under yours in the HUD).
 Turning it on mid-run starts it from your snake's current position.
 
 ### Garage
@@ -321,10 +330,14 @@ snake. The camera swings in close for a live preview.
   (twinkling stars), Prism (an animated rainbow), Dragon, Phoenix (sunset
   feathers, from reaching Sunset Heavens), Phantom and Event Horizon (from
   beating the game).
-- **8 silly skins:** Hot Dog (a grilled sausage in a bun with mustard),
-  Gummy Worm, Tape Measure, Toothpaste and Pickle are free; Watermelon
-  (30 apples), Crispy Bacon (catch a golden mouse) and Disco Ball (play 5
-  runs) unlock through play.
+- **Silly skins:** Hot Dog, Gummy Worm, Tape Measure, Toothpaste and Pickle
+  are free; Crispy Bacon unlocks by catching a golden mouse. Hot Dog, Tape
+  Measure, Pickle and Bacon are modelled, not just painted: a sausage in a
+  split bun, a flat steel tape behind its case, a warty pickle, a rippling
+  rasher.
+- **Maid** (a black dress, lace ruffles and a headdress) and
+  **BennyBennion1** (electric blue, glowing lime chevrons and a gaming
+  headset with music notes floating round it) are free.
 - Skin patterns are baked into a high-resolution texture, so fine details
   like bands, diamonds, ticks and circuit traces stay crisp up close.
 - **9 accessories:** shades, top hat, party hat, horns, bow, flower, plus an
@@ -418,10 +431,11 @@ Overclock (add `&bot=1` to let the autoplay drive while you listen).
 
 Glowing chevrons on the floor show the cells straight ahead (they turn red
 just before an obstacle), the compass points to the nearest apple (plus the
-prism and mouse) with its distance in cells, a heading-up minimap shows the
-whole board, the screen edge glows red when the next move would be fatal, and
-each wall's rim glows red as you approach it. The guide, minimap and compass
-can be turned off in Settings.
+prism and mouse) with its distance in cells, the screen edge glows red when
+the next move would be fatal, and each wall's rim glows red as you approach
+it. A crash turns the head (and the camera) into whatever it hit.
+The guide and pointers can be turned off in Settings, and the first-person
+field of view can be widened there.
 
 ## Settings
 
@@ -429,7 +443,7 @@ can be turned off in Settings.
 - **Reduce motion:** removes speed lines, motion blur, camera shake, camera
   roll and FOV kicks, softens animations and shortens camera transitions. It
   is on by default if your system asks for reduced motion.
-- Path guide, minimap and compass, FPS counter, sound effect and music volume.
+- Path guide, pickup pointers, first-person field of view, FPS counter, sound effect and music volume.
 
 Settings, your snake's look, lifetime stats and your best score are saved in
 the browser.
