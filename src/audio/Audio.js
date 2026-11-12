@@ -1243,6 +1243,169 @@ export class AudioEngine {
     src.stop(start + dur + 0.02);
   }
 
+  // ---------------------------------------------------------------- chip voices
+  // A pulse whose width sweeps while it plays (pulse-width modulation), the
+  // singing, chorusing lead of the classic sound chips. Built as a sawtooth
+  // minus a delayed copy of itself: the delay sets the duty, and an LFO on
+  // the delay sweeps it. bend: semitones it scoops up from at the start.
+  pwm(freq, { at = 0, t = null, dur = 0.3, gain = 0.1, duty = 0.25, depth = 0.15, rate = 3, dest = this.sfx, attack = 0.006, release = 0.08, vibrato = 0, bend = 0, pan = 0 } = {}) {
+    if (!this.ctx) return;
+    const c = this.ctx;
+    const start = t ?? c.currentTime + at;
+    const end = start + dur + 0.03;
+    const o = c.createOscillator();
+    o.type = 'sawtooth';
+    if (bend) {
+      o.frequency.setValueAtTime(freq * Math.pow(2, -bend / 12), start);
+      o.frequency.exponentialRampToValueAtTime(freq, start + Math.min(0.06, dur * 0.4));
+    } else o.frequency.setValueAtTime(freq, start);
+    const d = c.createDelay(0.05);
+    const lo = Math.max(0.04, duty - depth);
+    const hi = Math.min(0.5, duty + depth);
+    d.delayTime.value = ((lo + hi) / 2) / freq;
+    const inv = c.createGain();
+    inv.gain.value = -1;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, start);
+    g.gain.linearRampToValueAtTime(gain, start + attack);
+    g.gain.setValueAtTime(gain, start + Math.max(attack, dur - release));
+    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+    o.connect(g);
+    o.connect(d).connect(inv).connect(g);
+    const nodes = [o];
+    if (depth > 0) {
+      const lfo = c.createOscillator();
+      lfo.type = 'triangle';
+      lfo.frequency.value = rate;
+      const lg = c.createGain();
+      lg.gain.value = ((hi - lo) / 2) / freq;
+      lfo.connect(lg).connect(d.delayTime);
+      nodes.push(lfo);
+    }
+    if (vibrato > 0 && dur > 0.25) {
+      const v = c.createOscillator();
+      v.frequency.value = 5.6;
+      const vg = c.createGain();
+      vg.gain.setValueAtTime(0, start);
+      vg.gain.linearRampToValueAtTime(0, start + Math.min(0.18, dur * 0.3));
+      vg.gain.linearRampToValueAtTime(freq * vibrato, start + Math.min(0.45, dur * 0.6));
+      v.connect(vg).connect(o.frequency);
+      nodes.push(v);
+    }
+    let out = g;
+    if (pan && c.createStereoPanner) {
+      const p = c.createStereoPanner();
+      p.pan.value = pan;
+      out = g.connect(p);
+    }
+    out.connect(dest);
+    for (const n of nodes) {
+      n.start(start);
+      n.stop(end);
+    }
+  }
+
+  // A chord the way a single sound-chip channel plays one: one oscillator
+  // flicking through the notes many times a second.
+  chipChord(freqs, { at = 0, t = null, dur = 0.4, gain = 0.05, rate = 30, wave = 0.25, dest = this.sfx, attack = 0.004, release = 0.06, pan = 0 } = {}) {
+    if (!this.ctx || !freqs.length) return;
+    const c = this.ctx;
+    const start = t ?? c.currentTime + at;
+    const o = c.createOscillator();
+    if (typeof wave === 'number') o.setPeriodicWave(this.waves[wave]);
+    else o.type = wave;
+    const n = Math.max(1, Math.floor(dur * rate));
+    for (let i = 0; i < n; i++) o.frequency.setValueAtTime(freqs[i % freqs.length], start + i / rate);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, start);
+    g.gain.linearRampToValueAtTime(gain, start + attack);
+    g.gain.setValueAtTime(gain, start + Math.max(attack, dur - release));
+    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+    let node = o.connect(g);
+    if (pan && c.createStereoPanner) {
+      const p = c.createStereoPanner();
+      p.pan.value = pan;
+      node = node.connect(p);
+    }
+    node.connect(dest);
+    o.start(start);
+    o.stop(start + dur + 0.02);
+  }
+
+  // Sound-chip noise, from a 15-bit shift register like the old consoles':
+  // long mode is a hiss, short mode loops every 93 steps into a metallic,
+  // slightly pitched buzz (chip hi-hats, cymbals, the snare's rattle).
+  chipNoiseBuffer(short) {
+    this.lfsr = this.lfsr || {};
+    const k = short ? 'short' : 'long';
+    if (this.lfsr[k]) return this.lfsr[k];
+    const c = this.ctx;
+    const len = c.sampleRate;
+    const buf = c.createBuffer(1, len, c.sampleRate);
+    const d = buf.getChannelData(0);
+    let reg = 1;
+    for (let i = 0; i < len; i++) {
+      if (i % 2 === 0) {
+        const fb = (reg ^ (reg >> (short ? 6 : 1))) & 1;
+        reg = (reg >> 1) | (fb << 14);
+      }
+      d[i] = reg & 1 ? 0.7 : -0.7;
+    }
+    this.lfsr[k] = buf;
+    return buf;
+  }
+
+  // rate: playback speed (lower is darker, like the chips' noise periods)
+  chipNoise({ at = 0, t = null, dur = 0.1, gain = 0.1, short = false, rate = 1, hp = 0, lp = 0, dest = this.sfx } = {}) {
+    if (!this.ctx) return;
+    const c = this.ctx;
+    const start = t ?? c.currentTime + at;
+    const src = c.createBufferSource();
+    src.buffer = this.chipNoiseBuffer(short);
+    src.loop = true;
+    src.playbackRate.value = rate;
+    let node = src;
+    if (hp) {
+      const f = c.createBiquadFilter();
+      f.type = 'highpass';
+      f.frequency.value = hp;
+      node = node.connect(f);
+    }
+    if (lp) {
+      const f = c.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = lp;
+      node = node.connect(f);
+    }
+    const g = c.createGain();
+    g.gain.setValueAtTime(gain, start);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+    node.connect(g).connect(dest);
+    src.start(start, Math.random() * 0.9);
+    src.stop(start + dur + 0.02);
+  }
+
+  // A chip timpani: a triangle that lands a little sharp and sinks onto its
+  // note, over a soft noise thump, ringing out.
+  timpani(freq, { at = 0, t = null, dur = 0.9, gain = 0.3, dest = this.sfx } = {}) {
+    if (!this.ctx) return;
+    const c = this.ctx;
+    const start = t ?? c.currentTime + at;
+    const o = c.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(freq * 1.5, start);
+    o.frequency.exponentialRampToValueAtTime(freq, start + 0.06);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, start);
+    g.gain.linearRampToValueAtTime(gain, start + 0.004);
+    g.gain.exponentialRampToValueAtTime(gain * 0.35, start + 0.12);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+    o.connect(g).connect(dest);
+    o.start(start);
+    o.stop(start + dur + 0.02);
+    this.chipNoise({ t: start, dur: 0.12, gain: gain * 0.35, rate: 0.25, lp: 900, dest });
+  }
+
   // ---------------------------------------------------------------- sfx
   eat(combo = 1, pan = 0) {
     // bright two-tone chime that climbs with the combo

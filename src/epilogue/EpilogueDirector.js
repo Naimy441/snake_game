@@ -930,7 +930,7 @@ export class Epilogue {
       }],
       [18.6, () => {
         this.caption('TO BE CONTINUED...', 3.6, true);
-        this.music.setMode('home');
+        this.music.setMode('lament');
       }],
       [22.4, () => {
         this.letterbox(false);

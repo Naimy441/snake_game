@@ -427,6 +427,22 @@ third song, where it has one) in the console, or add `track` to
 the URL: `?track=2` plays Seaglass, `?level=6&track=2` always plays Afterglow and `?level=9&track=2`
 Overclock (add `&bot=1` to let the autoplay drive while you listen).
 
+Homecoming is scored by one anthem, **Ouroboros** (C# minor, 148 BPM), inspired
+by an epic 8-bit choir-theme remix: one original theme told across the whole
+ending. It's a music-box lullaby in C# major at home; a pedal-point build
+while the sky burns (a low C# drone and the fifth hammered out in eighths, trembling up a half step,
+with timpani and choir piling on bar by bar until the snake eats the
+apple); and the full anthem for the meteor storm: an opening hit and a
+brass motif (the fifth trembling, then the snake's run down and back up), a coiled verse over the pedal, a chorus with the choir singing
+the theme, a half-time climax over a bass that falls a semitone a bar
+(C# B# B A# A G#), and a timpani break, doubled an octave up from the second
+time round. Saving the world plays the chorus in C# major with the whole band,
+and the theme comes back slow and minor when the family is taken. It runs on
+new chip voices in the engine: a pulse-width-modulated lead (`pwm`), a
+"choir" of detuned PWM pulses through an "ah" formant, one-channel chip
+chords (`chipChord`), shift-register chip noise for the drums (`chipNoise`,
+long and metallic short mode) and a chip `timpani`.
+
 ### Chase and first-person aids
 
 Glowing chevrons on the floor show the cells straight ahead (they turn red
