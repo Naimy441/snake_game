@@ -1189,7 +1189,9 @@ export class AudioEngine {
   }
 
   // ---------------------------------------------------------------- voices
-  voice(freq, { at = 0, t = null, dur = 0.15, gain = 0.3, wave = 0.5, dest = this.sfx, attack = 0.004, release = 0.06, slide = 0, vibrato = 0, pan = 0 } = {}) {
+  // vibRate / vibDelay: a song can ask for its own vibrato speed, and for it
+  // to wait before it starts (the old consoles' delayed vibrato)
+  voice(freq, { at = 0, t = null, dur = 0.15, gain = 0.3, wave = 0.5, dest = this.sfx, attack = 0.004, release = 0.06, slide = 0, vibrato = 0, vibRate = 5.8, vibDelay = 0, pan = 0 } = {}) {
     if (!this.ctx) return;
     const c = this.ctx;
     const start = t ?? c.currentTime + at;
@@ -1204,12 +1206,12 @@ export class AudioEngine {
     g.gain.setValueAtTime(gain, start + Math.max(attack, dur - release));
     g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
     let node = o.connect(g);
-    if (vibrato > 0 && dur > 0.25) {
+    if (vibrato > 0 && dur > 0.25 + vibDelay) {
       const lfo = c.createOscillator();
       const lg = c.createGain();
-      lfo.frequency.value = 5.8;
-      lg.gain.setValueAtTime(0, start);
-      lg.gain.linearRampToValueAtTime(freq * vibrato, start + Math.min(0.25, dur * 0.5));
+      lfo.frequency.value = vibRate;
+      lg.gain.setValueAtTime(0, start + vibDelay);
+      lg.gain.linearRampToValueAtTime(freq * vibrato, start + vibDelay + Math.min(0.25, dur * 0.5));
       lfo.connect(lg).connect(o.frequency);
       lfo.start(start);
       lfo.stop(start + dur + 0.02);
