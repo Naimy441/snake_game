@@ -16,10 +16,16 @@
 //            siren climbing, the coil, and a hole with only the flick in it
 //   drop   - a chip wobble bass (a pulse whose width sweeps in time) barking
 //            the 3+3+2, kicks that pump the chords, the flick screaming two
-//            octaves up; half time, then the drums double up
+//            octaves up, in half time
+//   lift   - one bar: V stabs every eighth, 32nd flicks, a siren, a hole
+//   mega   - the last drop, no let-up: the opening's brass riff back over a
+//            faster wobble, the flick screaming over it, kick on every
+//            3+3+2, zaps; then harder (timpani on the gallop), a cut to three
+//            stabs and the flick alone, and four bars of the serpent's run
+//            at 16ths with the kick on every eighth
 //   end    - three last stabs, the flick alone, a final hit
 //
-// C# minor, 160 BPM, about 1:25. Plays once.
+// C# minor, 160 BPM, about 1:15. Plays once.
 // A custom track like the epilogue's: audio.startMusic({ custom: new Rattlesnake(audio) }).
 
 const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
@@ -41,6 +47,7 @@ const SERPENT = [[12, 2], [10, 2], [8, 2], [7, 2], [3, 2], [5, 2], [7, 4]];
 const SERPENT_UP = [[12, 2], [10, 2], [8, 2], [7, 2], [8, 2], [10, 2], [11, 4]];
 const REST = [];
 
+
 function expand(bars) {
   return bars.map((bar) => {
     const out = new Array(16).fill(null);
@@ -53,32 +60,44 @@ function expand(bars) {
   });
 }
 
+const TREMBLE_STEPS = expand([TREMBLE])[0];
+
 // the drop's bass: [step, length, wobble speed (16ths per sweep), octave]
 // barking the 3+3+2 one bar, answering it the next
 const WOB = [
   [[0, 3, 1, 0], [3, 3, 2, 0], [6, 2, 0, 12], [8, 6, 3, 0], [14, 2, 0, 12]],
   [[0, 6, 1, 0], [6, 2, 0, 12], [8, 3, 2, 0], [11, 3, 1, 0], [14, 2, 0, 12]],
 ];
+// the last drop's: busier, the octave popping more, the sweeps quicker
+const MEGA_WOB = [
+  [[0, 2, 1, 0], [2, 1, 0, 12], [3, 3, 1, 0], [6, 2, 0, 12], [8, 3, 1, 0], [11, 3, 2, 0], [14, 2, 0, 12]],
+  [[0, 3, 1, 0], [3, 3, 1, 0], [6, 2, 0, 12], [8, 2, 1, 0], [10, 2, 0, 12], [12, 2, 1, 0], [14, 2, 0, 12]],
+];
+// the serpent's run at 16ths, eight steps
+const RUN = [12, 10, 8, 7, 3, 5, 7, 8];
 
 // ---------------------------------------------------------------- form
 const SECTIONS = {
   intro: { chords: [C.i, C.i, C.i, [C.i, C.V7]], lead: expand([TREMBLE, SERPENT, TREMBLE, SERPENT_UP]) },
   // (hunt: the stabs land on the even bars, the flick growls in the odd ones)
   hunt: { chords: [C.i, C.i, C.i, C.i, C.i, C.i, C.i, C.V], lead: expand([REST, TREMBLE, REST, TREMBLE, REST, TREMBLE, REST, TREMBLE]) },
-  hunt4: { play: 'hunt', chords: [C.i, C.i, C.i, C.V], lead: expand([REST, TREMBLE, REST, TREMBLE]) },
   coil: { chords: [C.V] },
   strike: { chords: [C.i, C.i, C.i, C.i, C.i, C.i, C.bVI, C.V], lead: expand([TREMBLE, SERPENT, TREMBLE, SERPENT, TREMBLE, SERPENT, TREMBLE, SERPENT_UP]) },
   rise: { chords: [C.i, C.i, C.i, C.V] },
-  // the drop: C# minor all the way, sinking to A and G# to turn round
-  drop: { chords: [C.i, C.i, C.i, C.i, C.i, C.i, C.bVI, C.V, C.i, C.i, C.i, C.i, C.i, C.i, C.bVI, C.V] },
-  drop8: { play: 'drop', double: true, chords: [C.i, C.i, C.i, C.i, C.i, C.i, C.bVI, C.V] },
+  // the drops: C# minor all the way, sinking to A and G# to turn round
+  drop: { chords: [C.i, C.i, C.i, C.i, C.bVI, C.V] },
+  lift: { chords: [C.V] },
+  mega: {
+    chords: [C.i, C.i, C.i, C.i, C.i, C.i, C.bVI, C.V, C.i, C.i, C.i, C.i, C.i, C.i, C.bVI, C.V],
+    lead: expand([TREMBLE, SERPENT, TREMBLE, SERPENT, TREMBLE, SERPENT, TREMBLE, SERPENT_UP, TREMBLE, SERPENT, TREMBLE, REST]),
+  },
   end: { chords: [C.i, C.i] },
 };
-const FORM = ['intro', 'hunt', 'coil', 'strike', 'rise', 'drop', 'hunt4', 'coil', 'drop8', 'end'];
+const FORM = ['intro', 'hunt', 'coil', 'strike', 'rise', 'drop', 'lift', 'mega', 'end'];
 const STABS = [0, 3, 6]; // 3+3+2: the stabs, then the hole
 const GALLOP = [0, 3, 6, 8, 11, 14];
 // each section's level
-const LEVEL = { intro: 1, hunt: 0.95, hunt4: 0.95, coil: 1, strike: 1.05, rise: 0.88, drop: 1.38, drop8: 1.45, end: 1.3 };
+const LEVEL = { intro: 1, hunt: 0.95, coil: 1, strike: 1.05, rise: 0.88, drop: 1.38, lift: 1.2, mega: 1.45, end: 1.3 };
 
 const chordAt = (sec, bar, s) => {
   const cell = sec.chords[bar % sec.chords.length];
@@ -303,9 +322,8 @@ export class Rattlesnake {
   }
 
   // the hunt: stabs on the 3+3+2 then a hole, the rattle never stopping, the
-  // flick growling in the bass between (and a 16th-note engine under it the
-  // second time)
-  hunt(t, s, bar, sec, pass) {
+  // flick growling in the bass between
+  hunt(t, s, bar, sec) {
     const ch = chordAt(sec, bar, s);
     const bars = sec.chords.length;
     const lastBar = bar === bars - 1;
@@ -319,7 +337,6 @@ export class Rattlesnake {
       if (bar >= 4) this.lead(t, n.o, n.len, { gain: 0.045, oct: 12, duty: 0.125 });
     }
     if (!even && s === 8) this.snare(t, 0.12);
-    if (pass > 0 && !even && !lastBar) this.chug(t, 0, GALLOP.includes(s) ? 0.9 : 0.45);
     if (lastBar && s === 12) this.snare(t, 0.1);
   }
 
@@ -395,61 +412,132 @@ export class Rattlesnake {
   }
 
   // the drop: the wobble barking the 3+3+2, kicks that pump the chords, the
-  // flick screaming two octaves up. Half time for eight bars (snare on 3),
-  // then the drums double up (snare on 2 and 4, 16th rattle).
-  drop(t, s, bar, sec, pass) {
+  // flick screaming two octaves up, in half time (snare on 3)
+  drop(t, s, bar, sec) {
     const spb = this.spb;
     const ch = chordAt(sec, bar, s);
-    const double = sec.double || bar >= 8;
-    const b = bar % 8;
-    if (s === 0 && b % 4 === 0) {
+    if (s === 0 && bar % 4 === 0) {
       this.crash(t, 0.15);
-      if (b === 0) this.timp(t, 0, 0.5, 1.4);
+      if (bar === 0) this.timp(t, 0, 0.5, 1.4);
     }
-    // the bass
     for (const [st, len, every, oct] of WOB[bar % 2]) if (st === s) this.wob(t, ch.r + oct, len, every);
-    // the chords: a short stab on each bar, pumping
     if (s === 0) {
       this.choir(t, ch.n, spb * 14, 0.03, 0.01);
       this.arp(t, ch.n, spb * 16, 0.05, { oct: 24, pan: 0.4, wave: 0.125 });
     }
-    // the hook: the flick two octaves up on even bars; on odd bars a burst of
-    // 32nd flicks answers the bass, climbing
-    if (b % 2 === 0) {
-      const n = SECTIONS.intro.lead[0][s];
+    // the flick two octaves up on even bars; on odd bars a burst of 32nd
+    // flicks answers the bass, climbing
+    if (bar % 2 === 0) {
+      const n = TREMBLE_STEPS[s];
       if (n) {
         this.lead(t, n.o, n.len, { gain: 0.06, oct: 12, duty: 0.125 });
         this.lead(t, n.o, n.len, { gain: 0.045, oct: 24, duty: 0.25 });
       }
-    } else if (s >= 12) {
-      for (let i = 0; i < 2; i++) this.lead(t + (i * spb) / 2, ((s * 2 + i) % 2 ? 8 : 7) + 24 + (s - 12), 0.5, { gain: 0.045, duty: 0.25, bend: false });
+    } else if (s >= 12) this.burst(t, s, 0.045);
+    if (s === 0 || s === 10 || (s === 3 && bar % 2 === 0)) {
+      this.kick(t);
+      this.pump(t);
     }
-    // (the last drop: the hook doubled in the brass's octave too)
-    if (sec.double && b % 2 === 0) {
-      const n = SECTIONS.intro.lead[0][s];
-      if (n) this.lead(t, n.o, n.len, { gain: 0.05, duty: 0.4 });
+    if (s === 8) this.snare(t, 0.2);
+    if (s % 2 === 0) this.rattle(t, s % 4 === 2 ? 0.03 : 0.018);
+  }
+
+  // a burst of 32nd flicks two octaves up, climbing a semitone a step
+  burst(t, s, gain, from = 12) {
+    for (let i = 0; i < 2; i++) this.lead(t + (i * this.spb) / 2, ((s * 2 + i) % 2 ? 8 : 7) + 24 + (s - from), 0.5, { gain, duty: 0.25, bend: false });
+  }
+
+  // the lift, one bar into the last drop: the V stabs every eighth, the
+  // flicks in 32nds climbing over a snare going 16ths to 32nds, a siren,
+  // then a hole with only the flick in it
+  lift(t, s) {
+    const spb = this.spb;
+    if (s === 0) this.audio.voice(note(-12), { t, dur: spb * 12, gain: 0.05, wave: 0.25, slide: 4, attack: 0.2, release: 0.02, dest: this.bus.lead });
+    if (s >= 12) {
+      if (s === 12) this.lead(t, 7, 1, { gain: 0.11, duty: 0.4 });
+      if (s === 13) this.lead(t, 8, 1, { gain: 0.11, duty: 0.4 });
+      if (s === 14) this.lead(t, 7, 2, { gain: 0.11, duty: 0.4 });
+      return;
     }
+    if (s % 2 === 0) this.stab(t, C.V, 0.9 + s * 0.03);
+    this.snare(t, 0.07 + s * 0.012);
+    if (s >= 6) this.snare(t + spb / 2, 0.07 + s * 0.012);
+    for (let i = 0; i < 2; i++) this.lead(t + (i * spb) / 2, ((s * 2 + i) % 4 === 2 ? 8 : 7) + (s >= 6 ? 12 : 0), 0.5, { gain: 0.06 + s * 0.005, bend: false });
+    this.rattle(t, 0.03 + s * 0.004);
+  }
+
+  // the last drop, going for broke. The opening's brass riff comes back
+  // over the wobble with the flick screaming on top of it, the kick on
+  // every 3+3+2 pumping the chords, timpani, zaps. Halfway it goes harder
+  // (the riff an octave up as well, timpani on every gallop), cuts to three
+  // stabs and the flick alone, then slams into four bars of the serpent's
+  // run at 16ths, the kick on every eighth, before the end.
+  mega(t, s, bar, sec) {
+    const spb = this.spb;
+    const ch = chordAt(sec, bar, s);
+    const hard = bar >= 8;
+    const run = bar >= 12;
+    const b = bar % 8;
+    if (s === 0 && bar === 8) this.out.gain.setTargetAtTime(1.3 * LEVEL.mega * 1.08, t, 0.02);
+    // the cut: bar 11's second half is three stabs and the flick, alone
+    if (bar === 11 && s >= 8) {
+      if (s === 8 || s === 11) this.stab(t, C.i, 1.3);
+      if (s === 13) this.lead(t, 7, 1, { gain: 0.11, duty: 0.4 });
+      if (s === 14) this.lead(t, 8, 1, { gain: 0.11, duty: 0.4 });
+      if (s === 15) this.lead(t, 7, 1, { gain: 0.11, duty: 0.4 });
+      return;
+    }
+    if (s === 0 && (b % 2 === 0 || bar === 12)) {
+      this.crash(t, bar === 0 || bar === 12 ? 0.17 : 0.13);
+      if (bar === 0 || bar === 12) {
+        this.timp(t, 0, 0.55, 1.6);
+        this.choir(t, [-12, 0, 3, 7], spb * 8, 0.04, 0.005);
+      }
+    }
+    // the bass: the wobble, faster than the first drop's
+    for (const [st, len, every, oct] of MEGA_WOB[bar % 2]) if (st === s) this.wob(t, ch.r + oct, len, every);
+    // the chords pump twice a bar, the arpeggio in 32nds up top
+    if (s === 0 || s === 8) {
+      this.choir(t, ch.n, spb * 7, 0.032, 0.005);
+      this.arp(t, ch.n, spb * 8, 0.055, { oct: 24, pan: s ? -0.4 : 0.4, wave: 0.125 });
+    }
+    // the riff (or, the last four bars, the run) on brass, and the scream
+    if (run) {
+      const o = RUN[s % 8];
+      this.lead(t, o, 1, { gain: 0.1, duty: 0.4, bend: false });
+      this.lead(t, o, 1, { gain: 0.05, oct: 12, duty: 0.125, bend: false });
+      this.lead(t, o, 1, { gain: 0.04, oct: -12, bend: false });
+      if (s % 4 === 3 && bar === 15) this.burst(t, s, 0.04);
+    } else {
+      const n = sec.lead[bar][s];
+      if (n) {
+        this.brass(t, n, 1.15);
+        if (hard) this.lead(t, n.o, n.len, { gain: 0.04, oct: 12, duty: 0.125 });
+      }
+      // the scream: the flick two octaves up over the riff's run bars, a
+      // climbing burst under its tremble bars
+      if (bar % 2 === 1) {
+        const f = TREMBLE_STEPS[s];
+        if (f) this.lead(t, f.o, f.len, { gain: hard ? 0.05 : 0.04, oct: 24, duty: 0.25 });
+      } else if (s >= 12) this.burst(t, s, 0.035);
+    }
+    // the zaps: a pulse diving off the offbeat
+    if (s === 7 || s === 15) this.audio.voice(note(31), { t, dur: 0.12, gain: 0.035, wave: 0.125, slide: 0.18, dest: this.bus.arp });
     // the drums
-    if (b === 7 && s >= 12) {
+    if (bar === 15 && s >= 12) {
       if (s === 12) this.fill(t);
       return;
     }
-    if (double) {
-      if (s === 0 || s === 10 || (s === 7 && b % 2)) {
-        this.kick(t);
-        this.pump(t);
-      }
-      if (s === 4 || s === 12) this.snare(t, 0.17);
-      this.rattle(t, s % 2 ? 0.016 : 0.03);
-      if (s % 4 === 2) this.hat(t, 0.035, true);
-    } else {
-      if (s === 0 || s === 10 || (s === 3 && b % 2 === 0)) {
-        this.kick(t);
-        this.pump(t);
-      }
-      if (s === 8) this.snare(t, 0.2);
-      if (s % 2 === 0) this.rattle(t, s % 4 === 2 ? 0.03 : 0.018);
+    const kick = run ? s % 2 === 0 : GALLOP.includes(s);
+    if (kick) {
+      this.kick(t, s % 4 ? 0.8 : 1);
+      if (s % 4 === 0 || !run) this.pump(t);
     }
+    if (s === 4 || s === 12) this.snare(t, 0.18);
+    if (hard && s === 15) this.snare(t, 0.08);
+    this.rattle(t, s % 2 ? 0.018 : 0.032);
+    if (s % 4 === 2) this.hat(t, 0.035, true);
+    if (hard && GALLOP.includes(s)) this.timp(t, s === 8 ? -5 : 0, 0.18, 0.4);
   }
 
   // the end: three last stabs, the flick alone in the hole, a final hit
