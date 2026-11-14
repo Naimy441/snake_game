@@ -142,6 +142,7 @@ kbd {
 }
 .rush-label kbd { font-size: 9px; letter-spacing: 0.04em; color: rgba(255, 255, 255, 0.8); }
 .boost-tag { margin-left: auto; color: #8fe0ff; animation: blink2 0.5s infinite alternate; }
+.boost-tag b { font-variant-numeric: tabular-nums; }
 @keyframes blink2 { to { opacity: 0.45; } }
 .rush-bar {
   position: relative; height: 14px; background: rgba(6, 14, 38, 0.8); border: 1.5px solid rgba(160, 230, 255, 0.45);
@@ -160,8 +161,9 @@ kbd {
 .rush.active .rush-label span:first-child { color: #e6ffff; letter-spacing: 0.32em; transition: letter-spacing 0.4s ease-out; }
 .rush.full .rush-bar { border-color: var(--yellow); }
 .rush.full .rush-label span:first-child { color: var(--yellow); }
+/* bottom right, clear of the callouts and the run timer up top */
 .fps {
-  position: absolute; right: 18px; top: calc(66px + var(--safe-top)); font: 12px ui-monospace, monospace; color: var(--muted);
+  position: absolute; right: 18px; bottom: calc(14px + var(--safe-bottom)); font: 12px ui-monospace, monospace; color: var(--muted);
   background: rgba(0, 0, 0, 0.4); padding: 2px 8px; border-radius: 6px;
 }
 
@@ -775,7 +777,6 @@ button { font-family: var(--display); }
 .speedrun.stopped #sr-time { color: var(--yellow); }
 .speedrun.record #sr-time { color: #7dffb0; box-shadow: 0 0 18px rgba(125, 255, 176, 0.45); }
 .sr-pb { font: 800 11px var(--display); letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
-.speedrun:not(.hidden) ~ .fps { top: calc(118px + var(--safe-top)); }
 @media (max-width: 720px), (max-aspect-ratio: 9/10) {
   .speedrun { top: calc(52px + var(--safe-top)); }
   #sr-time { font-size: 19px; padding: 4px 9px; }

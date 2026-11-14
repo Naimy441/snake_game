@@ -49,7 +49,6 @@ your own body. The board is always clear: there are no obstacles on it.
 | Action | Overhead view | Chase and first-person views |
 | --- | --- | --- |
 | Steer | Arrow keys / WASD move in that screen direction | Left/Right or A/D turn left/right |
-| Steer (any view) | Q / E turn left / right relative to the snake | same |
 | Slow-mo (hold) | Space or Shift | same |
 | Cycle camera | C (overhead → chase → first-person) | C |
 | Pause / resume | P or Esc | same |
@@ -148,9 +147,9 @@ layers tall.
 
 - **Flight controls (every camera):** ← → turn left and right, ↑ climbs and
   ↓ dives. While climbing or diving, the opposite key levels out again in the
-  direction you were flying, and ← → turn you back to level flight. Q/E turn
-  too. On touch, swipe in any direction or use the ▲ ▼ buttons; on a gamepad
-  the D-pad does the same.
+  direction you were flying, and ← → turn you back to level flight. On touch,
+  swipe in any direction or use the ▲ ▼ buttons; on a gamepad the D-pad does
+  the same.
 - **Cameras:** in the sky the overhead view becomes a high chase camera
   behind the snake (a fixed overhead view can't show height). The chase and
   first-person cameras tilt up a climb and down a dive. The chase cameras stay

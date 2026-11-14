@@ -13,13 +13,14 @@ export const DIRS = {
 };
 
 // rush: how much of the slow-mo meter it refills (out of 100). Slow-mo gives
-// real reaction time, so the meter fills slower than it used to.
+// real reaction time (and saves you from crashes), so the meter is earned
+// slowly: about fourteen apples to fill it.
 export const FOOD_TYPES = {
-  orb: { points: 10, grow: 1, rush: 15 },
-  prism: { points: 50, grow: 2, rush: 60 },
-  // the golden mouse is worth the chase: big points, a full meter, and it
+  orb: { points: 10, grow: 1, rush: 7 },
+  prism: { points: 50, grow: 2, rush: 30 },
+  // the golden mouse is worth the chase: big points, half a meter, and it
   // only grows the snake by one
-  prey: { points: 250, grow: 1, rush: 100 },
+  prey: { points: 250, grow: 1, rush: 50 },
 };
 
 export const COMBO_WINDOW_MS = 5000;
@@ -132,7 +133,8 @@ export const SKY_CENTER = SKY_LIFT + SKY_CLIMB;
 
 // Orb chains: numbered orbs that pay out when eaten in order.
 export const CHAIN_LINK_POINTS = 20;
-export const CHAIN_LINK_RUSH = 15;
+export const CHAIN_LINK_RUSH = 7;
+export const CHAIN_DONE_RUSH = 40; // the whole chain, on top of its links
 export const CHAIN_BONUS_PER_LINK = 100;
 
 // Fleeing prey.
@@ -466,6 +468,23 @@ export class SnakeGame {
     if (this.queue.length >= 3) return false;
     this.queue.push({ x: d.x, z: d.z, y: Y(d) });
     return true;
+  }
+
+  // Would the next step (with the move waiting, if any) crash? Walls, the
+  // laser fence, the void, pillars and the snake's own body.
+  deadlyAhead() {
+    if (!this.alive || this.launch > 0) return false;
+    const d = this.queue.length ? this.queue[0] : this.dir;
+    const h = this.head;
+    const nx = h.x + d.x;
+    const nz = h.z + d.z;
+    const ny = Y(h) + Y(d);
+    if (!this.inBounds(nx, nz, ny)) return true;
+    if (this.obstacleAt(nx, nz)) return true;
+    const eats = (this.food && at(this.food, nx, nz, ny)) || (this.bonus && at(this.bonus, nx, nz, ny)) || this.extras.some((e) => at(e, nx, nz, ny)) || (this.prey && at(this.prey, nx, nz, ny));
+    const meteor = this.meteorLevel && this.meteors.some((m) => m.landed && m.x === nx && m.z === nz);
+    const growing = this.pendingGrowth > 0 || !!eats || !!meteor;
+    return this.occupied(nx, nz, !growing, ny);
   }
 
   // side: -1 = turn left, +1 = turn right, relative to the heading the snake
@@ -1868,6 +1887,21 @@ export class SnakeGame {
     return this.alive && !!this.undoOk && this.queue.length === 0 && this.launch === 0;
   }
 
+  // Would redoing the last step in direction d crash? (Checked from where
+  // the snake was before that step.)
+  regraceCrashes(d) {
+    const u = this.undo;
+    if (!u) return false;
+    const keep = [this.cells, this.queue, this.pendingGrowth, this.dir];
+    this.cells = u.cells;
+    this.queue = [{ x: d.x, z: d.z, y: Y(d) }];
+    this.pendingGrowth = u.pendingGrowth;
+    this.dir = u.dir;
+    const r = this.deadlyAhead();
+    [this.cells, this.queue, this.pendingGrowth, this.dir] = keep;
+    return r;
+  }
+
   regrace(d) {
     if (!this.canRegrace()) return null;
     const u = this.undo;
@@ -1940,7 +1974,7 @@ export class SnakeGame {
     this.clock += real;
     this.ticks++;
     // a slow-mo tile's slow-mo is free: holding Space on one doesn't stack, so it costs nothing
-    if (this.rushing && this.boostTicks <= 0) this.rush = Math.max(0, this.rush - (RUSH_DRAIN_PER_SEC * real) / 1000);
+    if (this.rushing && this.boostTicks <= 0 && !this.braking) this.rush = Math.max(0, this.rush - (RUSH_DRAIN_PER_SEC * real) / 1000);
     if (this.boostTicks > 0) this.boostTicks--;
 
     if (this.queue.length) {
@@ -2118,7 +2152,7 @@ export class SnakeGame {
       const points = METEOR_POINTS * this.combo * this.scoreMult;
       this.score += points;
       this.pendingGrowth += 1;
-      this.rush = Math.min(100, this.rush + 20);
+      this.rush = Math.min(100, this.rush + 10);
       this.meteorsEaten++;
       ev.ate = { ...meteor, type: 'meteor', points, combo: this.combo, rushing: this.scoreMult > 1, left: this.meteorsLeft };
     }
@@ -2136,7 +2170,7 @@ export class SnakeGame {
         if (ch.next >= ch.links.length) {
           const bonus = CHAIN_BONUS_PER_LINK * ch.links.length * this.scoreMult;
           this.score += bonus;
-          this.rush = 100;
+          this.rush = Math.min(100, this.rush + CHAIN_DONE_RUSH);
           this.stats.chains++;
           ev.chainComplete = { x: nx, z: nz, y: ny, bonus, links: ch.links.length };
           this.chain = null;

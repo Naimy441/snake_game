@@ -12,6 +12,7 @@ import { FoodView } from './render/FoodView.js';
 import { BoardObjects } from './render/BoardObjects.js';
 import { Effects } from './render/Effects.js';
 import { CameraRig } from './render/CameraRig.js';
+import { AirWaves } from './render/AirWaves.js';
 import { PostFX } from './render/Post.js';
 import { CameraDebug } from './render/CameraDebug.js';
 import { CameraTuner } from './CameraTuner.js';
@@ -57,8 +58,21 @@ const smooth01 = (v) => {
 // centre, so a redo never visibly snaps the head by more than ~1/4 cell.
 const GRACE = 0.25;
 // Real-time pace of the snake in slow-mo, relative to normal (see frame()):
-// the snake is 10% slower, and the rest of the world slows a lot more.
-const RUSH_FEEL = 0.9;
+// the snake moves at half speed, and the rest of the world slows a lot more
+// (to under a third).
+const RUSH_FEEL = 0.5;
+// Emergency slow-mo: about to crash with slow-mo in the meter, time all but
+// stops instead and the meter burns BRAKE_DRAIN per real second (a full
+// meter lasts 0.2 s, easing in included). It starts BRAKE_AT into the fatal move, late enough
+// that a turn pressed in good time never sets it off, and eases in over the
+// next BRAKE_SPAN of the move (the snake decelerates, it doesn't stop dead).
+// After that the snake creeps up to the crash so it gets there just as the
+// meter runs dry: turn away in time and the run goes on. Either way it costs
+// the whole meter (a fuller one just gives longer to react).
+const BRAKE_DRAIN = 500;
+const BRAKE_MIN_SCALE = 0.025; // the slowest it goes
+const BRAKE_AT = 0.7; // how far into the fatal move it kicks in (of a step)
+const BRAKE_SPAN = 0.4; // how much of the move the slowdown eases in over
 
 class App {
   constructor() {
@@ -115,6 +129,8 @@ class App {
     this.scaleMap = makeScaleNormalMap();
     this.effects = new Effects(600);
     this.scene.add(this.effects.group);
+    this.airWaves = new AirWaves();
+    this.scene.add(this.airWaves.group);
     this.food = new FoodView(this.glowTex);
     this.scene.add(this.food.group);
     this.board = new BoardObjects({ glowTex: this.glowTex, ringTex: makeRingTexture(), chevronTex: makeChevronTexture(), checker: this.world.island.checker });
@@ -847,6 +863,9 @@ class App {
   // that all fire the moment the run starts.
   preAim() {
     if (this.state === 'countdown') this.game.queue.length = 0;
+    // emergency slow-mo: the press is a way out, so it replaces whatever
+    // was queued (turning from the way the snake is going right now)
+    else if (this.brake) this.game.queue.length = 0;
   }
 
   // Apply a direction as early as possible: within the grace window right
@@ -854,17 +873,26 @@ class App {
   // queue it for the next step.
   steer(d) {
     const g = this.game;
-    if (!d) return;
-    if (this.state === 'playing' && this.t < GRACE && g.canRegrace()) {
+    if (!d) return false;
+    // (not a turn straight into a crash while there's slow-mo in the meter:
+    // that waits for the next step, so the emergency slow-mo can catch it)
+    if (this.state === 'playing' && this.t < GRACE && g.canRegrace() && !(g.rush > 0.5 && g.regraceCrashes(d))) {
       const wasRushing = g.rushing;
       const ev = g.regrace(d);
       if (ev) {
         this.audio.turn();
         this.handleStep(ev, wasRushing);
-        return;
+        return true;
       }
     }
-    if (g.queueDirection(d)) this.audio.turn();
+    if (g.queueDirection(d)) {
+      this.audio.turn();
+      // (for the tutorial: two quick turns the same way, a U-turn)
+      const f = g.lastFacing();
+      if (f.x === -g.facing.x && f.z === -g.facing.z) this.tutorial.on('uturn');
+      return true;
+    }
+    return false;
   }
 
 
@@ -1178,7 +1206,7 @@ class App {
   // The game's snake, pickups and effects move into the bonus stage's scene
   // (and back out again afterwards): everything else carries on as usual.
   bonusActors() {
-    return [this.snake.group, this.food.group, this.effects.group, this.board.group, this.ghostView.group];
+    return [this.snake.group, this.food.group, this.effects.group, this.airWaves.group, this.board.group, this.ghostView.group];
   }
 
   enterBonusScene() {
@@ -2177,9 +2205,15 @@ class App {
     else this.setText('hud-zone-next', g.space ? `${Math.max(0, g.coreFree())} cells left to fill` : nz < 0 ? 'Final zone' : `Next: ${ZONE_NAMES[nz]} at Lv ${ZONE_STARTS[nz] + 1}`);
     this.setStyle('hud-rush', 'transform', `scaleX(${(g.rush / 100).toFixed(3)})`);
     const rushEl = $('hud-rush-wrap');
-    this.setClass(rushEl, 'active', g.slowmo);
+    this.setClass(rushEl, 'active', g.slowmo || !!this.brake);
     this.setClass(rushEl, 'full', g.rush >= 99.9);
     this.setClass($('hud-boost'), 'hidden', !g.boosting);
+    // a slow-mo tile's free slow-mo: the real time left (each of its moves
+    // takes 1 / RUSH_FEEL of a normal move's time in slow-mo)
+    if (g.boosting) {
+      const left = (Math.max(0, g.boostTicks - clamp01(this.t)) * g.currentInterval(false)) / RUSH_FEEL / 1000;
+      this.setText('hud-boost-time', `${left.toFixed(1)}s`);
+    }
     const comboLeft = 1 - (g.clock - g.lastEatTime) / COMBO_WINDOW_MS;
     const showCombo = g.combo > 1 && comboLeft > 0 && this.state !== 'over';
     this.setClass($('hud-combo'), 'hidden', !showCombo);
@@ -2667,6 +2701,68 @@ class App {
     this.slowScale = Math.min(this.slowScale ?? 1, scale);
   }
 
+  // Emergency slow-mo. Each frame of play: if the next step would crash and
+  // there's slow-mo in the meter, time all but stops (once the head is
+  // BRAKE_AT into the move) and the meter burns fast. The slowdown is set so
+  // the head reaches the crash just as the meter runs out, so a fuller meter
+  // means a slower creep and longer to react. Turning away ends it (the rest
+  // of the meter is kept); running dry lets time go again, into the crash.
+  updateBrake(dt, stopped) {
+    const g = this.game;
+    // paused, or the countdown back in: hold the brake as it is (it picks up again)
+    if ((this.state === 'paused' || this.state === 'countdown') && this.brake) return;
+    const can = this.state === 'playing' && !stopped && !(this.playtest && this.playtest.bot) && !this.galaxy.kind;
+    const danger = can && g.deadlyAhead();
+    if (this.brake && (!danger || g.rush <= 0)) {
+      this.brake = null;
+      // a save costs the whole meter, however soon you turn away: one save
+      // per fill, never a spare life for every wall
+      g.rush = 0;
+      // snap back to full speed quickly (~0.1 s): the 0.5 s of the brake is
+      // all the slow time it buys, crash or escape
+      this.easeBack = 25;
+      this.brakeTail = true; // (held slow-mo stays free until it has)
+      this.audio.rushEnd();
+      if (danger) this.rig.kick += this.settings.reduceMotion ? 0 : 4; // out of meter: lurch back into the crash
+    } else if (!this.brake && danger && g.rush > 0.5 && this.t >= BRAKE_AT) {
+      // from the pace it's going now (held slow-mo is already slower)
+      this.brake = { t: 0, scale: this.timeScale ?? 1, from: this.timeScale ?? 1, at: this.t };
+      this.audio.rushStart();
+      if (!this.settings.reduceMotion) {
+        // it's over in a blink, so it lands hard: a cyan flash, the view
+        // punching in, a shudder, a shock ring off the nose, a spray of air
+        this.flash(0.38, '#8ff0ff');
+        this.rig.kick -= 9;
+        this.rig.shake += 0.35;
+        // the shock is as big as the slow-mo behind it: a full meter, the full blast
+        const size = THREE.MathUtils.clamp(g.rush / 100, 0, 1);
+        this.airWaves.burst(size);
+        const hp = this.snake.headPos;
+        const hd = this.snake.headDir;
+        this.effects.emit(hp.x + hd.x * 0.5, hp.y + 0.25, hp.z + hd.z * 0.5, {
+          count: 46, color: '#b8f6ff', speed: 4.2, up: 1.1, size: 0.22, life: 0.45, gravity: 0, spread: 0.3,
+        });
+        this.effects.shockwave(hp.x, hp.z, '#8ff0ff', { max: 0.8 + 2.4 * size, dur: 0.4, y: g.flying ? hp.y - 0.3 : 0 });
+      }
+    }
+    // the brake pays for the slowdown: held slow-mo doesn't drain as well
+    // while it lasts, nor while time is still easing back up afterwards
+    if (this.brakeTail && (this.timeScale ?? 1) > 0.25) this.brakeTail = false;
+    g.braking = !!this.brake || !!this.brakeTail;
+    if (!this.brake) return;
+    const b = this.brake;
+    b.t += dt;
+    g.rush = Math.max(0, g.rush - BRAKE_DRAIN * dt);
+    // the creep: spread what's left of the move over what's left of the meter
+    const left = Math.max(0.03, g.rush / BRAKE_DRAIN); // real seconds of meter left
+    const gameMs = Math.max(0, 0.995 - this.t) * g.currentInterval();
+    const creep = THREE.MathUtils.clamp(gameMs / (left * 1000), BRAKE_MIN_SCALE, 0.4);
+    // eased in by distance travelled, so it's a smooth deceleration whatever
+    // the frame rate: the further into the move, the slower
+    const k = THREE.MathUtils.smoothstep(this.t, b.at, Math.min(0.99, b.at + BRAKE_SPAN));
+    b.scale = b.from + (Math.min(b.from, creep) - b.from) * k;
+  }
+
   frame(now) {
     // Paused, the picture behind the pause card holds still and the canvas
     // keeps showing the last frame drawn, so stop redrawing the whole 3D
@@ -2696,21 +2792,23 @@ class App {
         if (this.game.rushing) this.tutorial.on('slowmo');
       } else this.audio.rushEnd();
     }
-    this.slowFx += ((slowOn ? 1 : 0) - this.slowFx) * Math.min(1, Math.max(0, now - this.last) / 1000 * (slowOn ? 7 : 4));
+    this.slowFx += ((slowOn || this.brake ? 1 : 0) - this.slowFx) * Math.min(1, Math.max(0, now - this.last) / 1000 * (slowOn ? 7 : 4));
     // the camera debug view can stop the snake (F) to look at the camera
     const debugSlow = this.camDebug.on && this.state === 'playing' && this.debugStopped ? 0 : 1;
-    const tsTarget = Math.min(slowing ? this.slowScale : 1, rushScale, debugSlow);
+    this.updateBrake(dt, debugSlow === 0);
+    const brakeScale = this.brake ? this.brake.scale : 1;
+    const tsTarget = Math.min(slowing ? this.slowScale : 1, rushScale, debugSlow, brakeScale);
     // level-up slow motion eases back gently; Rush snaps in and out so the
-    // pace you react to barely changes
+    // pace you react to barely changes; the emergency brake slams on
     if (slowing) this.easeBack = 3;
-    else if (rushScale < 1) this.easeBack = 10;
-    const ease = slowing || debugSlow < 1 ? 7 : rushScale < 1 ? 10 : this.easeBack || 3;
+    else if (rushScale < 1 || this.brake) this.easeBack = 10;
+    const ease = this.brake ? 60 : slowing || debugSlow < 1 ? 7 : rushScale < 1 ? 10 : this.easeBack || 3;
     this.timeScale = (this.timeScale ?? 1) + (tsTarget - (this.timeScale ?? 1)) * Math.min(1, dt * ease);
     if (tsTarget === 0 && this.timeScale < 0.002) this.timeScale = 0; // stopped: come to a full stop
     // gameplay time: snake, game clock, ghost, pickups and particles
     const gdt = dt * this.timeScale;
     // the music muffles in slow-mo, like it does under a level-up card
-    this.audio.setSlow((slowing && this.timeScale < 0.8) || slowOn);
+    this.audio.setSlow((slowing && this.timeScale < 0.8) || slowOn || !!this.brake);
     this.last = now;
     this.renderer.info.reset();
     this.input.pollGamepad();
@@ -2746,6 +2844,8 @@ class App {
     if (this.state === 'playing') {
       g.clockScale = Math.max(0.01, this.timeScale); // (0 when the debug view stops the snake)
       this.t += (gdt * 1000) / g.currentInterval();
+      // braking: never reach the crash while there's meter left to burn
+      if (this.brake && g.rush > 0) this.t = Math.min(this.t, 0.995);
       let guard = 0;
       while (this.t >= 1 && this.state === 'playing' && guard++ < 4) {
         this.t -= 1;
@@ -2804,6 +2904,9 @@ class App {
     });
     this.updateTailRip(dt);
     this.jetExhaust(g);
+    // emergency slow-mo: bow waves of thick air at the nose (fainter from
+    // the snake's own eyes, so they never hide what it's about to hit)
+    this.airWaves.update(dt, !!this.brake && !rm, this.snake.headPos, this.snake.headDir, this.snake.headUp, this.rig.mode === 'fp' ? 0.6 : 1, 0.12 + this.rig.bodyLift * 0.5);
     if (this.bonusOn) this.snake.setRim(this.bonus.rimColor(this.tmpRim || (this.tmpRim = new THREE.Color())), 0.55);
     else this.snake.setRim(this.world.p.rimColor, 0.35 + this.world.p.rimIntensity * 0.25);
     this.updateGhost(gdt);
@@ -2859,7 +2962,7 @@ class App {
     // tall block skins lift the chase and first-person cameras over the body
     this.rig.bodyLift = this.snake.block ? Math.max(0, this.snake.blockH - 1) : 0;
     this.rig.update(dt, this.snake, {
-      speedFx: this.camFx, slow: this.state === 'playing' && g.slowmo, reduceMotion: rm, aim: crashAim || (steering || g.flying ? aim : null),
+      speedFx: this.camFx, slow: this.state === 'playing' && (g.slowmo || !!this.brake), reduceMotion: rm, aim: crashAim || (steering || g.flying ? aim : null),
       flying: g.flying && this.state !== 'menu', pitch: steering ? next.y || 0 : 0, box: sky, sky: this.world.skyAmount, space: this.world.spaceAmount,
     });
     // The first-person camera sits inside the head; hide it once we're there.

@@ -36,6 +36,15 @@ const STEPS = [
     max: 12,
   },
   {
+    title: 'U-turn',
+    body: (app) => (app.relativeSteer
+      ? 'Press <kbd>←</kbd> and <kbd>A</kbd> together to turn right round (<kbd>→</kbd> and <kbd>D</kbd> the other way).'
+      : 'In chase or first person, <kbd>←</kbd> and <kbd>A</kbd> together turn you right round. Press <kbd>C</kbd> to try it.'),
+    done: 'uturn',
+    min: 2,
+    max: 10,
+  },
+  {
     title: 'Go for the bonus',
     body: 'Prisms, orb chains and the golden mouse score big. Corner the mouse!',
     min: 6,
@@ -113,7 +122,7 @@ export class Tutorial {
     this.hide();
   }
 
-  // Something happened in the game: 'ate', 'level', 'camera', 'slowmo'.
+  // Something happened in the game: 'ate', 'level', 'camera', 'slowmo', 'uturn'.
   on(flag) {
     if (this.active) this.flags.add(flag);
   }

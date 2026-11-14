@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SnakeGame, DIRS, BOARD_SIZES, SKY_SIZE as SKY_W, FOOD_TYPES } from '../src/game/SnakeGame.js';
+import { SnakeGame, DIRS, BOARD_SIZES, SKY_SIZE as SKY_W, FOOD_TYPES, CHAIN_LINK_RUSH, CHAIN_DONE_RUSH } from '../src/game/SnakeGame.js';
 
 const seq = (vals) => {
   let i = 0;
@@ -26,6 +26,30 @@ test('reversing into yourself is ignored, turns are queued', () => {
   assert.deepEqual(g.dir, DIRS.left);
   g.step();
   assert.deepEqual(g.dir, DIRS.up);
+});
+
+test('a redo of the last step knows when it would crash', () => {
+  const g = new SnakeGame({ rng: seq([0.5]) });
+  g.cells = [{ x: 8, z: 0, y: 0 }, { x: 9, z: 0, y: 0 }, { x: 10, z: 0, y: 0 }, { x: 11, z: 0, y: 0 }];
+  g.dir = { ...DIRS.left };
+  g.facing = { ...DIRS.left };
+  g.food = { x: 3, z: 9, y: 0, type: 'orb' };
+  g.step(); // along the top wall
+  assert.ok(g.canRegrace());
+  assert.equal(g.regraceCrashes(DIRS.up), true); // into the wall
+  assert.equal(g.regraceCrashes(DIRS.down), false);
+  assert.deepEqual(g.head, { x: 7, z: 0, y: 0 }, 'checking changes nothing');
+  assert.equal(g.queue.length, 0);
+});
+
+test('the next step knows when it would crash', () => {
+  const g = new SnakeGame({ rng: seq([0.5]) });
+  g.cells = [{ x: 0, z: 5, y: 0 }, { x: 0, z: 6, y: 0 }, { x: 0, z: 7, y: 0 }, { x: 0, z: 8, y: 0 }];
+  g.dir = { ...DIRS.left };
+  g.facing = { ...DIRS.left };
+  assert.equal(g.deadlyAhead(), true); // the wall
+  g.queueDirection(DIRS.up);
+  assert.equal(g.deadlyAhead(), false); // turning away
 });
 
 test('relative turns rotate the heading', () => {
@@ -218,7 +242,7 @@ test('orb chain pays out when eaten in order and fills rush', () => {
   ev = g.step();
   assert.ok(ev.chainComplete);
   assert.equal(g.chain, null);
-  assert.equal(g.rush, 100);
+  assert.equal(g.rush, CHAIN_LINK_RUSH * 3 + CHAIN_DONE_RUSH);
   assert.equal(g.score - before, 60 + CHAIN_BONUS_PER_LINK * 3);
   assert.equal(g.stats.chains, 1);
 });
@@ -289,7 +313,7 @@ test('catching prey scores big, fills slow-mo and grows the snake by one', () =>
   assert.ok(ev.caught);
   assert.equal(g.score, FOOD_TYPES.prey.points);
   assert.ok(FOOD_TYPES.prey.points >= 200, 'worth the risk');
-  assert.equal(g.rush, 100);
+  assert.equal(g.rush, FOOD_TYPES.prey.rush);
   assert.equal(g.prey, null);
   g.step();
   g.step();

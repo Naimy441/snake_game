@@ -87,12 +87,6 @@ export class Input {
       return;
     }
     switch (code) {
-      case 'KeyQ':
-        if (!e.repeat) this.h.turn(-1);
-        break;
-      case 'KeyE':
-        if (!e.repeat) this.h.turn(1);
-        break;
       case 'KeyH':
         if (!e.repeat && this.h.tutorial) this.h.tutorial();
         break;
